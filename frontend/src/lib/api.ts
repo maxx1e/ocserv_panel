@@ -22,6 +22,14 @@ export type AuthSummary = {
   roles?: string[];
 };
 
+export type WebUISettings = {
+  cookieSecure: boolean;
+  httpLoginAllowed: boolean;
+  requestSecure: boolean;
+  transport: 'http' | 'https';
+  warning: string;
+};
+
 export type AuditEvent = {
   id?: string | number;
   action?: string;
@@ -170,6 +178,10 @@ function safeErrorMessage(path: string, status: number): string {
 
 export function getSetupStatus(): Promise<SetupStatus> {
   return apiFetch<SetupStatus>('/api/setup/status');
+}
+
+export function getWebUISettings(): Promise<WebUISettings> {
+  return apiFetch<WebUISettings>('/api/settings/webui');
 }
 
 export function setupOwner(username: string, password: string): Promise<AuthSummary> {

@@ -44,6 +44,18 @@ The frontend does not read cookies directly, use browser storage for authenticat
 
 Session cookies are HttpOnly and SameSite=Lax. The backend default should keep the cookie `Secure` for production behind HAProxy TLS. Only explicit local development configuration should disable `Secure`, and only when using loopback HTTP.
 
+## HTTP login mode for local or trusted deployments
+
+HAProxy is optional for local testing and trusted single-host use. The backend can allow login over plain HTTP when started with:
+
+```bash
+OCSERV_PANEL_COOKIE_SECURE=false
+```
+
+This makes the session cookie HTTP-compatible while keeping it `HttpOnly` and `SameSite=Lax`. The Settings tab displays the current mode but does not change it. Restart the backend after changing `OCSERV_PANEL_COOKIE_SECURE`.
+
+For exposed production deployments, use a TLS strategy before entering credentials. The supported strategy for this baseline is HAProxy TLS termination in front of the loopback Go backend. Another reverse proxy or future direct Go TLS support can be documented later.
+
 ## Dashboard Analytics and Purge
 
 The current dashboard/history data is local-only. Historical sample session rows may be seeded as sample data for development and initial UI verification.

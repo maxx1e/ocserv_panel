@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -60,6 +61,72 @@ func TestAPIHealthReturnsEquivalentStatus(t *testing.T) {
 	decodeJSON(t, rec, &body)
 	if body.Status != "ok" {
 		t.Fatalf("expected status ok, got %q", body.Status)
+	}
+}
+
+func TestWebUISettingsReportsSecureDefault(t *testing.T) {
+	h := newTestHarnessWithCookieSecure(t, true)
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/settings/webui", nil, "")
+
+	assertStatus(t, rec, http.StatusOK)
+	bodyText := rec.Body.String()
+	body := decodeWebUISettingsBody(t, bodyText)
+	assertMapField(t, body, "cookieSecure", true)
+	assertMapField(t, body, "httpLoginAllowed", false)
+	assertMapField(t, body, "requestSecure", false)
+	assertMapField(t, body, "transport", "http")
+	assertMapFieldContains(t, body, "warning", "not encrypted")
+	assertBodyExcludesTerms(
+		t,
+		bodyText,
+		"ocserv_panel_session",
+		"password",
+		"token",
+		"hash",
+		"PRIVATE KEY",
+	)
+}
+
+func TestWebUISettingsReportsHTTPCompatibleCookieMode(t *testing.T) {
+	h := newTestHarnessWithCookieSecure(t, false)
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/settings/webui", nil, "")
+
+	assertStatus(t, rec, http.StatusOK)
+	body := decodeWebUISettingsBody(t, rec.Body.String())
+	assertMapField(t, body, "cookieSecure", false)
+	assertMapField(t, body, "httpLoginAllowed", true)
+	assertMapField(t, body, "requestSecure", false)
+	assertMapField(t, body, "transport", "http")
+	assertMapFieldContains(t, body, "warning", "HTTP login sends credentials")
+}
+
+func TestWebUISettingsReportsSecureRequest(t *testing.T) {
+	h := newTestHarnessWithCookieSecure(t, true)
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/webui", nil)
+	req.TLS = &tls.ConnectionState{}
+	rec := httptest.NewRecorder()
+
+	h.router.ServeHTTP(rec, req)
+
+	assertStatus(t, rec, http.StatusOK)
+	body := decodeWebUISettingsBody(t, rec.Body.String())
+	assertMapField(t, body, "requestSecure", true)
+	assertMapField(t, body, "transport", "https")
+	assertMapField(t, body, "cookieSecure", true)
+	assertMapField(t, body, "httpLoginAllowed", false)
+	assertMapField(t, body, "warning", "")
+}
+
+func TestWebUISettingsRejectsNonGET(t *testing.T) {
+	h := newTestHarness(t)
+
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/settings/webui", nil, "")
+
+	assertStatus(t, rec, http.StatusMethodNotAllowed)
+	if got := rec.Header().Get("Allow"); got != http.MethodGet {
+		t.Fatalf("expected Allow header %q, got %q", http.MethodGet, got)
 	}
 }
 
@@ -364,6 +431,11 @@ type testHarness struct {
 
 func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()
+	return newTestHarnessWithCookieSecure(t, true)
+}
+
+func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarness {
+	t.Helper()
 
 	ctx := context.Background()
 	database, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "panel.db"))
@@ -387,7 +459,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	return &testHarness{
 		database: database,
 		store:    s,
-		router:   NewAppRouter(authService, dashboardService, AppOptions{CookieSecure: true}),
+		router:   NewAppRouter(authService, dashboardService, AppOptions{CookieSecure: cookieSecure}),
 	}
 }
 
@@ -524,6 +596,37 @@ func assertJSONField(t *testing.T, rec *httptest.ResponseRecorder, field string,
 	}
 	if got != want {
 		t.Fatalf("expected field %q to be %#v, got %#v", field, want, got)
+	}
+}
+
+func decodeWebUISettingsBody(t *testing.T, bodyText string) map[string]any {
+	t.Helper()
+	body := map[string]any{}
+	if err := json.Unmarshal([]byte(bodyText), &body); err != nil {
+		t.Fatalf("decode web UI settings response: %v body=%s", err, bodyText)
+	}
+	return body
+}
+
+func assertMapField(t *testing.T, body map[string]any, field string, want any) {
+	t.Helper()
+	got, ok := body[field]
+	if !ok {
+		t.Fatalf("expected field %q in %v", field, body)
+	}
+	if got != want {
+		t.Fatalf("expected field %q to be %#v, got %#v", field, want, got)
+	}
+}
+
+func assertMapFieldContains(t *testing.T, body map[string]any, field string, want string) {
+	t.Helper()
+	got, ok := body[field].(string)
+	if !ok {
+		t.Fatalf("expected field %q to be a string in %v", field, body)
+	}
+	if !strings.Contains(got, want) {
+		t.Fatalf("expected field %q to contain %q, got %q", field, want, got)
 	}
 }
 

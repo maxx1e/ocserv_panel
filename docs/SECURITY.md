@@ -50,6 +50,14 @@ SQLite stores only the SHA-256 hash of the token. Logout should revoke the store
 
 Production deployments should keep the session cookie `Secure` behind HAProxy TLS. Disabling `Secure` is an explicit loopback-development opt-out only.
 
+## HTTP login warning
+
+HTTP-compatible login is supported only when `OCSERV_PANEL_COOKIE_SECURE=false`. In that mode, credentials and session cookies are not protected by transport encryption. Use this only for local testing or trusted networks.
+
+The login page and Settings tab warn when HTTP login is possible or when the current request is plain HTTP. These warnings do not make HTTP secure; they only make the risk visible.
+
+Session cookies remain `HttpOnly` and `SameSite=Lax` in both modes. SQLite stores only password hashes and session token hashes, never plaintext passwords or raw session tokens.
+
 ## RBAC and Audit Coverage
 
 The backend is the source of truth for authorization. Current roles are:

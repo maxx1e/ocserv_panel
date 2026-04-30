@@ -63,6 +63,14 @@ type purgeHistoryRequest struct {
 	Confirmation  string `json:"confirmation"`
 }
 
+type webUISettingsResponse struct {
+	CookieSecure     bool   `json:"cookieSecure"`
+	HTTPLoginAllowed bool   `json:"httpLoginAllowed"`
+	RequestSecure    bool   `json:"requestSecure"`
+	Transport        string `json:"transport"`
+	Warning          string `json:"warning"`
+}
+
 type principalResponse struct {
 	ID        int64     `json:"id"`
 	Username  string    `json:"username"`
@@ -160,6 +168,7 @@ func NewAppRouter(authService *app.AuthService, dashboardService *app.DashboardS
 	mux.HandleFunc("/api/health", handleHealthz)
 	mux.HandleFunc("/api/setup/status", appHandler.handleSetupStatus)
 	mux.HandleFunc("/api/setup/owner", appHandler.handleSetupOwner)
+	mux.HandleFunc("/api/settings/webui", appHandler.handleWebUISettings)
 	mux.HandleFunc("/api/auth/login", appHandler.handleLogin)
 	mux.HandleFunc("/api/auth/logout", appHandler.handleLogout)
 	mux.HandleFunc("/api/auth/me", appHandler.handleMe)
@@ -215,6 +224,27 @@ func (a *App) handleSetupOwner(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setSessionCookie(w, login.Token, login.ExpiresAt)
 	writeJSON(w, http.StatusOK, sessionFromLogin(login))
+}
+
+func (a *App) handleWebUISettings(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	requestSecure := requestIsSecure(r)
+	transport := "http"
+	if requestSecure {
+		transport = "https"
+	}
+	httpLoginAllowed := !a.cookieSecure
+
+	writeJSON(w, http.StatusOK, webUISettingsResponse{
+		CookieSecure:     a.cookieSecure,
+		HTTPLoginAllowed: httpLoginAllowed,
+		RequestSecure:    requestSecure,
+		Transport:        transport,
+		Warning:          webUITransportWarning(httpLoginAllowed, requestSecure),
+	})
 }
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -397,6 +427,20 @@ func allowMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	w.Header().Set("Allow", method)
 	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	return false
+}
+
+func requestIsSecure(r *http.Request) bool {
+	return r.TLS != nil
+}
+
+func webUITransportWarning(httpLoginAllowed bool, requestSecure bool) string {
+	if httpLoginAllowed {
+		return "HTTP login sends credentials/session cookies without transport encryption. Use only on trusted local networks or for testing."
+	}
+	if !requestSecure {
+		return "HTTP login is not enabled, but this request is not encrypted. Use HTTPS before entering credentials on untrusted networks."
+	}
+	return ""
 }
 
 func decodeRequestJSON(w http.ResponseWriter, r *http.Request, value any) bool {

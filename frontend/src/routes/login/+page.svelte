@@ -1,20 +1,33 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getSetupStatus, login } from '$lib/api';
+  import { getSetupStatus, getWebUISettings, login, type WebUISettings } from '$lib/api';
 
   let username = $state('');
   let password = $state('');
   let error = $state('');
   let setupRequired = $state(false);
   let submitting = $state(false);
+  let webUISettings = $state<WebUISettings | null>(null);
+  const transportWarning = $derived(webUISettingsWarning(webUISettings));
 
   onMount(async () => {
     try {
-      setupRequired = (await getSetupStatus()).required;
+      const [setupStatus, settings] = await Promise.all([getSetupStatus(), getWebUISettings()]);
+      setupRequired = setupStatus.required;
+      webUISettings = settings;
     } catch (caught) {
       error = caught instanceof Error ? caught.message : 'Unable to reach setup status.';
     }
   });
+
+  function webUISettingsWarning(settings: WebUISettings | null): string {
+    if (!settings) return '';
+    if (settings.warning) return settings.warning;
+    if (settings.httpLoginAllowed || settings.transport === 'http') {
+      return 'HTTP login sends credentials/session cookies without transport encryption. Use only on trusted local networks or for testing.';
+    }
+    return '';
+  }
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
@@ -38,6 +51,13 @@
   <p class="eyebrow">Login</p>
   <h2>Admin sign in</h2>
   <p class="muted">The backend sets an HttpOnly session cookie. This page never stores tokens or passwords.</p>
+
+  {#if transportWarning}
+    <div class="callout warning">
+      <strong>Insecure login warning</strong>
+      <p>{transportWarning}</p>
+    </div>
+  {/if}
 
   {#if setupRequired}
     <div class="callout warning">
