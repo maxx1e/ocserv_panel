@@ -1,1 +1,27 @@
+# Git worktrees
 .worktrees/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# SQLite runtime files
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Go build outputs
+backend/bin/
+backend/ocserv-panel
+backend/*.test
+
+# Frontend dependencies and build outputs
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.vite/
+
+# OpenCode local dependencies
+.opencode/node_modules/
