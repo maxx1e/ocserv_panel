@@ -1,16 +1,52 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import TimeSeriesChart from '$lib/components/monitoring/TimeSeriesChart.svelte';
+  import UnavailableMetric from '$lib/components/monitoring/UnavailableMetric.svelte';
+  import WindowSelector from '$lib/components/monitoring/WindowSelector.svelte';
   import {
     getHistoryAnalytics,
     getMe,
+    getMonitoringOverview,
     getSetupStatus,
     hasOwnerRole,
     principalFromAuth,
     purgeHistory,
     type HistoricalSession,
     type HistoryAnalytics,
+    type MonitoringOverview,
+    type MonitoringSeries,
+    type MonitoringWindow,
     type Principal
   } from '$lib/api';
+  import { metricByName, seriesByMetric } from '$lib/monitoring';
+
+  const HISTORY_WINDOWS: MonitoringWindow[] = ['24h', '7d', '30d'];
+  const HOST_CPU = 'host_cpu_utilization';
+  const HOST_MEMORY = 'host_memory_utilization';
+  const NET_RX = 'net_interface_rx_bytes';
+  const NET_TX = 'net_interface_tx_bytes';
+  const VPN_RX = 'vpn_interface_rx_bytes';
+  const VPN_TX = 'vpn_interface_tx_bytes';
+  const USER_RX = 'user_rx_bytes';
+  const USER_TX = 'user_tx_bytes';
+  const CONNECTION_RATE = 'connection_rate';
+
+  type ChartDefinition = {
+    metric: string;
+    title: string;
+  };
+
+  const chartDefinitions: ChartDefinition[] = [
+    { metric: HOST_CPU, title: 'CPU utilization' },
+    { metric: HOST_MEMORY, title: 'Memory utilization' },
+    { metric: NET_RX, title: 'Network inbound' },
+    { metric: NET_TX, title: 'Network outbound' },
+    { metric: VPN_RX, title: 'VPN inbound' },
+    { metric: VPN_TX, title: 'VPN outbound' },
+    { metric: USER_RX, title: 'User inbound' },
+    { metric: USER_TX, title: 'User outbound' },
+    { metric: CONNECTION_RATE, title: 'Connection rate' }
+  ];
 
   let loading = $state(true);
   let error = $state('');
@@ -19,9 +55,14 @@
   let setupRequired = $state(false);
   let principal = $state<Principal | null>(null);
   let analytics = $state<HistoryAnalytics | null>(null);
+  let monitoringWindow = $state<MonitoringWindow>('24h');
+  let monitoring = $state<MonitoringOverview | null>(null);
+  let monitoringLoading = $state(false);
+  let monitoringError = $state('');
   let retentionDays = $state<30 | 90 | 180 | 365>(90);
   let confirmation = $state('');
   let purgeSubmitting = $state(false);
+  let monitoringRequestId = 0;
 
   const isOwner = $derived(hasOwnerRole(principal));
   const sessions = $derived(analytics?.recentSessions ?? analytics?.sessions ?? []);
@@ -43,12 +84,68 @@
 
       principal = principalFromAuth(await getMe());
       analytics = await getHistoryAnalytics();
+      void reloadMonitoring(monitoringWindow);
     } catch (caught) {
       error = caught instanceof Error ? caught.message : 'Unable to load historical analytics.';
       principal = null;
     } finally {
       loading = false;
     }
+  }
+
+  async function reloadMonitoring(window: MonitoringWindow = monitoringWindow) {
+    const requestId = ++monitoringRequestId;
+    monitoringLoading = true;
+    monitoringError = '';
+    try {
+      const overview = await getMonitoringOverview(window);
+      if (!isLatestMonitoringRequest(requestId, window)) return;
+      monitoring = overview;
+    } catch (caught) {
+      if (!isLatestMonitoringRequest(requestId, window)) return;
+      monitoringError = caught instanceof Error ? caught.message : 'Unable to load monitoring overview.';
+      monitoring = null;
+    } finally {
+      if (isLatestMonitoringRequest(requestId, window)) {
+        monitoringLoading = false;
+      }
+    }
+  }
+
+  function isLatestMonitoringRequest(requestId: number, window: MonitoringWindow): boolean {
+    return requestId === monitoringRequestId && window === monitoringWindow;
+  }
+
+  function handleMonitoringWindowChange(event: CustomEvent<string>) {
+    const nextWindow = event.detail as MonitoringWindow;
+    if (!HISTORY_WINDOWS.includes(nextWindow) || nextWindow === monitoringWindow) return;
+    monitoringWindow = nextWindow;
+    void reloadMonitoring(nextWindow);
+  }
+
+  function metricSeries(metric: string): MonitoringSeries | undefined {
+    return seriesByMetric(monitoring, metric);
+  }
+
+  function unavailableReason(metric: string): string {
+    const catalogMetric = metricByName(monitoring?.catalog, metric);
+    if (catalogMetric?.reason) return catalogMetric.reason;
+    if (catalogMetric?.state === 'unavailable') return 'The backend reports this metric as unavailable.';
+    return 'Metric data has not been collected for this window yet.';
+  }
+
+  function shouldShowChart(metric: string): boolean {
+    return metricByName(monitoring?.catalog, metric)?.state !== 'unavailable' && Boolean(metricSeries(metric));
+  }
+
+  function formatGeneratedAt(value: string | undefined): string {
+    if (!value) return 'not loaded yet';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    }).format(date);
   }
 
   async function handlePurge(event: SubmitEvent) {
@@ -139,6 +236,46 @@
       <article class="panel stat-card"><span>Sent</span><strong>{formatBytes(totals.txBytes)}</strong></article>
       <article class="panel stat-card"><span>Total traffic</span><strong>{formatBytes(totals.totalBytes)}</strong></article>
     </div>
+
+    <section class="panel page-stack" aria-labelledby="history-monitoring-heading">
+      <div class="monitoring-toolbar">
+        <div>
+          <p class="eyebrow">Monitoring history</p>
+          <h3 id="history-monitoring-heading">Resource and traffic trends</h3>
+          <p class="muted">
+            Backend-collected samples for longer history windows. User and ocserv-specific metrics show unavailable states when the backend cannot collect them.
+          </p>
+          <p class="muted">Generated: {formatGeneratedAt(monitoring?.generatedAt)} · Window: {monitoring?.window ?? monitoringWindow}</p>
+        </div>
+        <div class="monitoring-toolbar">
+          <WindowSelector value={monitoringWindow} windows={HISTORY_WINDOWS} on:change={handleMonitoringWindowChange} />
+          <button class="button" type="button" disabled={monitoringLoading} onclick={() => reloadMonitoring()}>
+            {monitoringLoading ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {#if monitoringError}
+        <div class="callout warning" role="status">
+          <strong>Monitoring unavailable</strong>
+          <p>{monitoringError}</p>
+        </div>
+      {/if}
+
+      {#if monitoringLoading && !monitoring}
+        <div class="panel">Loading monitoring history…</div>
+      {:else}
+        <div class="chart-grid">
+          {#each chartDefinitions as chart}
+            {#if shouldShowChart(chart.metric)}
+              <TimeSeriesChart title={chart.title} series={metricSeries(chart.metric)} />
+            {:else}
+              <UnavailableMetric title={chart.title} reason={unavailableReason(chart.metric)} />
+            {/if}
+          {/each}
+        </div>
+      {/if}
+    </section>
 
     <section class="panel">
       <h3>Recent historical sessions</h3>

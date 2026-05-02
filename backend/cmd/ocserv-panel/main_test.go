@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"ocserv_panel/backend/internal/metrics"
+	"ocserv_panel/backend/internal/monitoring"
 )
 
 func TestEnvOrDefault(t *testing.T) {
@@ -35,6 +40,61 @@ func TestEnvOrDefault(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTSDBPathFromEnv(t *testing.T) {
+	t.Run("defaults to local data metrics path", func(t *testing.T) {
+		t.Setenv("OCSERV_PANEL_TSDB_PATH", "")
+
+		got := tsdbPathFromEnv()
+		want := filepath.Join("data", "metrics")
+		if got != want {
+			t.Fatalf("tsdbPathFromEnv() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("uses configured path", func(t *testing.T) {
+		t.Setenv("OCSERV_PANEL_TSDB_PATH", filepath.Join("tmp", "panel-metrics"))
+
+		got := tsdbPathFromEnv()
+		want := filepath.Join("tmp", "panel-metrics")
+		if got != want {
+			t.Fatalf("tsdbPathFromEnv() = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestConfiguredCollectors(t *testing.T) {
+	t.Run("uses host collectors only by default", func(t *testing.T) {
+		t.Setenv("OCSERV_PANEL_NET_IFACE", "")
+		t.Setenv("OCSERV_PANEL_VPN_IFACE", "")
+
+		collectors := configuredCollectors(fakeFileReader{})
+		if len(collectors) != 2 {
+			t.Fatalf("len(configuredCollectors()) = %d, want 2", len(collectors))
+		}
+	})
+
+	t.Run("adds configured network and vpn interface collectors", func(t *testing.T) {
+		t.Setenv("OCSERV_PANEL_NET_IFACE", "eth0")
+		t.Setenv("OCSERV_PANEL_VPN_IFACE", "vpns0")
+		reader := fakeFileReader{
+			"/sys/class/net/eth0/statistics/rx_bytes":  []byte("10\n"),
+			"/sys/class/net/eth0/statistics/tx_bytes":  []byte("20\n"),
+			"/sys/class/net/vpns0/statistics/rx_bytes": []byte("30\n"),
+			"/sys/class/net/vpns0/statistics/tx_bytes": []byte("40\n"),
+		}
+
+		collectors := configuredCollectors(reader)
+		if len(collectors) != 4 {
+			t.Fatalf("len(configuredCollectors()) = %d, want 4", len(collectors))
+		}
+
+		assertCollectorHasSample(t, collectors, metrics.MetricNetInterfaceRXBytes, "eth0")
+		assertCollectorHasSample(t, collectors, metrics.MetricNetInterfaceTXBytes, "eth0")
+		assertCollectorHasSample(t, collectors, metrics.MetricVPNInterfaceRXBytes, "vpns0")
+		assertCollectorHasSample(t, collectors, metrics.MetricVPNInterfaceTXBytes, "vpns0")
+	})
 }
 
 func TestCookieSecureFromEnv(t *testing.T) {
@@ -87,6 +147,45 @@ func TestResolveMigrationsDirHonorsEnvAndFallbacks(t *testing.T) {
 	if got := resolveMigrationsDir(); got != "migrations" {
 		t.Fatalf("expected local migrations fallback, got %q", got)
 	}
+}
+
+type fakeFileReader map[string][]byte
+
+var _ monitoring.FileReader = fakeFileReader{}
+
+func (r fakeFileReader) ReadFile(path string) ([]byte, error) {
+	data := r[path]
+
+	return data, nil
+}
+
+func assertCollectorHasSample(
+	t *testing.T,
+	collectors []monitoring.Collector,
+	name metrics.MetricName,
+	iface string,
+) {
+	t.Helper()
+
+	for _, collector := range collectors {
+		result := collector.Collect(context.Background(), time.Unix(100, 0).UTC())
+		if result.Status != monitoring.CollectStatusAvailable {
+			continue
+		}
+
+		for _, sample := range result.Samples {
+			if sample.Name != name {
+				continue
+			}
+			if sample.Labels["interface"] != iface {
+				t.Fatalf("sample %q interface label = %q, want %q", name, sample.Labels["interface"], iface)
+			}
+
+			return
+		}
+	}
+
+	t.Fatalf("configured collectors did not emit sample %q for interface %q", name, iface)
 }
 
 func stringPtr(value string) *string {

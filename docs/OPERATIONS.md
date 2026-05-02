@@ -60,6 +60,21 @@ For exposed production deployments, use a TLS strategy before entering credentia
 
 The current dashboard/history data is local-only. Historical sample session rows may be seeded as sample data for development and initial UI verification.
 
+### Local Monitoring TSDB
+
+Dashboard monitoring uses the embedded Prometheus TSDB Go library as a local, file-backed time-series store inside the backend process. This is not a Prometheus server, daemon, scrape target, Grafana deployment, or external monitoring stack.
+
+Operational defaults and configuration:
+
+- `OCSERV_PANEL_TSDB_PATH` controls the TSDB directory and defaults to `data/metrics`.
+- Retention is 30 days.
+- Collectors run every 15 seconds.
+- Host CPU and memory collectors run by default.
+- Network and VPN interface counters are collected only when `OCSERV_PANEL_NET_IFACE` and/or `OCSERV_PANEL_VPN_IFACE` name local interfaces.
+- `ocserv`, user, and session metric slots may appear as unavailable until future ingestion is implemented; unavailable values should not be interpreted as zero activity.
+
+If the TSDB cannot be opened, the backend falls back to in-memory metrics so dashboard reads can continue. Treat this as operationally degraded: new samples are not persistent and will be lost on restart until the TSDB path or filesystem permissions are fixed.
+
 The history purge operation deletes only historical session rows older than the configured retention window. It is owner-only and requires the confirmation string `PURGE`. It does not terminate active VPN sessions, call `ocserv`, edit configuration, or remove certificates.
 
 ## Current Slice Safety

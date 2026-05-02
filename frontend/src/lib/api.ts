@@ -77,6 +77,39 @@ export type HistoryAnalytics = {
   [key: string]: unknown;
 };
 
+export type MonitoringMetricState = 'collecting' | 'unavailable';
+
+export type MonitoringMetric = {
+  name: string;
+  description: string;
+  state: MonitoringMetricState;
+  reason?: string;
+};
+
+export type MonitoringPoint = {
+  timestamp: string;
+  value: number;
+};
+
+export type MonitoringSeries = {
+  metric: string;
+  labels: Record<string, string>;
+  points: MonitoringPoint[];
+};
+
+export type MonitoringCatalog = MonitoringMetric[];
+
+export type MonitoringOverview = {
+  window: string;
+  generatedAt: string;
+  catalog: MonitoringCatalog;
+  series: MonitoringSeries[];
+};
+
+export type MonitoringWindow = '15m' | '1h' | '6h' | '24h' | '7d' | '30d';
+
+export type MonitoringStep = '15s' | '60s' | '5m' | '1h';
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -212,6 +245,24 @@ export function getDashboardSummary(): Promise<DashboardSummary> {
 
 export function getHistoryAnalytics(): Promise<HistoryAnalytics> {
   return apiFetch<HistoryAnalytics>('/api/history/analytics');
+}
+
+export function getMonitoringCatalog(): Promise<MonitoringCatalog> {
+  return apiFetch<MonitoringCatalog>('/api/monitoring/catalog');
+}
+
+export function getMonitoringOverview(window: MonitoringWindow): Promise<MonitoringOverview> {
+  const query = new URLSearchParams({ window });
+  return apiFetch<MonitoringOverview>(`/api/monitoring/overview?${query.toString()}`);
+}
+
+export function getMonitoringSeries(
+  metric: string,
+  window: MonitoringWindow,
+  step: MonitoringStep
+): Promise<MonitoringSeries> {
+  const query = new URLSearchParams({ metric, window, step });
+  return apiFetch<MonitoringSeries>(`/api/monitoring/series?${query.toString()}`);
 }
 
 export function purgeHistory(retentionDays: 30 | 90 | 180 | 365, confirmation: 'PURGE'): Promise<void> {

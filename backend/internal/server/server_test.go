@@ -18,6 +18,7 @@ import (
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/db"
+	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
@@ -206,6 +207,15 @@ func TestLoginMeAndLogoutSessionCookieLifecycle(t *testing.T) {
 	assertStatus(t, meAfterLogout, http.StatusUnauthorized)
 }
 
+func TestAuthMeUnauthenticatedDoesNotRecordMonitoringAudit(t *testing.T) {
+	h := newTestHarness(t)
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/auth/me", nil, "")
+
+	assertStatus(t, rec, http.StatusUnauthorized)
+	assertNoAuditActionPrefix(t, h.store, "monitoring.")
+}
+
 func TestLogoutClearsCookieWhenRevocationFails(t *testing.T) {
 	h := newTestHarness(t)
 	h.createOwner(t, "owner", "owner-password")
@@ -264,6 +274,131 @@ func TestProtectedDashboardHistoryAndPurgeAuthorization(t *testing.T) {
 	if _, ok := body["cutoff"].(string); !ok {
 		t.Fatalf("expected cutoff string in %v", body)
 	}
+}
+
+func TestMonitoringEndpointsRequireAuthentication(t *testing.T) {
+	h := newTestHarness(t)
+
+	for _, path := range []string{
+		"/api/monitoring/catalog",
+		"/api/monitoring/overview",
+		"/api/monitoring/series?metric=host_cpu_utilization",
+	} {
+		t.Run(path, func(t *testing.T) {
+			rec := serveAPI(t, h.router, http.MethodGet, path, nil, "")
+
+			assertStatus(t, rec, http.StatusUnauthorized)
+			assertJSONField(t, rec, "error", "authentication required")
+		})
+	}
+}
+
+func TestMonitoringCatalogReturnsDefaultMetrics(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	cookie := h.login(t, "owner", "owner-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/catalog", nil, cookie)
+
+	assertStatus(t, rec, http.StatusOK)
+	var body []map[string]any
+	decodeJSON(t, rec, &body)
+	assertCatalogContainsMetric(t, body, string(metrics.MetricHostCPUUtilization))
+	assertNoMapField(t, body[0], "Name")
+	assertMapHasFields(t, body[0], "name", "description", "state")
+}
+
+func TestMonitoringOverviewReturnsDefaultWindowAndSeries(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	cookie := h.login(t, "owner", "owner-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/overview", nil, cookie)
+
+	assertStatus(t, rec, http.StatusOK)
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+	assertMapField(t, body, "window", "1h")
+	if _, ok := body["generatedAt"].(string); !ok {
+		t.Fatalf("expected generatedAt string in %v", body)
+	}
+	if _, ok := body["series"].([]any); !ok {
+		t.Fatalf("expected series array in %v", body)
+	}
+	assertNoMapField(t, body, "generated_at")
+}
+
+func TestMonitoringOverviewRejectsInvalidWindow(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	cookie := h.login(t, "owner", "owner-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/overview?window=2h", nil, cookie)
+
+	assertStatus(t, rec, http.StatusBadRequest)
+	assertJSONField(t, rec, "error", "invalid request")
+}
+
+func TestMonitoringSeriesReturnsRequestedMetric(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	cookie := h.login(t, "owner", "owner-password")
+
+	rec := serveAPI(
+		t,
+		h.router,
+		http.MethodGet,
+		"/api/monitoring/series?metric=host_cpu_utilization&window=1h&step=60s",
+		nil,
+		cookie,
+	)
+
+	assertStatus(t, rec, http.StatusOK)
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+	assertMapField(t, body, "metric", string(metrics.MetricHostCPUUtilization))
+	assertNoMapField(t, body, "Metric")
+	if _, ok := body["points"].([]any); !ok {
+		t.Fatalf("expected points array in %v", body)
+	}
+	assertNoMapField(t, body, "Points")
+}
+
+func TestMonitoringSeriesRejectsInvalidQuery(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	cookie := h.login(t, "owner", "owner-password")
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "missing metric", path: "/api/monitoring/series"},
+		{name: "invalid metric", path: "/api/monitoring/series?metric=unknown&window=1h&step=60s"},
+		{name: "invalid window", path: "/api/monitoring/series?metric=host_cpu_utilization&window=2h&step=60s"},
+		{name: "invalid step", path: "/api/monitoring/series?metric=host_cpu_utilization&window=1h&step=1s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := serveAPI(t, h.router, http.MethodGet, tt.path, nil, cookie)
+
+			assertStatus(t, rec, http.StatusBadRequest)
+			assertJSONField(t, rec, "error", "invalid request")
+		})
+	}
+}
+
+func TestMonitoringEndpointsDenyUsersWithoutDashboardRead(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	h.createUserWithoutRoles(t, "limited", "limited-password")
+	cookie := h.login(t, "limited", "limited-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/catalog", nil, cookie)
+
+	assertStatus(t, rec, http.StatusForbidden)
+	assertJSONField(t, rec, "error", "permission denied")
 }
 
 func TestDashboardSummaryIncludesRequiredStatusAndLocalData(t *testing.T) {
@@ -333,6 +468,24 @@ func TestProtectedEndpointsAuditUnauthenticatedAttempts(t *testing.T) {
 			path:   "/api/history/purge",
 			body:   purgeRequest(30, "PURGE"),
 			action: "history.purge",
+		},
+		{
+			name:   "monitoring catalog",
+			method: http.MethodGet,
+			path:   "/api/monitoring/catalog",
+			action: "monitoring.catalog",
+		},
+		{
+			name:   "monitoring overview",
+			method: http.MethodGet,
+			path:   "/api/monitoring/overview",
+			action: "monitoring.overview",
+		},
+		{
+			name:   "monitoring series",
+			method: http.MethodGet,
+			path:   "/api/monitoring/series?metric=host_cpu_utilization",
+			action: "monitoring.series",
 		},
 	}
 
@@ -455,11 +608,17 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	recorder := audit.NewSQLiteRecorder(s)
 	authService := app.NewAuthService(s, recorder)
 	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	monitoringService := app.NewMonitoringService(metrics.NewMemoryStore(), rbac.NewDefaultAuthorizer(), nil, recorder)
 
 	return &testHarness{
 		database: database,
 		store:    s,
-		router:   NewAppRouter(authService, dashboardService, AppOptions{CookieSecure: cookieSecure}),
+		router: NewAppRouter(
+			authService,
+			dashboardService,
+			monitoringService,
+			AppOptions{CookieSecure: cookieSecure},
+		),
 	}
 }
 
@@ -503,6 +662,24 @@ func (h *testHarness) createViewer(t *testing.T, username string, password strin
 		string(rbac.RoleViewer),
 	); err != nil {
 		t.Fatalf("assign viewer role: %v", err)
+	}
+}
+
+func (h *testHarness) createUserWithoutRoles(t *testing.T, username string, password string) {
+	t.Helper()
+	passwordHash, err := auth.HashPassword(password)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := h.database.ExecContext(
+		context.Background(),
+		`INSERT INTO admin_users (username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		username,
+		passwordHash,
+		"2026-01-05T00:00:00Z",
+		"2026-01-05T00:00:00Z",
+	); err != nil {
+		t.Fatalf("insert user without roles: %v", err)
 	}
 }
 
@@ -619,6 +796,22 @@ func assertMapField(t *testing.T, body map[string]any, field string, want any) {
 	}
 }
 
+func assertNoMapField(t *testing.T, body map[string]any, field string) {
+	t.Helper()
+	if _, ok := body[field]; ok {
+		t.Fatalf("expected field %q to be absent in %v", field, body)
+	}
+}
+
+func assertMapHasFields(t *testing.T, body map[string]any, fields ...string) {
+	t.Helper()
+	for _, field := range fields {
+		if _, ok := body[field]; !ok {
+			t.Fatalf("expected field %q in %v", field, body)
+		}
+	}
+}
+
 func assertMapFieldContains(t *testing.T, body map[string]any, field string, want string) {
 	t.Helper()
 	got, ok := body[field].(string)
@@ -628,6 +821,16 @@ func assertMapFieldContains(t *testing.T, body map[string]any, field string, wan
 	if !strings.Contains(got, want) {
 		t.Fatalf("expected field %q to contain %q, got %q", field, want, got)
 	}
+}
+
+func assertCatalogContainsMetric(t *testing.T, catalog []map[string]any, want string) {
+	t.Helper()
+	for _, metric := range catalog {
+		if metric["name"] == want {
+			return
+		}
+	}
+	t.Fatalf("expected catalog to contain metric %q in %v", want, catalog)
 }
 
 func requireSessionCookie(t *testing.T, rec *httptest.ResponseRecorder, expectSecure bool) *http.Cookie {
@@ -693,6 +896,19 @@ func assertDeniedAuditAction(t *testing.T, s *store.Store, action string) {
 		}
 	}
 	t.Fatalf("expected denied audit action %q in %#v", action, events)
+}
+
+func assertNoAuditActionPrefix(t *testing.T, s *store.Store, prefix string) {
+	t.Helper()
+	events, err := s.RecentAuditEvents(context.Background(), 20)
+	if err != nil {
+		t.Fatalf("load audit events: %v", err)
+	}
+	for _, event := range events {
+		if strings.HasPrefix(event.Action, prefix) {
+			t.Fatalf("expected no audit action with prefix %q in %#v", prefix, events)
+		}
+	}
 }
 
 func TestHealthzRejectsNonGET(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/auth"
+	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/store"
 )
 
@@ -33,10 +34,11 @@ func NewRouter() http.Handler {
 
 // App wires HTTP handlers to application services.
 type App struct {
-	authService      *app.AuthService
-	dashboardService *app.DashboardService
-	cookieSecure     bool
-	now              func() time.Time
+	authService       *app.AuthService
+	dashboardService  *app.DashboardService
+	monitoringService *app.MonitoringService
+	cookieSecure      bool
+	now               func() time.Time
 }
 
 // AppOptions configures NewAppRouter.
@@ -151,16 +153,22 @@ type purgeHistoryResponse struct {
 }
 
 // NewAppRouter builds the backend HTTP API router.
-func NewAppRouter(authService *app.AuthService, dashboardService *app.DashboardService, opts AppOptions) http.Handler {
+func NewAppRouter(
+	authService *app.AuthService,
+	dashboardService *app.DashboardService,
+	monitoringService *app.MonitoringService,
+	opts AppOptions,
+) http.Handler {
 	now := opts.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	appHandler := &App{
-		authService:      authService,
-		dashboardService: dashboardService,
-		cookieSecure:     opts.CookieSecure,
-		now:              now,
+		authService:       authService,
+		dashboardService:  dashboardService,
+		monitoringService: monitoringService,
+		cookieSecure:      opts.CookieSecure,
+		now:               now,
 	}
 
 	mux := http.NewServeMux()
@@ -175,6 +183,9 @@ func NewAppRouter(authService *app.AuthService, dashboardService *app.DashboardS
 	mux.HandleFunc("/api/dashboard/summary", appHandler.handleDashboardSummary)
 	mux.HandleFunc("/api/history/analytics", appHandler.handleHistoryAnalytics)
 	mux.HandleFunc("/api/history/purge", appHandler.handleHistoryPurge)
+	mux.HandleFunc("/api/monitoring/catalog", appHandler.handleMonitoringCatalog)
+	mux.HandleFunc("/api/monitoring/overview", appHandler.handleMonitoringOverview)
+	mux.HandleFunc("/api/monitoring/series", appHandler.handleMonitoringSeries)
 
 	return securityHeaders(mux)
 }
@@ -348,6 +359,71 @@ func (a *App) handleHistoryPurge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, purgeHistoryResponse{RetentionDays: result.RetentionDays, Cutoff: result.Cutoff, DeletedRows: result.DeletedRows})
 }
 
+func (a *App) handleMonitoringCatalog(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		_, _ = a.monitoringService.Catalog(r.Context(), auth.Principal{})
+		return
+	}
+	catalog, err := a.monitoringService.Catalog(r.Context(), principal)
+	if err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, catalog)
+}
+
+func (a *App) handleMonitoringOverview(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		_, _ = a.monitoringService.Overview(r.Context(), auth.Principal{}, queryValueDefault(r, "window", "1h"))
+		return
+	}
+	window := queryValueDefault(r, "window", "1h")
+	overview, err := a.monitoringService.Overview(r.Context(), principal, window)
+	if err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, overview)
+}
+
+func (a *App) handleMonitoringSeries(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		_, _ = a.monitoringService.Series(
+			r.Context(),
+			auth.Principal{},
+			metrics.MetricName(r.URL.Query().Get("metric")),
+			queryValueDefault(r, "window", "1h"),
+			queryValueDefault(r, "step", "60s"),
+		)
+		return
+	}
+	metric := r.URL.Query().Get("metric")
+	if metric == "" {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	window := queryValueDefault(r, "window", "1h")
+	step := queryValueDefault(r, "step", "60s")
+	series, err := a.monitoringService.Series(r.Context(), principal, metrics.MetricName(metric), window, step)
+	if err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, series)
+}
+
 func (a *App) authenticate(w http.ResponseWriter, r *http.Request) (auth.Principal, bool) {
 	validation, err := a.authService.ValidateSession(r.Context(), sessionTokenFromCookie(r))
 	if err != nil {
@@ -375,9 +451,26 @@ func (a *App) writeAppError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "invalid confirmation")
 	case errors.Is(err, app.ErrInvalidRetention):
 		writeError(w, http.StatusBadRequest, "invalid retention")
+	case isMetricsValidationError(err):
+		writeError(w, http.StatusBadRequest, "invalid request")
 	default:
 		writeError(w, http.StatusInternalServerError, "internal server error")
 	}
+}
+
+func isMetricsValidationError(err error) bool {
+	return errors.Is(err, metrics.ErrInvalidMetric) ||
+		errors.Is(err, metrics.ErrInvalidWindow) ||
+		errors.Is(err, metrics.ErrInvalidStep) ||
+		errors.Is(err, metrics.ErrInvalidRange)
+}
+
+func queryValueDefault(r *http.Request, key string, fallback string) string {
+	value := r.URL.Query().Get(key)
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func (a *App) setSessionCookie(w http.ResponseWriter, token string, expiresAt time.Time) {

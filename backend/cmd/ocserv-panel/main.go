@@ -15,6 +15,8 @@ import (
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/db"
+	"ocserv_panel/backend/internal/metrics"
+	"ocserv_panel/backend/internal/monitoring"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/server"
 	"ocserv_panel/backend/internal/store"
@@ -45,10 +47,25 @@ func main() {
 	recorder := audit.NewSQLiteRecorder(persistence)
 	authService := app.NewAuthService(persistence, recorder)
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer())
+	metricStore := openMetricStore()
+	defer func() {
+		if err := metricStore.Close(); err != nil {
+			slog.Error("close metric store failed", "error", err)
+		}
+	}()
+	monitoringService := app.NewMonitoringService(metricStore, rbac.NewDefaultAuthorizer(), nil, recorder)
+	collectorService := monitoring.NewCollectorService(
+		metricStore,
+		configuredCollectors(monitoring.OSReader{}),
+		15*time.Second,
+		slog.Default(),
+		nil,
+	)
+	go collectorService.Run(ctx)
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
+		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -76,6 +93,47 @@ func envOrDefault(key string, fallback string) string {
 	}
 
 	return fallback
+}
+
+func tsdbPathFromEnv() string {
+	return envOrDefault("OCSERV_PANEL_TSDB_PATH", filepath.Join("data", "metrics"))
+}
+
+func openMetricStore() metrics.Store {
+	metricStore, err := metrics.OpenTSDBStore(tsdbPathFromEnv(), 30*24*time.Hour)
+	if err == nil {
+		return metricStore
+	}
+
+	slog.Warn("open metrics tsdb failed; using in-memory metrics store", "error", err)
+
+	return metrics.NewMemoryStore()
+}
+
+func configuredCollectors(reader monitoring.FileReader) []monitoring.Collector {
+	collectors := []monitoring.Collector{
+		monitoring.NewCPUCollector(reader),
+		monitoring.NewMemoryCollector(reader),
+	}
+
+	if iface := strings.TrimSpace(os.Getenv("OCSERV_PANEL_NET_IFACE")); iface != "" {
+		collectors = append(collectors, monitoring.NewInterfaceCollector(
+			reader,
+			iface,
+			metrics.MetricNetInterfaceRXBytes,
+			metrics.MetricNetInterfaceTXBytes,
+		))
+	}
+	if iface := strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")); iface != "" {
+		collectors = append(collectors, monitoring.NewInterfaceCollector(
+			reader,
+			iface,
+			metrics.MetricVPNInterfaceRXBytes,
+			metrics.MetricVPNInterfaceTXBytes,
+		))
+	}
+
+	return collectors
 }
 
 func cookieSecureFromEnv() bool {

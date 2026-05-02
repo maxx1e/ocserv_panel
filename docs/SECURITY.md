@@ -69,6 +69,14 @@ The history purge path is owner-only and requires the exact confirmation string 
 
 Audit logging should cover authentication events, purge attempts and results, and denied dashboard/history access. Audit metadata must redact sensitive keys and private-key markers before persistence or display.
 
+## Monitoring Data Safety
+
+The monitoring TSDB must store only numeric samples and safe labels. It must not store secrets, private keys, passwords, tokens, certificates, plaintext credentials, or raw command output.
+
+Monitoring read APIs require authenticated dashboard read access through RBAC. Successful reads, auth/RBAC denials, and backend query failures are audited; request validation failures may be rejected without a monitoring audit event.
+
+Current collectors read local `/proc` and `/sys` files only. This monitoring slice does not run shell commands, `sudo`, `systemctl`, `occtl`, `ocpasswd`, or access the live `ocserv` management socket.
+
 ## Frontend Boundary
 
 The SvelteKit frontend must not access local files, sockets, commands, certificates, or secrets directly. It must call backend APIs for all administrative behavior.

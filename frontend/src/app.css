@@ -268,13 +268,183 @@ th {
   font-size: 0.85rem;
 }
 
+.monitoring-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.metric-card {
+  border-color: #d0d5dd;
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 1rem;
+}
+
+.metric-card span,
+.metric-card small {
+  color: #667085;
+}
+
+.metric-card span {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.metric-card strong {
+  color: #101828;
+  font-size: 1.45rem;
+  overflow-wrap: anywhere;
+}
+
+.metric-card.unavailable {
+  background: #f9fafb;
+  border-style: dashed;
+}
+
+.metric-card.unavailable strong {
+  color: #667085;
+}
+
+.window-selector {
+  background: #f2f4f7;
+  border: 1px solid #e4e7ec;
+  border-radius: 0.65rem;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  padding: 0.2rem;
+}
+
+.window-selector button {
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+  color: #475467;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.45rem 0.65rem;
+}
+
+.window-selector button:hover,
+.window-selector button.active {
+  background: #ffffff;
+  color: #101828;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 8%);
+}
+
+.chart-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chart-heading {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.chart-heading h3,
+.chart-heading p {
+  margin: 0;
+}
+
+.chart-heading strong {
+  color: #101828;
+  white-space: nowrap;
+}
+
+.chart-card svg {
+  display: block;
+  height: auto;
+  max-height: 260px;
+  min-height: 180px;
+  overflow: visible;
+  width: 100%;
+}
+
+.chart-axis {
+  stroke: #e4e7ec;
+  stroke-width: 1;
+}
+
+.chart-area {
+  fill: #175cd3;
+  opacity: 0.08;
+}
+
+.chart-line {
+  fill: none;
+  stroke: #175cd3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.chart-point {
+  fill: #ffffff;
+  stroke: #175cd3;
+  stroke-width: 2;
+}
+
+.chart-tick {
+  fill: #667085;
+  font-size: 0.75rem;
+}
+
+.chart-tick-end {
+  text-anchor: end;
+}
+
+.unavailable-metric {
+  background: #f9fafb;
+  border: 1px dashed #d0d5dd;
+  border-radius: 0.75rem;
+  color: #667085;
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem;
+}
+
+.unavailable-metric strong {
+  color: #344054;
+}
+
+.unavailable-metric p {
+  margin: 0;
+}
+
 @media (max-width: 760px) {
   .shell {
     grid-template-columns: 1fr;
   }
 
   .cards,
-  .definition-grid {
+  .definition-grid,
+  .chart-grid {
     grid-template-columns: 1fr;
+  }
+
+  .content {
+    padding: 1rem;
+  }
+
+  .monitoring-toolbar,
+  .chart-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .window-selector {
+    width: fit-content;
+  }
+
+  .chart-card svg {
+    min-height: 160px;
   }
 }
