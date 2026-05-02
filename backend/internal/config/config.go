@@ -1,0 +1,251 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// GeneralConfig holds general application settings.
+type GeneralConfig struct {
+	AppName  string `toml:"app_name"`
+	Timezone string `toml:"timezone"`
+}
+
+// InstallationConfig holds filesystem path settings.
+type InstallationConfig struct {
+	ConfigPath       string `toml:"config_path"`
+	DataDir          string `toml:"data_dir"`
+	LogDir           string `toml:"log_dir"`
+	OcservConfigPath string `toml:"ocserv_config_path"`
+	OcservSocketPath string `toml:"ocserv_socket_path"`
+	OcpasswdPath     string `toml:"ocpasswd_path"`
+	CertDir          string `toml:"cert_dir"`
+}
+
+// ServiceConfig holds service runtime settings.
+type ServiceConfig struct {
+	Name            string `toml:"name"`
+	User            string `toml:"user"`
+	Group           string `toml:"group"`
+	StartOnBoot     bool   `toml:"start_on_boot"`
+	MaintenanceMode bool   `toml:"maintenance_mode"`
+}
+
+// WebConfig holds web server settings.
+type WebConfig struct {
+	Host           string `toml:"host"`
+	Port           int    `toml:"port"`
+	BaseURL        string `toml:"base_url"`
+	ReverseProxy   bool   `toml:"reverse_proxy"`
+	TrustedProxies string `toml:"trusted_proxies"`
+	HTTPS          bool   `toml:"https"`
+}
+
+// SecurityConfig holds security settings.
+type SecurityConfig struct {
+	AllowedAdminIPs   string `toml:"allowed_admin_ips"`
+	TLSCertPath       string `toml:"tls_cert_path"`
+	TLSKeyPath        string `toml:"tls_key_path"`
+	EncryptionKeyPath string `toml:"encryption_key_path"`
+	CSRFEnabled       bool   `toml:"csrf_enabled"`
+	SecurityHeaders   bool   `toml:"security_headers"`
+}
+
+// DatabaseConfig holds database connection settings.
+type DatabaseConfig struct {
+	DSN             string `toml:"dsn"`
+	MaxOpenConns    int    `toml:"max_open_conns"`
+	MaxIdleConns    int    `toml:"max_idle_conns"`
+	ConnMaxLifetime int    `toml:"conn_max_lifetime"`
+}
+
+// MonitoringConfig holds monitoring endpoint settings.
+type MonitoringConfig struct {
+	HealthEndpoint           bool `toml:"health_endpoint"`
+	MetricsEndpoint          bool `toml:"metrics_endpoint"`
+	DashboardRefreshInterval int  `toml:"dashboard_refresh_interval"`
+}
+
+// Config is the top-level TOML configuration structure.
+type Config struct {
+	General      GeneralConfig      `toml:"general"`
+	Installation InstallationConfig `toml:"installation"`
+	Service      ServiceConfig      `toml:"service"`
+	Web          WebConfig          `toml:"web"`
+	Security     SecurityConfig     `toml:"security"`
+	Database     DatabaseConfig     `toml:"database"`
+	Monitoring   MonitoringConfig   `toml:"monitoring"`
+}
+
+// Defaults returns a Config with all values set to their defaults.
+func Defaults() Config {
+	return Config{
+		General: GeneralConfig{
+			AppName:  "ocserv Panel",
+			Timezone: "UTC",
+		},
+		Installation: InstallationConfig{
+			ConfigPath:       "/etc/ocserv-panel/config.toml",
+			DataDir:          "/var/lib/ocserv-panel",
+			LogDir:           "/var/log/ocserv-panel",
+			OcservConfigPath: "/etc/ocserv/ocserv.conf",
+			OcservSocketPath: "/var/run/ocserv-socket",
+			OcpasswdPath:     "/etc/ocserv/ocpasswd",
+			CertDir:          "/etc/ocserv/certs",
+		},
+		Service: ServiceConfig{
+			Name:            "ocserv-panel",
+			User:            "ocserv-panel",
+			Group:           "ocserv-panel",
+			StartOnBoot:     true,
+			MaintenanceMode: false,
+		},
+		Web: WebConfig{
+			Host:    "127.0.0.1",
+			Port:    8080,
+			BaseURL: "http://localhost:8080",
+		},
+		Security: SecurityConfig{
+			CSRFEnabled:     true,
+			SecurityHeaders: true,
+		},
+		Database: DatabaseConfig{
+			DSN:             "ocserv-panel.db",
+			MaxOpenConns:    5,
+			MaxIdleConns:    2,
+			ConnMaxLifetime: 300,
+		},
+		Monitoring: MonitoringConfig{
+			HealthEndpoint:           true,
+			MetricsEndpoint:          false,
+			DashboardRefreshInterval: 15,
+		},
+	}
+}
+
+// Load reads a TOML config file and merges with defaults.
+// If the file does not exist, returns defaults without error.
+func Load(path string) (Config, error) {
+	cfg := Defaults()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return Config{}, fmt.Errorf("read config file %s: %w", path, err)
+	}
+	if err := unmarshalTOML(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+// Save writes a Config to a TOML file with atomic write and backup.
+func Save(cfg Config, path string) error {
+	data, err := marshalTOML(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	// Backup existing file
+	if _, statErr := os.Stat(path); statErr == nil {
+		backup := path + ".bak"
+		existing, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return fmt.Errorf("read existing config for backup: %w", readErr)
+		}
+		if writeErr := os.WriteFile(backup, existing, 0600); writeErr != nil {
+			return fmt.Errorf("write config backup: %w", writeErr)
+		}
+	}
+	// Atomic write: temp file + rename
+	dir := filepath.Dir(path)
+	tmp, tmpErr := os.CreateTemp(dir, "config-*.tmp")
+	if tmpErr != nil {
+		return fmt.Errorf("create temp file: %w", tmpErr)
+	}
+	tmpName := tmp.Name()
+	if _, writeErr := tmp.Write(data); writeErr != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("write temp config: %w", writeErr)
+	}
+	if closeErr := tmp.Close(); closeErr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close temp config: %w", closeErr)
+	}
+	if chmodErr := os.Chmod(tmpName, 0600); chmodErr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("chmod temp config: %w", chmodErr)
+	}
+	if renameErr := os.Rename(tmpName, path); renameErr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("rename temp config: %w", renameErr)
+	}
+	return nil
+}
+
+// Validate checks a Config for obvious errors.
+func Validate(cfg Config) error {
+	if cfg.Web.Port < 1 || cfg.Web.Port > 65535 {
+		return fmt.Errorf("web.port must be between 1 and 65535, got %d", cfg.Web.Port)
+	}
+	if cfg.Database.MaxOpenConns < 1 {
+		return fmt.Errorf("database.max_open_conns must be at least 1, got %d", cfg.Database.MaxOpenConns)
+	}
+	if cfg.Database.MaxIdleConns < 0 {
+		return fmt.Errorf("database.max_idle_conns must be at least 0, got %d", cfg.Database.MaxIdleConns)
+	}
+	if cfg.Database.ConnMaxLifetime < 0 {
+		return fmt.Errorf("database.conn_max_lifetime must be at least 0, got %d", cfg.Database.ConnMaxLifetime)
+	}
+	if cfg.Monitoring.DashboardRefreshInterval < 5 {
+		return fmt.Errorf("monitoring.dashboard_refresh_interval must be at least 5 seconds, got %d", cfg.Monitoring.DashboardRefreshInterval)
+	}
+	return nil
+}
+
+// MergeEnv overrides config values from environment variables.
+func MergeEnv(cfg *Config, getenv func(string) string) {
+	if v := getenv("OCSERV_PANEL_ADDR"); v != "" {
+		cfg.Web.Host = hostFromAddr(v)
+		cfg.Web.Port = portFromAddr(v)
+	}
+	if v := getenv("OCSERV_PANEL_DB_DSN"); v != "" {
+		cfg.Database.DSN = v
+	}
+	if v := getenv("OCSERV_PANEL_COOKIE_SECURE"); v != "" {
+		cfg.Security.CSRFEnabled = isTruthy(v)
+	}
+	if v := getenv("OCSERV_PANEL_TSDB_PATH"); v != "" {
+		cfg.Installation.DataDir = v
+	}
+	if v := getenv("OCSERV_PANEL_MIGRATIONS_DIR"); v != "" {
+		cfg.Installation.ConfigPath = v
+	}
+}
+
+func hostFromAddr(addr string) string {
+	host, _, err := splitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	return host
+}
+
+func portFromAddr(addr string) int {
+	_, port, err := splitHostPort(addr)
+	if err != nil {
+		return 8080
+	}
+	return port
+}
+
+func isTruthy(v string) bool {
+	switch v {
+	case "1", "t", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
