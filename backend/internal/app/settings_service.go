@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"ocserv_panel/backend/internal/audit"
@@ -128,6 +129,181 @@ func defaultForSetting(key string) string {
 	default:
 		return ""
 	}
+}
+
+// SettingsSection represents a group of related settings.
+type SettingsSection struct {
+	ID          string       `json:"id"`
+	Label       string       `json:"label"`
+	Title       string       `json:"title"`
+	Description string       `json:"description,omitempty"`
+	Settings    []SettingDef `json:"settings"`
+}
+
+// SettingsSectionsResponse is the full API response for GET /api/settings.
+type SettingsSectionsResponse struct {
+	Sections        []SettingsSection `json:"sections"`
+	RestartRequired bool              `json:"restart_required"`
+	PendingChanges  []string          `json:"pending_changes"`
+}
+
+// GetAllSections returns all settings grouped by section with current values.
+func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Principal) (*SettingsSectionsResponse, error) {
+	if !principal.Authenticated() {
+		_ = s.record(ctx, nil, "settings.get_sections", "setting", "", audit.OutcomeDenied, "settings get_sections authentication required", nil)
+		return nil, ErrUnauthenticated
+	}
+	actorID := principal.ID
+	if !s.authorizer.Allowed(principalRoles(principal), rbac.PermissionSettingsRead) {
+		_ = s.record(ctx, &actorID, "settings.get_sections", "setting", "", audit.OutcomeDenied, "settings get_sections permission denied", nil)
+		return nil, ErrPermissionDenied
+	}
+
+	sectionDefs := AllSectionDefs()
+	defsBySection := SettingDefsBySection()
+	sections := make([]SettingsSection, 0, len(sectionDefs))
+
+	for _, sec := range sectionDefs {
+		defs := defsBySection[sec.ID]
+		settings := make([]SettingDef, 0, len(defs))
+		for _, d := range defs {
+			setting := SettingDef{
+				Key:             d.Key,
+				Label:           d.Label,
+				Section:         d.Section,
+				Type:            d.Type,
+				Source:          d.Source,
+				RequiresRestart: d.RequiresRestart,
+				Default:         d.Default,
+				Options:         d.Options,
+				Validation:      d.Validation,
+				SortOrder:       d.SortOrder,
+			}
+			settings = append(settings, setting)
+		}
+		sections = append(sections, SettingsSection{
+			ID:          sec.ID,
+			Label:       sec.Label,
+			Title:       sec.Title,
+			Description: sec.Description,
+			Settings:    settings,
+		})
+	}
+
+	if err := s.record(ctx, &actorID, "settings.get_sections", "setting", "", audit.OutcomeSuccess, "settings get_sections loaded", nil); err != nil {
+		return nil, fmt.Errorf("audit settings get_sections: %w", err)
+	}
+
+	return &SettingsSectionsResponse{
+		Sections:        sections,
+		RestartRequired: false, // will be computed from config state
+		PendingChanges:  []string{},
+	}, nil
+}
+
+// UpdateSetting updates a single setting value.
+func (s *SettingsService) UpdateSetting(ctx context.Context, principal auth.Principal, key, value string) (SettingDef, error) {
+	if !principal.Authenticated() {
+		_ = s.record(ctx, nil, "settings.update", "setting", key, audit.OutcomeDenied, "settings update authentication required", map[string]string{"value": value})
+		return SettingDef{}, ErrUnauthenticated
+	}
+	actorID := principal.ID
+	if !s.authorizer.Allowed(principalRoles(principal), rbac.PermissionSettingsManage) {
+		_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeDenied, "settings update permission denied", map[string]string{"value": value})
+		return SettingDef{}, ErrPermissionDenied
+	}
+
+	def, found := FindSettingDef(key)
+	if !found {
+		_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeDenied, "settings update unknown key", map[string]string{"value": value})
+		return SettingDef{}, ErrInvalidInput
+	}
+
+	// Validate the value based on type
+	if err := validateSettingValue(def, value); err != nil {
+		_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeDenied, "settings update validation failed", map[string]string{"value": value, "error": err.Error()})
+		return SettingDef{}, err
+	}
+
+	oldValue, _ := s.settingsStore.GetSetting(ctx, key)
+	if oldValue == "" {
+		oldValue = def.Default
+	}
+
+	// Store the value in app_settings regardless of source.
+	// Config-sourced settings will be written to TOML in a later task.
+	if err := s.settingsStore.SetSetting(ctx, key, value); err != nil {
+		_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update save failed", map[string]string{"value": value})
+		return SettingDef{}, fmt.Errorf("update setting %q: %w", key, err)
+	}
+
+	_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeSuccess, "settings update saved", map[string]string{"old_value": oldValue, "new_value": value})
+
+	return SettingDef{
+		Key:             def.Key,
+		Label:           def.Label,
+		Section:         def.Section,
+		Type:            def.Type,
+		Source:          def.Source,
+		RequiresRestart: def.RequiresRestart,
+		Default:         def.Default,
+		Options:         def.Options,
+		Validation:      def.Validation,
+		SortOrder:       def.SortOrder,
+	}, nil
+}
+
+// validateSettingValue checks a value against its setting definition.
+func validateSettingValue(def SettingDef, value string) error {
+	switch def.Type {
+	case SettingTypeNumber:
+		if def.Validation != "" {
+			return validateNumberWithConstraints(value, def.Validation)
+		}
+		return nil
+	case SettingTypeToggle:
+		if value != "true" && value != "false" {
+			return fmt.Errorf("%w: toggle must be true or false", ErrInvalidInput)
+		}
+		return nil
+	case SettingTypeSelect:
+		if len(def.Options) > 0 {
+			for _, opt := range def.Options {
+				if opt == value {
+					return nil
+				}
+			}
+			return fmt.Errorf("%w: value must be one of %v", ErrInvalidInput, def.Options)
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// validateNumberWithConstraints parses a validation string like "min:1,max:65535" and checks the value.
+func validateNumberWithConstraints(value string, validation string) error {
+	num, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("%w: must be a number", ErrInvalidInput)
+	}
+	// Parse constraints from "min:X,max:Y" or "min:X" or "max:Y"
+	parts := strings.Split(validation, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "min:") {
+			minVal, err := strconv.Atoi(strings.TrimPrefix(part, "min:"))
+			if err == nil && num < minVal {
+				return fmt.Errorf("%w: must be at least %d", ErrInvalidInput, minVal)
+			}
+		} else if strings.HasPrefix(part, "max:") {
+			maxVal, err := strconv.Atoi(strings.TrimPrefix(part, "max:"))
+			if err == nil && num > maxVal {
+				return fmt.Errorf("%w: must be at most %d", ErrInvalidInput, maxVal)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *SettingsService) record(ctx context.Context, actorID *int64, action string, resourceType string, resourceID string, outcome audit.Outcome, message string, metadata map[string]string) error {

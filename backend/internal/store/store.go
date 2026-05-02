@@ -301,6 +301,52 @@ func (s *Store) SetSetting(ctx context.Context, key string, value string) error 
 	return nil
 }
 
+// SettingDefinition is a persisted setting definition row.
+type SettingDefinition struct {
+	Key             string
+	Label           string
+	Section         string
+	Type            string
+	Source          string
+	RequiresRestart bool
+	DefaultValue    string
+	Options         string // JSON array
+	Validation      string
+	SortOrder       int
+}
+
+// GetSettingDefinitions returns all setting definitions ordered by section and sort_order.
+func (s *Store) GetSettingDefinitions(ctx context.Context) ([]SettingDefinition, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT key, label, section, type, source, requires_restart, default_value, options, validation, sort_order FROM setting_definitions ORDER BY section, sort_order`)
+	if err != nil {
+		return nil, fmt.Errorf("query setting definitions: %w", err)
+	}
+	defer rows.Close()
+
+	defs := make([]SettingDefinition, 0)
+	for rows.Next() {
+		var d SettingDefinition
+		var requiresRestart int
+		var options sql.NullString
+		var validation sql.NullString
+		if err := rows.Scan(&d.Key, &d.Label, &d.Section, &d.Type, &d.Source, &requiresRestart, &d.DefaultValue, &options, &validation, &d.SortOrder); err != nil {
+			return nil, fmt.Errorf("scan setting definition: %w", err)
+		}
+		d.RequiresRestart = requiresRestart == 1
+		if options.Valid {
+			d.Options = options.String
+		}
+		if validation.Valid {
+			d.Validation = validation.String
+		}
+		defs = append(defs, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate setting definitions: %w", err)
+	}
+	return defs, nil
+}
+
 // PurgeHistoricalBefore deletes only historical sessions disconnected before cutoff.
 func (s *Store) PurgeHistoricalBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
