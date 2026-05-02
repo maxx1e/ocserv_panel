@@ -41,7 +41,7 @@ Replace the raw list with a card grid showing formatted values.
 ### Frontend changes
 - New `AnalyticsCard.svelte` component: takes a label, value (number), and format hint (bytes, count, percent). Uses existing `formatBytes()` and `formatMetricValue()` from `monitoring.ts`.
 - `+page.svelte`: Replace `Object.entries(summary.analytics)` rendering with a grid of `AnalyticsCard` components, each with appropriate format hints.
-- Cards: Total Sessions (count), Sample Sessions (count), Total Bytes In (bytes), Total Bytes Out (bytes). Optionally add a "Total Traffic" card that sums in+out.
+- Cards: Total Sessions (count), Sample Sessions (count), Total Bytes In (bytes), Total Bytes Out (bytes), Total Traffic (bytes, sum of in+out).
 
 ### Backend changes
 None. The existing `AnalyticsSummary` struct returns raw numbers. Formatting is a presentation concern handled client-side.
