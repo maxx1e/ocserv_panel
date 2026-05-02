@@ -17,6 +17,7 @@ type MonitoringService struct {
 	recorder   audit.Recorder
 	authorizer rbac.Authorizer
 	now        func() time.Time
+	catalog    *metrics.Catalog
 }
 
 // MonitoringOverview is a dashboard-ready snapshot of recent metric series.
@@ -36,13 +37,20 @@ func NewMonitoringService(store metrics.Store, authorizer rbac.Authorizer, now f
 	if len(recorders) > 0 && recorders[0] != nil {
 		recorder = recorders[0]
 	}
+	catalog := metrics.DefaultCatalog()
 
 	return &MonitoringService{
 		store:      store,
 		recorder:   recorder,
 		authorizer: authorizer,
 		now:        now,
+		catalog:    &catalog,
 	}
+}
+
+// SetMetricState updates the state and reason of a metric in the monitoring catalog.
+func (s *MonitoringService) SetMetricState(name metrics.MetricName, state metrics.State, reason string) {
+	s.catalog.SetState(name, state, reason)
 }
 
 // Catalog returns metric definitions visible to dashboard readers.
@@ -55,7 +63,7 @@ func (s *MonitoringService) Catalog(ctx context.Context, principal auth.Principa
 		return nil, fmt.Errorf("audit monitoring catalog: %w", err)
 	}
 
-	return defaultMonitoringCatalog(), nil
+	return s.catalogList(), nil
 }
 
 // Overview returns core dashboard metric series for a validated window.
@@ -94,7 +102,7 @@ func (s *MonitoringService) Overview(ctx context.Context, principal auth.Princip
 	return MonitoringOverview{
 		Window:      window,
 		GeneratedAt: now,
-		Catalog:     defaultMonitoringCatalog(),
+		Catalog:     s.catalogList(),
 		Series:      series,
 	}, nil
 }
@@ -162,11 +170,10 @@ func defaultMonitoringStep(window string) string {
 	}
 }
 
-func defaultMonitoringCatalog() []metrics.MetricDefinition {
-	catalog := metrics.DefaultCatalog()
+func (s *MonitoringService) catalogList() []metrics.MetricDefinition {
 	definitions := make([]metrics.MetricDefinition, 0, len(monitoringCatalogMetrics))
 	for _, name := range monitoringCatalogMetrics {
-		definition, ok := catalog.Find(name)
+		definition, ok := s.catalog.Find(name)
 		if !ok {
 			continue
 		}

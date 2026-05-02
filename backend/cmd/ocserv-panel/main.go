@@ -69,9 +69,29 @@ func main() {
 		}
 	}()
 	monitoringService := app.NewMonitoringService(metricStore, rbac.NewDefaultAuthorizer(), nil, recorder)
+	collectors := configuredCollectors(monitoring.OSReader{})
+
+	// Auto-discover VPN interface for interface-level metrics.
+	vpnIface, vpnSource, err := monitoring.DiscoverVPNInterface()
+	if err != nil {
+		slog.Warn("vpn interface discovery failed", "error", err)
+	} else if vpnIface != "" {
+		slog.Info("vpn interface discovered", "interface", vpnIface, "source", vpnSource)
+		collectors = append(collectors, monitoring.NewInterfaceCollector(
+			monitoring.OSReader{},
+			vpnIface,
+			metrics.MetricVPNInterfaceRXBytes,
+			metrics.MetricVPNInterfaceTXBytes,
+		))
+		monitoringService.SetMetricState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
+		monitoringService.SetMetricState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
+	} else {
+		slog.Info("no vpn interface discovered; vpn metrics will remain unavailable")
+	}
+
 	collectorService := monitoring.NewCollectorService(
 		metricStore,
-		configuredCollectors(monitoring.OSReader{}),
+		collectors,
 		15*time.Second,
 		slog.Default(),
 		nil,

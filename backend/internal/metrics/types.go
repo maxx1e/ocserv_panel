@@ -97,6 +97,16 @@ func (c Catalog) Find(name MetricName) (MetricDefinition, bool) {
 	return metric, ok
 }
 
+// SetState updates the state and reason of a metric in the catalog.
+// If the metric does not exist in the catalog, the call is a no-op.
+func (c *Catalog) SetState(name MetricName, state State, reason string) {
+	if def, ok := c.metrics[name]; ok {
+		def.State = state
+		def.Reason = reason
+		c.metrics[name] = def
+	}
+}
+
 type Sample struct {
 	Name      MetricName
 	Labels    map[string]string
