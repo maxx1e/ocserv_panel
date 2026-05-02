@@ -1,3 +1,9 @@
+// Package config isolates the third-party TOML library in this file.
+// Switching TOML libraries requires changing only toml_compat.go.
+
+// toml_compat.go isolates the third-party TOML dependency.
+// Switching TOML libraries requires changing only this file.
+
 package config
 
 import (
@@ -18,11 +24,11 @@ func marshalTOML(cfg Config) ([]byte, error) {
 func splitHostPort(addr string) (string, int, error) {
 	host, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
-		return addr, 8080, err
+		return addr, DefaultPort, err
 	}
 	port, atoiErr := strconv.Atoi(portStr)
 	if atoiErr != nil {
-		return host, 8080, atoiErr
+		return host, DefaultPort, atoiErr
 	}
 	return host, port, nil
 }

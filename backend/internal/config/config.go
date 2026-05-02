@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 )
 
+// DefaultPort is the default HTTP port for the web server.
+const DefaultPort = 8080
+
 // GeneralConfig holds general application settings.
 type GeneralConfig struct {
 	AppName  string `toml:"app_name"`
@@ -103,7 +106,7 @@ func Defaults() Config {
 		},
 		Web: WebConfig{
 			Host:    "127.0.0.1",
-			Port:    8080,
+			Port:    DefaultPort,
 			BaseURL: "http://localhost:8080",
 		},
 		Security: SecurityConfig{
@@ -145,42 +148,42 @@ func Load(path string) (Config, error) {
 func Save(cfg Config, path string) error {
 	data, err := marshalTOML(cfg)
 	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+		return fmt.Errorf("marshal config for %s: %w", path, err)
 	}
 	// Backup existing file
 	if _, statErr := os.Stat(path); statErr == nil {
 		backup := path + ".bak"
 		existing, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return fmt.Errorf("read existing config for backup: %w", readErr)
+			return fmt.Errorf("read existing config %s for backup: %w", path, readErr)
 		}
 		if writeErr := os.WriteFile(backup, existing, 0600); writeErr != nil {
-			return fmt.Errorf("write config backup: %w", writeErr)
+			return fmt.Errorf("write config backup %s: %w", backup, writeErr)
 		}
 	}
 	// Atomic write: temp file + rename
 	dir := filepath.Dir(path)
 	tmp, tmpErr := os.CreateTemp(dir, "config-*.tmp")
 	if tmpErr != nil {
-		return fmt.Errorf("create temp file: %w", tmpErr)
+		return fmt.Errorf("create temp file in %s: %w", dir, tmpErr)
 	}
 	tmpName := tmp.Name()
 	if _, writeErr := tmp.Write(data); writeErr != nil {
 		tmp.Close()
 		os.Remove(tmpName)
-		return fmt.Errorf("write temp config: %w", writeErr)
+		return fmt.Errorf("write temp config %s: %w", tmpName, writeErr)
 	}
 	if closeErr := tmp.Close(); closeErr != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("close temp config: %w", closeErr)
+		return fmt.Errorf("close temp config %s: %w", tmpName, closeErr)
 	}
 	if chmodErr := os.Chmod(tmpName, 0600); chmodErr != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("chmod temp config: %w", chmodErr)
+		return fmt.Errorf("chmod temp config %s: %w", tmpName, chmodErr)
 	}
 	if renameErr := os.Rename(tmpName, path); renameErr != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("rename temp config: %w", renameErr)
+		return fmt.Errorf("rename temp config to %s: %w", path, renameErr)
 	}
 	return nil
 }
@@ -206,6 +209,8 @@ func Validate(cfg Config) error {
 }
 
 // MergeEnv overrides config values from environment variables.
+// Supported env vars: OCSERV_PANEL_ADDR (host:port), OCSERV_PANEL_DB_DSN,
+// OCSERV_PANEL_COOKIE_SECURE (bool), OCSERV_PANEL_DATA_DIR, OCSERV_PANEL_CONFIG_PATH.
 func MergeEnv(cfg *Config, getenv func(string) string) {
 	if v := getenv("OCSERV_PANEL_ADDR"); v != "" {
 		cfg.Web.Host = hostFromAddr(v)
@@ -217,10 +222,10 @@ func MergeEnv(cfg *Config, getenv func(string) string) {
 	if v := getenv("OCSERV_PANEL_COOKIE_SECURE"); v != "" {
 		cfg.Security.CSRFEnabled = isTruthy(v)
 	}
-	if v := getenv("OCSERV_PANEL_TSDB_PATH"); v != "" {
+	if v := getenv("OCSERV_PANEL_DATA_DIR"); v != "" {
 		cfg.Installation.DataDir = v
 	}
-	if v := getenv("OCSERV_PANEL_MIGRATIONS_DIR"); v != "" {
+	if v := getenv("OCSERV_PANEL_CONFIG_PATH"); v != "" {
 		cfg.Installation.ConfigPath = v
 	}
 }
@@ -236,7 +241,7 @@ func hostFromAddr(addr string) string {
 func portFromAddr(addr string) int {
 	_, port, err := splitHostPort(addr)
 	if err != nil {
-		return 8080
+		return DefaultPort
 	}
 	return port
 }

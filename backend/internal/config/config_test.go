@@ -11,8 +11,8 @@ func TestDefaultsReturnsValidConfig(t *testing.T) {
 	if cfg.General.AppName != "ocserv Panel" {
 		t.Fatalf("General.AppName = %q, want %q", cfg.General.AppName, "ocserv Panel")
 	}
-	if cfg.Web.Port != 8080 {
-		t.Fatalf("Web.Port = %d, want 8080", cfg.Web.Port)
+	if cfg.Web.Port != DefaultPort {
+		t.Fatalf("Web.Port = %d, want %d", cfg.Web.Port, DefaultPort)
 	}
 	if cfg.Database.MaxOpenConns != 5 {
 		t.Fatalf("Database.MaxOpenConns = %d, want 5", cfg.Database.MaxOpenConns)
