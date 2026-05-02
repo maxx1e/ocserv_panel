@@ -22,7 +22,7 @@ const (
 	SettingSourceDatabase SettingSource = "database"
 )
 
-// SettingDef describes a single setting's metadata.
+// SettingDef describes a single setting's metadata and current value.
 type SettingDef struct {
 	Key             string        `json:"key"`
 	Label           string        `json:"label"`
@@ -31,6 +31,7 @@ type SettingDef struct {
 	Source          SettingSource `json:"source"`
 	RequiresRestart bool          `json:"requires_restart"`
 	Default         string        `json:"default"`
+	Value           string        `json:"value"`
 	Options         []string      `json:"options,omitempty"`
 	Validation      string        `json:"validation,omitempty"`
 	SortOrder       int           `json:"sort_order"`

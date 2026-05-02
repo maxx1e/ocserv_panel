@@ -105,7 +105,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
+		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

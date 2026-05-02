@@ -619,6 +619,7 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 			dashboardService,
 			monitoringService,
 			settingsService,
+			rbac.NewDefaultAuthorizer(),
 			AppOptions{CookieSecure: cookieSecure},
 		),
 	}

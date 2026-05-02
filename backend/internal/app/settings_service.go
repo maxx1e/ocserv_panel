@@ -167,6 +167,17 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 		defs := defsBySection[sec.ID]
 		settings := make([]SettingDef, 0, len(defs))
 		for _, d := range defs {
+			value := d.Default
+			if d.Source == SettingSourceDatabase {
+				stored, err := s.settingsStore.GetSetting(ctx, d.Key)
+				if err == nil && stored != "" {
+					value = stored
+				}
+			}
+			// Mask password-type values
+			if d.Type == SettingTypePassword && len(value) > 4 {
+				value = "****" + value[len(value)-4:]
+			}
 			setting := SettingDef{
 				Key:             d.Key,
 				Label:           d.Label,
@@ -175,6 +186,7 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 				Source:          d.Source,
 				RequiresRestart: d.RequiresRestart,
 				Default:         d.Default,
+				Value:           value,
 				Options:         d.Options,
 				Validation:      d.Validation,
 				SortOrder:       d.SortOrder,
@@ -247,6 +259,7 @@ func (s *SettingsService) UpdateSetting(ctx context.Context, principal auth.Prin
 		Source:          def.Source,
 		RequiresRestart: def.RequiresRestart,
 		Default:         def.Default,
+		Value:           value,
 		Options:         def.Options,
 		Validation:      def.Validation,
 		SortOrder:       def.SortOrder,

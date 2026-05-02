@@ -10,6 +10,7 @@ import (
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/metrics"
+	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
 
@@ -38,6 +39,7 @@ type App struct {
 	dashboardService  *app.DashboardService
 	monitoringService *app.MonitoringService
 	settingsService   *app.SettingsService
+	authorizer        rbac.Authorizer
 	cookieSecure      bool
 	now               func() time.Time
 }
@@ -163,6 +165,7 @@ func NewAppRouter(
 	dashboardService *app.DashboardService,
 	monitoringService *app.MonitoringService,
 	settingsService *app.SettingsService,
+	authorizer rbac.Authorizer,
 	opts AppOptions,
 ) http.Handler {
 	now := opts.Now
@@ -174,6 +177,7 @@ func NewAppRouter(
 		dashboardService:  dashboardService,
 		monitoringService: monitoringService,
 		settingsService:   settingsService,
+		authorizer:        authorizer,
 		cookieSecure:      opts.CookieSecure,
 		now:               now,
 	}

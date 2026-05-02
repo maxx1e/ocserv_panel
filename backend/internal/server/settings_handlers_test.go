@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -139,9 +138,7 @@ func TestRestartStatusReturnsNotRequired(t *testing.T) {
 
 	assertStatus(t, rec, http.StatusOK)
 	var body map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode restart status response: %v", err)
-	}
+	decodeJSON(t, rec, &body)
 	rr, ok := body["restart_required"].(bool)
 	if !ok || rr != false {
 		t.Fatalf("expected restart_required=false, got %v", body["restart_required"])
@@ -153,4 +150,98 @@ func TestRestartStatusReturnsNotRequired(t *testing.T) {
 	if len(pc) != 0 {
 		t.Fatalf("expected empty pending_changes, got %v", pc)
 	}
+}
+
+func TestRestartStatusViewerCanRead(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	h.createViewer(t, "testviewer", "viewerpass123")
+	cookie := h.login(t, "testviewer", "viewerpass123")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/settings/restart-status", nil, cookie)
+
+	assertStatus(t, rec, http.StatusOK)
+}
+
+func TestRestartRequiresAuth(t *testing.T) {
+	h := newTestHarness(t)
+
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/settings/restart", nil, "")
+
+	assertStatus(t, rec, http.StatusUnauthorized)
+	assertJSONField(t, rec, "error", "authentication required")
+}
+
+func TestRestartRequiresOwner(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	h.createViewer(t, "testviewer", "viewerpass123")
+	cookie := h.login(t, "testviewer", "viewerpass123")
+
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/settings/restart", nil, cookie)
+
+	assertStatus(t, rec, http.StatusForbidden)
+	assertJSONField(t, rec, "error", "permission denied")
+}
+
+func TestRestartReturnsPlaceholder(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/settings/restart", nil, cookie)
+
+	assertStatus(t, rec, http.StatusOK)
+	assertJSONField(t, rec, "ok", true)
+}
+
+func TestSettingsSectionsGetIncludesValues(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	// Set a database-sourced setting value first
+	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/logs.level", map[string]string{"value": "debug"}, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	// Now get sections and verify the value is present
+	rec = serveAPI(t, h.router, http.MethodGet, "/api/settings", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+	sections, ok := body["sections"].([]any)
+	if !ok {
+		t.Fatalf("sections is not an array in %v", body)
+	}
+	// Find the logs section and verify it has a value field
+	for _, sec := range sections {
+		secMap, ok := sec.(map[string]any)
+		if !ok {
+			continue
+		}
+		if secMap["id"] != "logs" {
+			continue
+		}
+		settings, ok := secMap["settings"].([]any)
+		if !ok {
+			t.Fatalf("settings is not an array in logs section")
+		}
+		for _, s := range settings {
+			sMap, ok := s.(map[string]any)
+			if !ok {
+				continue
+			}
+			if sMap["key"] == "logs.level" {
+				if _, hasValue := sMap["value"]; !hasValue {
+					t.Fatalf("logs.level setting missing 'value' field in %v", sMap)
+				}
+				if sMap["value"] != "debug" {
+					t.Fatalf("expected logs.level value='debug', got %v", sMap["value"])
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("logs.level setting not found in sections")
 }
