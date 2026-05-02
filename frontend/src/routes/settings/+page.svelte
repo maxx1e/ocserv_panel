@@ -1,80 +1,199 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getWebUISettings, type WebUISettings } from '$lib/api';
+  import {
+    getSettingsSections,
+    updateSettingByKey,
+    getRestartStatus,
+    triggerRestart,
+    type SettingsSectionsResponse,
+    type SettingsSection
+  } from '$lib/api';
+  import SettingsNav from '$lib/components/settings/SettingsNav.svelte';
+  import RestartBanner from '$lib/components/settings/RestartBanner.svelte';
+  import SettingsSectionComponent from '$lib/components/settings/SettingsSection.svelte';
 
   let loading = $state(true);
   let error = $state('');
-  let settings = $state<WebUISettings | null>(null);
+  let data = $state<SettingsSectionsResponse | null>(null);
+  let savingKey = $state<string | null>(null);
+  let restarting = $state(false);
+  let restartError = $state('');
 
-  const cookieMode = $derived(settings?.cookieSecure ? 'Secure cookies' : 'HTTP-compatible cookies');
-  const requestTransport = $derived(settings?.transport === 'https' ? 'HTTPS' : 'HTTP');
+  let activeSection = $state('');
+  const sectionIds = $derived(data?.sections.map((s) => s.id) ?? []);
 
-  onMount(async () => {
+  let restartPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  onMount(() => {
+    loadSettings();
+
+    // Set up intersection observer for section tracking
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            activeSection = entry.target.id;
+          }
+        }
+      },
+      { rootMargin: '-80px 0px -60% 0px', threshold: 0 }
+    );
+
+    // Observe all sections after they render
+    requestAnimationFrame(() => {
+      for (const id of sectionIds) {
+        const el = document.getElementById(id);
+        if (el) observer.observe(el);
+      }
+    });
+
+    return () => {
+      observer.disconnect();
+      if (restartPollInterval) clearInterval(restartPollInterval);
+    };
+  });
+
+  // Poll restart status when restart is required
+  $effect(() => {
+    if (restartPollInterval) {
+      clearInterval(restartPollInterval);
+      restartPollInterval = null;
+    }
+
+    if (data?.restart_required && !restarting) {
+      restartPollInterval = setInterval(() => {
+        pollRestartStatus();
+      }, 30_000);
+    }
+
+    return () => {
+      if (restartPollInterval) {
+        clearInterval(restartPollInterval);
+        restartPollInterval = null;
+      }
+    };
+  });
+
+  async function loadSettings() {
+    loading = true;
+    error = '';
     try {
-      settings = await getWebUISettings();
-    } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Unable to load Web UI settings.';
+      data = await getSettingsSections();
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Unable to load settings.';
     } finally {
       loading = false;
     }
-  });
+  }
+
+  async function handleUpdate(key: string, value: string) {
+    savingKey = key;
+    try {
+      await updateSettingByKey(key, value);
+      // Refresh settings to get updated state
+      data = await getSettingsSections();
+    } catch (e) {
+      throw e;
+    } finally {
+      savingKey = null;
+    }
+  }
+
+  async function pollRestartStatus() {
+    try {
+      const status = await getRestartStatus();
+      if (!status.restart_required) {
+        // Restart is no longer needed, refresh
+        data = await getSettingsSections();
+      }
+    } catch {
+      // Ignore polling errors
+    }
+  }
+
+  async function handleRestart() {
+    const confirmed = confirm(
+      'Are you sure you want to restart the service? All active VPN sessions will be disconnected.'
+    );
+    if (!confirmed) return;
+
+    restarting = true;
+    restartError = '';
+
+    // Poll status before sending restart
+    await pollRestartStatus();
+
+    try {
+      await triggerRestart();
+      // Poll for restart completion — page reloads when service is back
+      const finalPoll = setInterval(async () => {
+        try {
+          const status = await getRestartStatus();
+          if (!status.restart_required) {
+            clearInterval(finalPoll);
+            window.location.reload();
+          }
+        } catch {
+          // Keep polling
+        }
+      }, 3_000);
+
+      // Safety: stop polling after 2 minutes
+      setTimeout(() => {
+        clearInterval(finalPoll);
+        restarting = false;
+        restartError =
+          'The service did not come back within 2 minutes. Check the service manually.';
+      }, 120_000);
+    } catch (e) {
+      restarting = false;
+      restartError =
+        e instanceof Error ? e.message : 'Restart failed. Check service logs.';
+    }
+  }
 </script>
 
 <section class="page-stack">
   <div class="hero panel">
-    <p class="eyebrow">Settings</p>
-    <h2>Web UI transport</h2>
+    <p class="eyebrow">Configure</p>
+    <h2>Settings</h2>
     <p class="muted">
-      This page shows how the backend is currently configured for HTTP or HTTPS-oriented login.
-      The setting is read-only in this slice and is controlled by the backend environment.
+      Adjust ocserv and panel configuration. Changes to config-source settings require a service
+      restart; database-source changes take effect immediately.
     </p>
   </div>
 
   {#if loading}
-    <div class="panel">Loading Web UI settings…</div>
+    <div class="panel">Loading settings…</div>
   {:else if error}
     <div class="panel error-text">{error}</div>
-  {:else if settings}
-    {#if settings.warning}
+  {:else if data}
+    {#if restartError}
       <div class="callout warning">
-        <strong>Transport warning</strong>
-        <p>{settings.warning}</p>
+        <strong>Restart failed</strong>
+        <p>{restartError}</p>
       </div>
     {/if}
 
-    <div class="grid cards">
-      <article class="panel stat-card">
-        <span>Cookie mode</span>
-        <strong>{cookieMode}</strong>
-        <small>{settings.cookieSecure ? 'Session cookies require HTTPS.' : 'Session cookies can be sent over HTTP.'}</small>
-      </article>
-      <article class="panel stat-card">
-        <span>Current request</span>
-        <strong>{requestTransport}</strong>
-        <small>{settings.requestSecure ? 'The backend sees this request as encrypted.' : 'The backend sees this request as plain HTTP.'}</small>
-      </article>
-      <article class="panel stat-card">
-        <span>HTTP login</span>
-        <strong>{settings.httpLoginAllowed ? 'Allowed' : 'Blocked by Secure cookie'}</strong>
-        <small>{settings.httpLoginAllowed ? 'Use only on trusted networks or for testing.' : 'Disable Secure cookies only for trusted HTTP use.'}</small>
-      </article>
-    </div>
+    <RestartBanner
+      pendingChanges={data.pending_changes}
+      onRestart={handleRestart}
+      {restarting}
+    />
 
-    <section class="panel">
-      <h3>Environment control</h3>
-      <p class="muted">Restart the backend after changing this environment variable.</p>
-      <dl class="definition-grid">
-        <div>
-          <dt>Allow HTTP login</dt>
-          <dd><code>OCSERV_PANEL_COOKIE_SECURE=false</code></dd>
-        </div>
-        <div>
-          <dt>HTTPS-oriented default</dt>
-          <dd>Unset <code>OCSERV_PANEL_COOKIE_SECURE</code>, or set it to <code>true</code>.</dd>
-        </div>
-      </dl>
-    </section>
+    <SettingsNav
+      sections={data.sections}
+      {activeSection}
+    />
+
+    {#each data.sections as section (section.id)}
+      <SettingsSectionComponent
+        {section}
+        onUpdate={handleUpdate}
+        {savingKey}
+      />
+    {/each}
   {:else}
-    <div class="panel error-text">Web UI settings were not returned.</div>
+    <div class="panel error-text">Settings data was not returned.</div>
   {/if}
 </section>

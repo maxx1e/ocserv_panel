@@ -419,6 +419,172 @@ th {
   margin: 0;
 }
 
+/* Settings page */
+.settings-nav {
+  display: flex;
+  gap: 0.3rem;
+  overflow-x: auto;
+  padding: 0.5rem 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #f6f8fb;
+}
+
+.settings-nav a {
+  background: #ffffff;
+  border: 1px solid #e4e7ec;
+  border-radius: 2rem;
+  color: #475467;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.45rem 0.85rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.settings-nav a:hover {
+  background: #f2f4f7;
+  color: #101828;
+}
+
+.settings-nav a.active {
+  background: #175cd3;
+  border-color: #175cd3;
+  color: #ffffff;
+}
+
+.settings-section {
+  scroll-margin-top: 4rem;
+}
+
+.setting-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.setting-field .field-header {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.setting-field .field-label {
+  color: #344054;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.setting-field .restart-badge {
+  color: #f79009;
+  font-size: 0.8rem;
+  margin-left: 0.15rem;
+}
+
+.setting-field .field-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.setting-field input,
+.setting-field select {
+  border: 1px solid #d0d5dd;
+  border-radius: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.9rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-field input:focus,
+.setting-field select:focus {
+  border-color: #175cd3;
+  outline: 2px solid rgba(23, 92, 211, 0.2);
+}
+
+.setting-field .field-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.setting-field .field-actions .button {
+  font-size: 0.8rem;
+  padding: 0.45rem 0.7rem;
+}
+
+.setting-field .saving {
+  color: #667085;
+  font-size: 0.85rem;
+}
+
+.setting-field .error {
+  color: #b42318;
+  font-size: 0.8rem;
+}
+
+.readonly-value {
+  color: #101828;
+  font-size: 0.9rem;
+  padding: 0.45rem 0;
+}
+
+.toggle-switch {
+  background: #d0d5dd;
+  border: 0;
+  border-radius: 1rem;
+  cursor: pointer;
+  height: 1.5rem;
+  padding: 0;
+  position: relative;
+  width: 2.75rem;
+  transition: background 0.2s;
+}
+
+.toggle-switch.active {
+  background: #175cd3;
+}
+
+.toggle-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.toggle-thumb {
+  background: #ffffff;
+  border-radius: 50%;
+  display: block;
+  height: 1.15rem;
+  left: 0.2rem;
+  position: absolute;
+  top: 0.175rem;
+  transition: left 0.2s;
+  width: 1.15rem;
+}
+
+.toggle-switch.active .toggle-thumb {
+  left: calc(100% - 1.35rem);
+}
+
+.multi-checkbox-group {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.multi-checkbox-group label {
+  align-items: center;
+  color: #344054;
+  display: flex;
+  font-weight: 400;
+  gap: 0.5rem;
+}
+
+.multi-checkbox-group input[type="checkbox"] {
+  accent-color: #175cd3;
+  width: 1rem;
+  height: 1rem;
+}
+
 @media (max-width: 760px) {
   .shell {
     grid-template-columns: 1fr;
