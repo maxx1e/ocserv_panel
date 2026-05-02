@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
+  import AnalyticsCard from '$lib/components/monitoring/AnalyticsCard.svelte';
   import MetricCard from '$lib/components/monitoring/MetricCard.svelte';
   import TimeSeriesChart from '$lib/components/monitoring/TimeSeriesChart.svelte';
   import UnavailableMetric from '$lib/components/monitoring/UnavailableMetric.svelte';
@@ -16,7 +17,7 @@
     type MonitoringWindow,
     type Principal
   } from '$lib/api';
-  import { formatMetricValue, latestPoint, metricByName, seriesByMetric } from '$lib/monitoring';
+  import { formatBytes, formatMetricValue, latestPoint, metricByName, seriesByMetric } from '$lib/monitoring';
 
   const MONITORING_WINDOWS: MonitoringWindow[] = ['15m', '1h', '6h', '24h'];
   const HOST_CPU = 'host_cpu_utilization';
@@ -54,13 +55,24 @@
   let monitoringLoading = $state(false);
   let monitoringError = $state('');
   let monitoringRequestId = 0;
+  let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
   const sampleDataMessage = $derived(sampleDataText(summary?.sampleData));
   const recentAudit = $derived(summary?.recentAudit ?? []);
-  const analyticsRows = $derived(summary?.analytics ? Object.entries(summary.analytics) : []);
 
   onMount(() => {
     void loadDashboard();
+    refreshInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void reloadMonitoring();
+      }
+    }, 15_000);
+  });
+
+  onDestroy(() => {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+    }
   });
 
   async function loadDashboard() {
@@ -142,11 +154,6 @@
     return 'No sample data reported.';
   }
 
-  function formatValue(value: unknown): string {
-    if (value === null || value === undefined) return '—';
-    if (typeof value === 'object') return JSON.stringify(value);
-    return String(value);
-  }
 </script>
 
 <section class="page-stack">
@@ -243,15 +250,14 @@
 
     <section class="panel">
       <h3>Analytics summary</h3>
-      {#if analyticsRows.length > 0}
-        <dl class="definition-grid">
-          {#each analyticsRows as [key, value]}
-            <div>
-              <dt>{key}</dt>
-              <dd>{formatValue(value)}</dd>
-            </div>
-          {/each}
-        </dl>
+      {#if summary?.analytics}
+        <div class="grid cards">
+          <AnalyticsCard label="Total sessions" value={formatMetricValue('totalSessions', summary.analytics.totalSessions as number ?? undefined)} unit="sessions" />
+          <AnalyticsCard label="Sample sessions" value={formatMetricValue('sampleSessions', summary.analytics.sampleSessions as number ?? undefined)} unit="sessions" />
+          <AnalyticsCard label="Total received" value={formatBytes(summary.analytics.totalBytesIn as number ?? undefined)} />
+          <AnalyticsCard label="Total sent" value={formatBytes(summary.analytics.totalBytesOut as number ?? undefined)} />
+          <AnalyticsCard label="Total traffic" value={formatBytes(((summary.analytics.totalBytesIn as number ?? 0) + (summary.analytics.totalBytesOut as number ?? 0)))} />
+        </div>
       {:else}
         <p class="muted">No analytics summary returned yet.</p>
       {/if}

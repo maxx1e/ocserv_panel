@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import TimeSeriesChart from '$lib/components/monitoring/TimeSeriesChart.svelte';
   import UnavailableMetric from '$lib/components/monitoring/UnavailableMetric.svelte';
   import WindowSelector from '$lib/components/monitoring/WindowSelector.svelte';
@@ -7,16 +7,19 @@
     getHistoryAnalytics,
     getMe,
     getMonitoringOverview,
+    getSettings,
     getSetupStatus,
     hasOwnerRole,
     principalFromAuth,
     purgeHistory,
+    updateSetting,
     type HistoricalSession,
     type HistoryAnalytics,
     type MonitoringOverview,
     type MonitoringSeries,
     type MonitoringWindow,
-    type Principal
+    type Principal,
+    type Setting
   } from '$lib/api';
   import { metricByName, seriesByMetric } from '$lib/monitoring';
 
@@ -63,6 +66,11 @@
   let confirmation = $state('');
   let purgeSubmitting = $state(false);
   let monitoringRequestId = 0;
+  let refreshInterval: ReturnType<typeof setInterval> | null = null;
+  let retentionSetting = $state<string>('365');
+  let settingsLoading = $state(false);
+  let settingsError = $state('');
+  let settingsSuccess = $state('');
 
   const isOwner = $derived(hasOwnerRole(principal));
   const sessions = $derived(analytics?.recentSessions ?? analytics?.sessions ?? []);
@@ -72,6 +80,17 @@
 
   onMount(() => {
     void loadHistory();
+    refreshInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void reloadMonitoring();
+      }
+    }, 15_000);
+  });
+
+  onDestroy(() => {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+    }
   });
 
   async function loadHistory() {
@@ -85,11 +104,39 @@
       principal = principalFromAuth(await getMe());
       analytics = await getHistoryAnalytics();
       void reloadMonitoring(monitoringWindow);
+      void loadSettings();
     } catch (caught) {
       error = caught instanceof Error ? caught.message : 'Unable to load historical analytics.';
       principal = null;
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadSettings() {
+    settingsLoading = true;
+    try {
+      const response = await getSettings();
+      const retention = response.settings.find((s: Setting) => s.key === 'history.retention_days');
+      if (retention) {
+        retentionSetting = retention.value;
+      }
+    } catch {
+      // Settings are optional — don't block the page
+    } finally {
+      settingsLoading = false;
+    }
+  }
+
+  async function handleSaveRetention(event: SubmitEvent) {
+    event.preventDefault();
+    settingsError = '';
+    settingsSuccess = '';
+    try {
+      await updateSetting('history.retention_days', retentionSetting);
+      settingsSuccess = 'Retention setting saved.';
+    } catch (caught) {
+      settingsError = caught instanceof Error ? caught.message : 'Failed to save retention setting.';
     }
   }
 
@@ -299,6 +346,31 @@
         </div>
       {:else}
         <p class="muted">No historical sessions returned yet.</p>
+      {/if}
+    </section>
+
+    <section class="panel">
+      <h3>Housekeeping</h3>
+      <p class="muted">Configure automatic data retention. Old records are purged daily based on the retention period.</p>
+      {#if isOwner}
+        <form class="form-stack" onsubmit={handleSaveRetention}>
+          <label>
+            Auto-delete records older than
+            <select bind:value={retentionSetting}>
+              <option value="30">30 days</option>
+              <option value="90">90 days</option>
+              <option value="180">180 days</option>
+              <option value="365">365 days (default)</option>
+            </select>
+          </label>
+          {#if settingsError}<p class="error-text">{settingsError}</p>{/if}
+          {#if settingsSuccess}<p class="success-text">{settingsSuccess}</p>{/if}
+          <button class="button" type="submit" disabled={settingsLoading}>
+            {settingsLoading ? 'Saving…' : 'Save retention setting'}
+          </button>
+        </form>
+      {:else}
+        <p class="muted">Your role can view analytics but cannot change retention settings.</p>
       {/if}
     </section>
 

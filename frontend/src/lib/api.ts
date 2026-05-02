@@ -272,6 +272,26 @@ export function purgeHistory(retentionDays: 30 | 90 | 180 | 365, confirmation: '
   });
 }
 
+export type Setting = {
+  key: string;
+  value: string;
+};
+
+export type SettingsResponse = {
+  settings: Setting[];
+};
+
+export function getSettings(): Promise<SettingsResponse> {
+  return apiFetch<SettingsResponse>('/api/settings');
+}
+
+export function updateSetting(key: string, value: string): Promise<Setting> {
+  return apiFetch<Setting>(`/api/settings/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: { value }
+  });
+}
+
 export function principalFromAuth(auth: AuthSummary | null): Principal | null {
   if (!auth) return null;
   const principal = auth.principal ?? auth.user;
