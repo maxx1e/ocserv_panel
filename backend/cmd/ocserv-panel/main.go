@@ -53,7 +53,6 @@ func main() {
 	housekeepingScheduler := app.NewHousekeepingScheduler(
 		persistence,
 		recorder,
-		rbac.NewDefaultAuthorizer(),
 		func(ctx context.Context, retentionDays int) (int64, error) {
 			cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
 			return persistence.PurgeHistoricalBefore(ctx, cutoff)

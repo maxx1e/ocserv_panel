@@ -23,7 +23,7 @@ func TestHousekeepingSchedulerPurgesOnSchedule(t *testing.T) {
 		return 0, nil
 	}
 
-	scheduler := NewHousekeepingScheduler(s, audit.NoopRecorder{}, rbac.NewDefaultAuthorizer(), mockPurger, 50*time.Millisecond)
+	scheduler := NewHousekeepingScheduler(s, audit.NoopRecorder{}, mockPurger, 50*time.Millisecond)
 
 	// Set retention to 365 days
 	settingsService := NewSettingsService(s, audit.NoopRecorder{}, rbac.NewDefaultAuthorizer())
@@ -53,7 +53,7 @@ func TestHousekeepingSchedulerUsesConfiguredRetention(t *testing.T) {
 		return 0, nil
 	}
 
-	scheduler := NewHousekeepingScheduler(s, audit.NoopRecorder{}, rbac.NewDefaultAuthorizer(), mockPurger, time.Hour)
+	scheduler := NewHousekeepingScheduler(s, audit.NoopRecorder{}, mockPurger, time.Hour)
 
 	// Default retention should be 365
 	days := scheduler.GetRetentionDays(ctx)
@@ -72,7 +72,7 @@ func TestHousekeepingSchedulerStopsOnContextCancel(t *testing.T) {
 		return 0, nil
 	}
 
-	scheduler := NewHousekeepingScheduler(s, audit.NoopRecorder{}, rbac.NewDefaultAuthorizer(), mockPurger, 50*time.Millisecond)
+	scheduler := NewHousekeepingScheduler(s, audit.NoopRecorder{}, mockPurger, 50*time.Millisecond)
 
 	done := make(chan struct{})
 	go func() {
