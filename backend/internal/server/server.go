@@ -449,6 +449,7 @@ func (a *App) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
+		_, _ = a.settingsService.GetAll(r.Context(), auth.Principal{})
 		return
 	}
 	settings, err := a.settingsService.GetAll(r.Context(), principal)
@@ -469,6 +470,7 @@ func (a *App) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
+		_ = a.settingsService.SetRetentionDays(r.Context(), auth.Principal{}, 0)
 		return
 	}
 	// Extract key from path: /api/settings/{key}
