@@ -48,6 +48,21 @@ func main() {
 	authService := app.NewAuthService(persistence, recorder)
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer())
 	settingsService := app.NewSettingsService(persistence, recorder, rbac.NewDefaultAuthorizer())
+
+	// Create housekeeping scheduler
+	housekeepingScheduler := app.NewHousekeepingScheduler(
+		persistence,
+		recorder,
+		rbac.NewDefaultAuthorizer(),
+		func(ctx context.Context, retentionDays int) (int64, error) {
+			cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
+			return persistence.PurgeHistoricalBefore(ctx, cutoff)
+		},
+		24*time.Hour,
+		app.HousekeepingWithLogger(slog.Default()),
+	)
+	go housekeepingScheduler.Run(ctx)
+
 	metricStore := openMetricStore()
 	defer func() {
 		if err := metricStore.Close(); err != nil {
