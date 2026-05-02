@@ -111,7 +111,7 @@ A new `SettingsService` provides CRUD for app settings stored in `app_settings`,
 - Keep existing manual purge form as a "Purge Now" action
 
 ### Database
-Uses existing `app_settings` table. New row: `history.retention_days` = `"365"` (default). No migration needed — the table already supports arbitrary key-value pairs.
+Uses existing `app_settings` table. New row: `history.retention_days` = `"30"` (default). No migration needed — the table already supports arbitrary key-value pairs.
 
 ---
 

@@ -25,3 +25,6 @@ frontend/.vite/
 
 # OpenCode local dependencies
 .opencode/node_modules/
+
+# Superpowers visual brainstorming artifacts
+.superpowers/

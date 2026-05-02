@@ -72,21 +72,26 @@ func main() {
 	collectors := configuredCollectors(monitoring.OSReader{})
 
 	// Auto-discover VPN interface for interface-level metrics.
-	vpnIface, vpnSource, err := monitoring.DiscoverVPNInterface()
-	if err != nil {
-		slog.Warn("vpn interface discovery failed", "error", err)
-	} else if vpnIface != "" {
-		slog.Info("vpn interface discovered", "interface", vpnIface, "source", vpnSource)
-		collectors = append(collectors, monitoring.NewInterfaceCollector(
-			monitoring.OSReader{},
-			vpnIface,
-			metrics.MetricVPNInterfaceRXBytes,
-			metrics.MetricVPNInterfaceTXBytes,
-		))
-		monitoringService.SetMetricState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
-		monitoringService.SetMetricState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
+	// Skip discovery if OCSERV_PANEL_VPN_IFACE is explicitly set.
+	if strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")) == "" {
+		vpnIface, vpnSource, err := monitoring.DiscoverVPNInterface()
+		if err != nil {
+			slog.Warn("vpn interface discovery failed", "error", err)
+		} else if vpnIface != "" {
+			slog.Info("vpn interface discovered", "interface", vpnIface, "source", vpnSource)
+			collectors = append(collectors, monitoring.NewInterfaceCollector(
+				monitoring.OSReader{},
+				vpnIface,
+				metrics.MetricVPNInterfaceRXBytes,
+				metrics.MetricVPNInterfaceTXBytes,
+			))
+			monitoringService.SetMetricState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
+			monitoringService.SetMetricState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
+		} else {
+			slog.Info("no vpn interface discovered; vpn metrics will remain unavailable")
+		}
 	} else {
-		slog.Info("no vpn interface discovered; vpn metrics will remain unavailable")
+		slog.Info("vpn interface set via environment variable; skipping auto-discovery")
 	}
 
 	collectorService := monitoring.NewCollectorService(
