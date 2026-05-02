@@ -334,3 +334,53 @@ func TestStorePurgeHistoricalComparesParsedTimestamps(t *testing.T) {
 		t.Fatalf("newer count = %d, older count = %d, want 1 and 0", newerCount, olderCount)
 	}
 }
+
+func TestGetSettingReturnsEmptyWhenNotSet(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	value, err := s.GetSetting(ctx, "nonexistent.key")
+	if err != nil {
+		t.Fatalf("GetSetting unexpected error: %v", err)
+	}
+	if value != "" {
+		t.Fatalf("GetSetting = %q, want empty string for nonexistent key", value)
+	}
+}
+
+func TestSetAndGetSetting(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	if err := s.SetSetting(ctx, "history.retention_days", "90"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+
+	value, err := s.GetSetting(ctx, "history.retention_days")
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+	if value != "90" {
+		t.Fatalf("GetSetting = %q, want %q", value, "90")
+	}
+}
+
+func TestSetSettingUpserts(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	if err := s.SetSetting(ctx, "history.retention_days", "90"); err != nil {
+		t.Fatalf("SetSetting first: %v", err)
+	}
+	if err := s.SetSetting(ctx, "history.retention_days", "180"); err != nil {
+		t.Fatalf("SetSetting second: %v", err)
+	}
+
+	value, err := s.GetSetting(ctx, "history.retention_days")
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+	if value != "180" {
+		t.Fatalf("GetSetting = %q, want %q after upsert", value, "180")
+	}
+}
