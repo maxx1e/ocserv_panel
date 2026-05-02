@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"ocserv_panel/backend/internal/app"
@@ -37,6 +38,7 @@ type App struct {
 	authService       *app.AuthService
 	dashboardService  *app.DashboardService
 	monitoringService *app.MonitoringService
+	settingsService   *app.SettingsService
 	cookieSecure      bool
 	now               func() time.Time
 }
@@ -146,6 +148,19 @@ type historicalSessionResponse struct {
 	Source          string    `json:"source"`
 }
 
+type settingsListResponse struct {
+	Settings []settingResponse `json:"settings"`
+}
+
+type settingResponse struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type updateSettingRequest struct {
+	Value string `json:"value"`
+}
+
 type purgeHistoryResponse struct {
 	RetentionDays int       `json:"retentionDays"`
 	Cutoff        time.Time `json:"cutoff"`
@@ -157,6 +172,7 @@ func NewAppRouter(
 	authService *app.AuthService,
 	dashboardService *app.DashboardService,
 	monitoringService *app.MonitoringService,
+	settingsService *app.SettingsService,
 	opts AppOptions,
 ) http.Handler {
 	now := opts.Now
@@ -167,6 +183,7 @@ func NewAppRouter(
 		authService:       authService,
 		dashboardService:  dashboardService,
 		monitoringService: monitoringService,
+		settingsService:   settingsService,
 		cookieSecure:      opts.CookieSecure,
 		now:               now,
 	}
@@ -186,6 +203,8 @@ func NewAppRouter(
 	mux.HandleFunc("/api/monitoring/catalog", appHandler.handleMonitoringCatalog)
 	mux.HandleFunc("/api/monitoring/overview", appHandler.handleMonitoringOverview)
 	mux.HandleFunc("/api/monitoring/series", appHandler.handleMonitoringSeries)
+	mux.HandleFunc("/api/settings", appHandler.handleSettingsGet)
+	mux.HandleFunc("/api/settings/", appHandler.handleSettingsPut)
 
 	return securityHeaders(mux)
 }
@@ -422,6 +441,62 @@ func (a *App) handleMonitoringSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, series)
+}
+
+func (a *App) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		return
+	}
+	settings, err := a.settingsService.GetAll(r.Context(), principal)
+	if err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	response := make([]settingResponse, 0, len(settings))
+	for _, s := range settings {
+		response = append(response, settingResponse{Key: s.Key, Value: s.Value})
+	}
+	writeJSON(w, http.StatusOK, settingsListResponse{Settings: response})
+}
+
+func (a *App) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodPut) {
+		return
+	}
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		return
+	}
+	// Extract key from path: /api/settings/{key}
+	key := r.URL.Path[len("/api/settings/"):]
+	if key == "" {
+		writeError(w, http.StatusBadRequest, "setting key is required")
+		return
+	}
+	var req updateSettingRequest
+	if !decodeRequestJSON(w, r, &req) {
+		return
+	}
+	switch key {
+	case "history.retention_days":
+		days, err := strconv.Atoi(req.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "retention days must be a number")
+			return
+		}
+		if err := a.settingsService.SetRetentionDays(r.Context(), principal, days); err != nil {
+			a.writeAppError(w, err)
+			return
+		}
+	default:
+		writeError(w, http.StatusBadRequest, "unknown setting key")
+		return
+	}
+	writeJSON(w, http.StatusOK, settingResponse{Key: key, Value: req.Value})
 }
 
 func (a *App) authenticate(w http.ResponseWriter, r *http.Request) (auth.Principal, bool) {

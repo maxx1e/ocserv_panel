@@ -609,6 +609,7 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	authService := app.NewAuthService(s, recorder)
 	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
 	monitoringService := app.NewMonitoringService(metrics.NewMemoryStore(), rbac.NewDefaultAuthorizer(), nil, recorder)
+	settingsService := app.NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
 
 	return &testHarness{
 		database: database,
@@ -617,6 +618,7 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 			authService,
 			dashboardService,
 			monitoringService,
+			settingsService,
 			AppOptions{CookieSecure: cookieSecure},
 		),
 	}
@@ -921,5 +923,136 @@ func TestHealthzRejectsNonGET(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected status %d, got %d", http.StatusMethodNotAllowed, rec.Code)
+	}
+}
+
+// ---- Settings API Tests ----
+
+func TestSettingsAPIGetRequiresAuth(t *testing.T) {
+	h := newTestHarness(t)
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/settings", nil, "")
+
+	assertStatus(t, rec, http.StatusUnauthorized)
+	assertJSONField(t, rec, "error", "authentication required")
+}
+
+func TestSettingsAPIPutRequiresAuth(t *testing.T) {
+	h := newTestHarness(t)
+
+	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/history.retention_days", map[string]string{"value": "90"}, "")
+
+	assertStatus(t, rec, http.StatusUnauthorized)
+	assertJSONField(t, rec, "error", "authentication required")
+}
+
+func TestSettingsAPIGetReturnsSettings(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	// Set retention days so we have a non-default value to read back.
+	recPut := serveAPI(t, h.router, http.MethodPut, "/api/settings/history.retention_days", map[string]string{"value": "90"}, cookie)
+	assertStatus(t, recPut, http.StatusOK)
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/settings", nil, cookie)
+
+	assertStatus(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"history.retention_days"`) || !strings.Contains(body, `"90"`) {
+		t.Fatalf("response body missing expected setting: %s", body)
+	}
+}
+
+func TestSettingsAPIPutUpdatesRetention(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/history.retention_days", map[string]string{"value": "180"}, cookie)
+
+	assertStatus(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"history.retention_days"`) || !strings.Contains(body, `"180"`) {
+		t.Fatalf("response body missing expected setting: %s", body)
+	}
+}
+
+func TestSettingsAPIPutRejectsInvalidRetention(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/history.retention_days", map[string]string{"value": "7"}, cookie)
+
+	assertStatus(t, rec, http.StatusBadRequest)
+	assertJSONField(t, rec, "error", "invalid retention")
+}
+
+func TestSettingsAPIPutRejectsUnknownKey(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/unknown.key", map[string]string{"value": "test"}, cookie)
+
+	assertStatus(t, rec, http.StatusBadRequest)
+	assertJSONField(t, rec, "error", "unknown setting key")
+}
+
+func TestSettingsAPIPutRejectsMissingKey(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/", map[string]string{"value": "test"}, cookie)
+
+	assertStatus(t, rec, http.StatusBadRequest)
+	assertJSONField(t, rec, "error", "setting key is required")
+}
+
+func TestSettingsAPIPutRejectsInvalidJSON(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	rec := serveRawAPI(t, h.router, http.MethodPut, "/api/settings/history.retention_days", `{"value":`, cookie)
+
+	assertStatus(t, rec, http.StatusBadRequest)
+	assertJSONField(t, rec, "error", "invalid JSON request body")
+}
+
+func TestSettingsAPIPutRejectsNonNumericRetention(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/history.retention_days", map[string]string{"value": "not-a-number"}, cookie)
+
+	assertStatus(t, rec, http.StatusBadRequest)
+	assertJSONField(t, rec, "error", "retention days must be a number")
+}
+
+func TestSettingsAPIPutAuditLogging(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "testowner", "testpass123")
+	cookie := h.login(t, "testowner", "testpass123")
+
+	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/history.retention_days", map[string]string{"value": "90"}, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	events, err := h.store.RecentAuditEvents(context.Background(), 20)
+	if err != nil {
+		t.Fatalf("load audit events: %v", err)
+	}
+	found := false
+	for _, event := range events {
+		if event.Action == "settings.set_retention" && event.Outcome == string(audit.OutcomeSuccess) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected success audit action settings.set_retention in %#v", events)
 	}
 }

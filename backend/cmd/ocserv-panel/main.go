@@ -47,6 +47,7 @@ func main() {
 	recorder := audit.NewSQLiteRecorder(persistence)
 	authService := app.NewAuthService(persistence, recorder)
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer())
+	settingsService := app.NewSettingsService(persistence, recorder, rbac.NewDefaultAuthorizer())
 	metricStore := openMetricStore()
 	defer func() {
 		if err := metricStore.Close(); err != nil {
@@ -65,7 +66,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
+		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
