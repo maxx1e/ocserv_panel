@@ -207,7 +207,7 @@ type SettingsService struct {
 Key methods:
 - `GetAllSections(ctx context.Context, principal auth.Principal) ([]Section, error)` — returns all sections with current values
 - `UpdateSetting(ctx context.Context, principal auth.Principal, key, value string) (SettingDef, error)` — updates a setting in the appropriate store
-- `RestartRequired(ctx context.Context) (bool, []string)` — checks if any config-file settings have pending changes
+- `RestartRequired(ctx context.Context) (bool, []string)` — checks if the in-memory config differs from the on-disk config (i.e., config-file settings were changed via the API but not yet applied via restart). Returns the list of changed keys.
 - `TriggerRestart(ctx context.Context, principal auth.Principal) error` — triggers service restart via systemd
 
 ### API Endpoints
@@ -378,6 +378,8 @@ CREATE TABLE IF NOT EXISTS setting_definitions (
 ```
 
 The `app_settings` table continues to store runtime values for database-sourced settings. Config-sourced settings are read from the TOML file at startup and when requested.
+
+The migration includes INSERT statements to seed all setting definitions with their metadata (key, label, section, type, source, requires_restart, default_value, options, sort_order). This ensures the registry is populated on first run and the settings UI can be built dynamically from the database.
 
 ## Security Considerations
 
