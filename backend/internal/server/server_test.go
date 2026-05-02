@@ -17,6 +17,7 @@ import (
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
+	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/db"
 	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/rbac"
@@ -609,7 +610,8 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	authService := app.NewAuthService(s, recorder)
 	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
 	monitoringService := app.NewMonitoringService(metrics.NewMemoryStore(), rbac.NewDefaultAuthorizer(), nil, recorder)
-	settingsService := app.NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	settingsService := app.NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	return &testHarness{
 		database: database,

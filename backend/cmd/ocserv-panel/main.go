@@ -14,6 +14,7 @@ import (
 
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/audit"
+	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/db"
 	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/monitoring"
@@ -47,7 +48,17 @@ func main() {
 	recorder := audit.NewSQLiteRecorder(persistence)
 	authService := app.NewAuthService(persistence, recorder)
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer())
-	settingsService := app.NewSettingsService(persistence, recorder, rbac.NewDefaultAuthorizer())
+
+	configPath := envOrDefault("OCSERV_PANEL_CONFIG_PATH", "/etc/ocserv-panel/config.toml")
+	cfg, cfgErr := config.Load(configPath)
+	if cfgErr != nil {
+		slog.Warn("loading config file failed, continuing with defaults", "path", configPath, "error", cfgErr)
+	} else {
+		slog.Info("config loaded", "path", configPath)
+	}
+	config.MergeEnv(&cfg, os.Getenv)
+
+	settingsService := app.NewSettingsService(&cfg, persistence, recorder, rbac.NewDefaultAuthorizer())
 
 	// Create housekeeping scheduler
 	housekeepingScheduler := app.NewHousekeepingScheduler(

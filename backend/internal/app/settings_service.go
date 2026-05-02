@@ -9,6 +9,7 @@ import (
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
+	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
@@ -21,6 +22,7 @@ type Setting struct {
 
 // SettingsService manages application settings stored in app_settings.
 type SettingsService struct {
+	config        *config.Config
 	settingsStore settingsStore
 	recorder      audit.Recorder
 	authorizer    rbac.Authorizer
@@ -33,11 +35,11 @@ type settingsStore interface {
 }
 
 // NewSettingsService returns a SettingsService backed by SQLite storage.
-func NewSettingsService(s *store.Store, recorder audit.Recorder, authorizer rbac.Authorizer) *SettingsService {
+func NewSettingsService(cfg *config.Config, s *store.Store, recorder audit.Recorder, authorizer rbac.Authorizer) *SettingsService {
 	if recorder == nil {
 		recorder = audit.NoopRecorder{}
 	}
-	return &SettingsService{settingsStore: s, recorder: recorder, authorizer: authorizer, now: func() time.Time { return time.Now().UTC() }}
+	return &SettingsService{config: cfg, settingsStore: s, recorder: recorder, authorizer: authorizer, now: func() time.Time { return time.Now().UTC() }}
 }
 
 // GetRetentionDays returns the configured history retention in days, defaulting

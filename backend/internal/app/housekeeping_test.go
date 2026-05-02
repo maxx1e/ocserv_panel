@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"ocserv_panel/backend/internal/audit"
+	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/rbac"
 )
 
@@ -26,7 +27,8 @@ func TestHousekeepingSchedulerPurgesOnSchedule(t *testing.T) {
 	scheduler := NewHousekeepingScheduler(s, audit.NoopRecorder{}, mockPurger, 50*time.Millisecond)
 
 	// Set retention to 365 days
-	settingsService := NewSettingsService(s, audit.NoopRecorder{}, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	settingsService := NewSettingsService(&cfg, s, audit.NoopRecorder{}, rbac.NewDefaultAuthorizer())
 	if err := settingsService.SetRetentionDays(ctx, owner, 365); err != nil {
 		t.Fatalf("SetRetentionDays: %v", err)
 	}

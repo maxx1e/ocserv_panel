@@ -6,13 +6,15 @@ import (
 	"testing"
 
 	"ocserv_panel/backend/internal/auth"
+	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/rbac"
 )
 
 func TestSettingsServiceGetAllSectionsRequiresAuth(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.GetAllSections(ctx, auth.Principal{})
 	if !errors.Is(err, ErrUnauthenticated) {
@@ -24,7 +26,8 @@ func TestSettingsServiceGetAllSectionsRequiresPermission(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	// Viewer has settings:read permission, so this should succeed
 	_, err := service.GetAllSections(ctx, viewer)
@@ -37,7 +40,8 @@ func TestSettingsServiceGetAllSectionsReturnsAllSections(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	resp, err := service.GetAllSections(ctx, owner)
 	if err != nil {
@@ -59,7 +63,8 @@ func TestSettingsServiceGetAllSectionsReturnsAllSections(t *testing.T) {
 func TestSettingsServiceUpdateSettingRequiresAuth(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, auth.Principal{}, "general.theme", "dark")
 	if !errors.Is(err, ErrUnauthenticated) {
@@ -71,7 +76,8 @@ func TestSettingsServiceUpdateSettingRequiresOwner(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, viewer, "general.theme", "dark")
 	if !errors.Is(err, ErrPermissionDenied) {
@@ -83,7 +89,8 @@ func TestSettingsServiceUpdateSettingRejectsUnknownKey(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, owner, "unknown.key", "value")
 	if !errors.Is(err, ErrInvalidInput) {
@@ -95,7 +102,8 @@ func TestSettingsServiceUpdateSettingSavesDatabaseSetting(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	result, err := service.UpdateSetting(ctx, owner, "general.theme", "dark")
 	if err != nil {
@@ -119,7 +127,8 @@ func TestSettingsServiceUpdateSettingValidatesToggle(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, owner, "security.csrf_enabled", "maybe")
 	if !errors.Is(err, ErrInvalidInput) {
@@ -131,7 +140,8 @@ func TestSettingsServiceUpdateSettingValidatesSelect(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, owner, "general.theme", "invalid_theme")
 	if !errors.Is(err, ErrInvalidInput) {
@@ -143,7 +153,8 @@ func TestSettingsServiceUpdateSettingValidatesNumber(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	service := NewSettingsService(s, recorder, rbac.NewDefaultAuthorizer())
+	cfg := config.Defaults()
+	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
 	// Port must be between 1 and 65535
 	_, err := service.UpdateSetting(ctx, owner, "web.port", "0")
