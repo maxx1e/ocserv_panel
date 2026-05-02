@@ -17,8 +17,12 @@ const (
 	PermissionManageUsers    Permission = "users:manage"
 	PermissionManageConfig   Permission = "config:manage"
 	PermissionManageService  Permission = "service:manage"
-	PermissionHistoryPurge   Permission = "history:purge"
-	PermissionSettingsManage Permission = "settings:manage"
+	PermissionHistoryPurge    Permission = "history:purge"
+	PermissionSettingsManage  Permission = "settings:manage"
+	PermissionSettingsRead    Permission = "settings:read"
+	PermissionSettingsRestart Permission = "settings:restart"
+	PermissionSettingsExport  Permission = "settings:export"
+	PermissionSettingsBackup  Permission = "settings:backup"
 )
 
 // Authorizer evaluates role grants.
@@ -31,15 +35,20 @@ func NewDefaultAuthorizer() Authorizer {
 	return Authorizer{
 		grants: map[Role]map[Permission]struct{}{
 			RoleOwner: {
-				PermissionReadDashboard:  {},
-				PermissionManageUsers:    {},
-				PermissionManageConfig:   {},
-				PermissionManageService:  {},
-				PermissionHistoryPurge:   {},
-				PermissionSettingsManage: {},
+				PermissionReadDashboard:   {},
+				PermissionManageUsers:     {},
+				PermissionManageConfig:    {},
+				PermissionManageService:   {},
+				PermissionHistoryPurge:    {},
+				PermissionSettingsManage:  {},
+				PermissionSettingsRead:    {},
+				PermissionSettingsRestart: {},
+				PermissionSettingsExport:  {},
+				PermissionSettingsBackup:  {},
 			},
 			RoleViewer: {
 				PermissionReadDashboard: {},
+				PermissionSettingsRead:  {},
 			},
 		},
 	}
