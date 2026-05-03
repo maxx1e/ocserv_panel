@@ -1,22 +1,39 @@
 <script lang="ts">
+  import SettingRow from './SettingRow.svelte';
+  import { settingDescriptions } from '$lib/settings/descriptions';
+  import type { SettingDef } from '$lib/api';
+
   type Props = {
-    checked: boolean;
-    onchange: (value: boolean) => void;
-    disabled?: boolean;
-    label?: string;
+    setting: SettingDef;
+    onUpdate: (key: string, value: string) => Promise<void>;
+    savingKey: string | null;
   };
 
-  let { checked, onchange, disabled = false, label = 'Toggle' }: Props = $props();
+  let { setting, onUpdate, savingKey }: Props = $props();
+  const isSaving = $derived(savingKey === setting.key);
+
+  async function toggleChange(newValue: boolean) {
+    try {
+      await onUpdate(setting.key, String(newValue));
+    } catch {
+      // Error handled by parent
+    }
+  }
 </script>
 
-<button
-  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {checked ? 'bg-slate-600' : 'bg-slate-300'} {disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"
-  {disabled}
-  onclick={() => onchange(!checked)}
-  role="switch"
-  aria-checked={checked}
-  aria-label={label}
-  type="button"
->
-  <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {checked ? 'translate-x-6' : 'translate-x-1'}"></span>
-</button>
+<SettingRow label={setting.label} description={settingDescriptions[setting.key]} requiresRestart={setting.requires_restart} isSaving={isSaving}>
+  <div class="flex items-center gap-3">
+    <button
+      class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {setting.value === 'true' ? 'bg-slate-600' : 'bg-slate-300'} {isSaving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"
+      onclick={() => toggleChange(setting.value !== 'true')}
+      disabled={isSaving}
+      role="switch"
+      aria-checked={setting.value === 'true'}
+      aria-label={setting.label}
+      type="button"
+    >
+      <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {setting.value === 'true' ? 'translate-x-6' : 'translate-x-1'}"></span>
+    </button>
+    <span class="text-sm text-slate-500">{setting.value === 'true' ? 'Enabled' : 'Disabled'}</span>
+  </div>
+</SettingRow>
