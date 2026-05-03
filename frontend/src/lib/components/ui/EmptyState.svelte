@@ -7,12 +7,11 @@
   };
 
   let { icon, title, description, items = [] }: Props = $props();
-
-  const Icon = $derived(icon);
 </script>
 
 <div class="bg-white rounded-lg shadow-sm p-8 text-center">
   {#if icon}
+    {@const Icon = icon}
     <div class="mx-auto w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
       <Icon class="w-8 h-8 text-slate-400" />
     </div>

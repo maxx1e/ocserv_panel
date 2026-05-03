@@ -1,6 +1,4 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
-
   type Props = {
     title: string;
     value: string;
@@ -12,8 +10,6 @@
   };
 
   let { title, value, subtitle, icon, trend, unavailable = false, hint }: Props = $props();
-
-  const Icon = $derived(icon);
 </script>
 
 <article
@@ -39,6 +35,7 @@
       {/if}
     </div>
     {#if icon}
+      {@const Icon = icon}
       <div class="flex-shrink-0 ml-4">
         <div class="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center">
           <Icon class="w-6 h-6 text-slate-600" />

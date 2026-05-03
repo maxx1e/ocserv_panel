@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { LineChart } from 'layerchart';
-  import { ArrowDown, ArrowUp, Cpu, Database, Server, Shield, Users } from 'lucide-svelte';
+  import { ArrowDown, ArrowUp, Cpu, Database, MemoryStick, Server, Shield, Users } from 'lucide-svelte';
 
   import CardStats from '$lib/components/ui/CardStats.svelte';
   import CardChart from '$lib/components/ui/CardChart.svelte';
@@ -272,7 +272,7 @@
       <CardStats
         title="Memory"
         value={metricValue(HOST_MEMORY)}
-        icon={Server}
+        icon={MemoryStick}
         unavailable={metricState(HOST_MEMORY) === 'unavailable'}
         hint={unavailableReason(HOST_MEMORY)}
       />
