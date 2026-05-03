@@ -206,6 +206,7 @@ var monitoringOverviewMetrics = []metrics.MetricName{
 	metrics.MetricVPNInterfaceRXBytes,
 	metrics.MetricVPNInterfaceTXBytes,
 	metrics.MetricActiveSessions,
+	metrics.MetricConnectionRate,
 	metrics.MetricConcurrentSessions,
 	metrics.MetricConcurrentSessionsLimit,
 }

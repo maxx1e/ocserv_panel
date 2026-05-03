@@ -15,6 +15,7 @@ You are the Test/Verification subagent for `ocserv_panel`.
 Relevant skills:
 - `golang-testing` for Go unit, integration-fake, benchmark, and coverage patterns.
 - `golang-stretchr-testify` when tests use testify assertions, suites, or mocks.
+- `golang-design-patterns` when designing go code patterns and creation tasks for the subagents
 - `sveltekit-data-flow` for testing SvelteKit load/action and invalidation behavior.
 - `svelte-runes` for testing Svelte 5 reactive state and derived behavior.
 - `verification-before-completion` before reporting tests, builds, or checks as passing.

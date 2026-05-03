@@ -78,10 +78,10 @@ func DefaultCatalog() Catalog {
 		collectingMetric(MetricVPNInterfaceTXBytes, "VPN interface transmitted bytes"),
 		unavailableMetric(MetricUserRXBytes, "user received bytes"),
 		unavailableMetric(MetricUserTXBytes, "user transmitted bytes"),
-		unavailableMetric(MetricActiveSessions, "active sessions"),
-		unavailableMetric(MetricConnectionRate, "connection rate"),
-		unavailableMetric(MetricConcurrentSessions, "concurrent sessions"),
-		unavailableMetric(MetricConcurrentSessionsLimit, "concurrent sessions limit"),
+		collectingMetric(MetricActiveSessions, "active sessions"),
+		collectingMetric(MetricConnectionRate, "connection rate"),
+		collectingMetric(MetricConcurrentSessions, "concurrent sessions"),
+		collectingMetric(MetricConcurrentSessionsLimit, "concurrent sessions limit"),
 	}
 
 	catalog := Catalog{metrics: make(map[MetricName]MetricDefinition, len(metrics))}

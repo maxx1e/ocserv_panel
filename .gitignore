@@ -28,3 +28,6 @@ frontend/.vite/
 
 # Superpowers visual brainstorming artifacts
 .superpowers/
+
+# Metrics runtime data (Prometheus TSDB)
+backend/data/

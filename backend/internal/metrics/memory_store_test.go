@@ -40,10 +40,6 @@ func TestMetricCatalogMarksOcservOnlyUnavailable(t *testing.T) {
 	for _, name := range []MetricName{
 		MetricUserRXBytes,
 		MetricUserTXBytes,
-		MetricActiveSessions,
-		MetricConnectionRate,
-		MetricConcurrentSessions,
-		MetricConcurrentSessionsLimit,
 	} {
 		metric, ok := catalog.Find(name)
 		if !ok {
@@ -55,6 +51,24 @@ func TestMetricCatalogMarksOcservOnlyUnavailable(t *testing.T) {
 				name,
 				metric.State,
 				metric.Reason,
+			)
+		}
+	}
+	for _, name := range []MetricName{
+		MetricActiveSessions,
+		MetricConnectionRate,
+		MetricConcurrentSessions,
+		MetricConcurrentSessionsLimit,
+	} {
+		metric, ok := catalog.Find(name)
+		if !ok {
+			t.Fatalf("catalog missing %s", name)
+		}
+		if metric.State != StateCollecting {
+			t.Fatalf(
+				"metric %s state = %s, want collecting",
+				name,
+				metric.State,
 			)
 		}
 	}

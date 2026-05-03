@@ -174,7 +174,20 @@ func configuredCollectors(reader monitoring.FileReader) []monitoring.Collector {
 			metrics.MetricNetInterfaceRXBytes,
 			metrics.MetricNetInterfaceTXBytes,
 		))
+	} else if defaultIface, err := monitoring.DiscoverDefaultInterface(); err != nil {
+		slog.Warn("default interface discovery failed", "error", err)
+	} else if defaultIface != "" {
+		slog.Info("default interface discovered", "interface", defaultIface)
+		collectors = append(collectors, monitoring.NewInterfaceCollector(
+			reader,
+			defaultIface,
+			metrics.MetricNetInterfaceRXBytes,
+			metrics.MetricNetInterfaceTXBytes,
+		))
+	} else {
+		slog.Info("no default interface discovered; network interface metrics will remain unavailable")
 	}
+
 	if iface := strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")); iface != "" {
 		collectors = append(collectors, monitoring.NewInterfaceCollector(
 			reader,

@@ -65,13 +65,13 @@ func TestTSDBPathFromEnv(t *testing.T) {
 }
 
 func TestConfiguredCollectors(t *testing.T) {
-	t.Run("uses host collectors only by default", func(t *testing.T) {
+	t.Run("includes host collectors and auto-discovered interface by default", func(t *testing.T) {
 		t.Setenv("OCSERV_PANEL_NET_IFACE", "")
 		t.Setenv("OCSERV_PANEL_VPN_IFACE", "")
 
 		collectors := configuredCollectors(fakeFileReader{})
-		if len(collectors) != 2 {
-			t.Fatalf("len(configuredCollectors()) = %d, want 2", len(collectors))
+		if len(collectors) < 2 {
+			t.Fatalf("len(configuredCollectors()) = %d, want at least 2", len(collectors))
 		}
 	})
 

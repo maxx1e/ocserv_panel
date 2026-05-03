@@ -32,6 +32,7 @@ Relevant skills:
 - `verification-before-completion` before claiming work is complete or passing.
 - `requesting-code-review` before merging significant or risky changes.
 - `using-git-worktrees` when isolated feature work is needed.
+- `frontend-skill` for the designing nice and modern UI interfaces.
 
 Before work matching any listed skill, invoke that skill and follow it.
 

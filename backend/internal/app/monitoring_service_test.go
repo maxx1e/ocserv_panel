@@ -26,8 +26,8 @@ func TestMonitoringServiceCatalogRequiresDashboardReadPermission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
-	assertMetricDefinition(t, catalog, metrics.MetricActiveSessions, metrics.StateUnavailable)
-	assertMetricDefinition(t, catalog, metrics.MetricConcurrentSessionsLimit, metrics.StateUnavailable)
+	assertMetricDefinition(t, catalog, metrics.MetricActiveSessions, metrics.StateCollecting)
+	assertMetricDefinition(t, catalog, metrics.MetricConcurrentSessionsLimit, metrics.StateCollecting)
 }
 
 func TestMonitoringServiceOverviewRequiresPermissionAndQueriesCoreMetrics(t *testing.T) {
@@ -70,8 +70,8 @@ func TestMonitoringServiceOverviewRequiresPermissionAndQueriesCoreMetrics(t *tes
 	if len(overview.Catalog) == 0 {
 		t.Fatal("overview catalog is empty, want default metric definitions")
 	}
-	if len(overview.Series) != 9 {
-		t.Fatalf("overview series count = %d, want 9 core dashboard metrics", len(overview.Series))
+	if len(overview.Series) != 10 {
+		t.Fatalf("overview series count = %d, want 10 core dashboard metrics", len(overview.Series))
 	}
 
 	cpu := findSeries(t, overview.Series, metrics.MetricHostCPUUtilization)
@@ -83,6 +83,7 @@ func TestMonitoringServiceOverviewRequiresPermissionAndQueriesCoreMetrics(t *tes
 		t.Fatalf("memory points = %#v, want samples outside 1h window excluded", memory.Points)
 	}
 	findSeries(t, overview.Series, metrics.MetricActiveSessions)
+	findSeries(t, overview.Series, metrics.MetricConnectionRate)
 	findSeries(t, overview.Series, metrics.MetricConcurrentSessionsLimit)
 }
 

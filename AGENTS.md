@@ -201,6 +201,7 @@ Use SvelteKit for:
 - Historical analytics views
 - Configuration editing workflows
 - Certificate views and lifecycle controls
+- MUST use reference design from the `notus-svelte-main` folder
 
 The frontend should call backend APIs rather than shelling out or assuming direct filesystem access.
 
