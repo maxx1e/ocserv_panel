@@ -1,8 +1,14 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import TimeSeriesChart from '$lib/components/monitoring/TimeSeriesChart.svelte';
-  import UnavailableMetric from '$lib/components/monitoring/UnavailableMetric.svelte';
-  import WindowSelector from '$lib/components/monitoring/WindowSelector.svelte';
+  import { LineChart } from 'layerchart';
+  import { ArrowDown, ArrowUp, Server, Users } from 'lucide-svelte';
+
+  import CardStats from '$lib/components/ui/CardStats.svelte';
+  import CardChart from '$lib/components/ui/CardChart.svelte';
+  import CardTable from '$lib/components/ui/CardTable.svelte';
+  import CardSettings from '$lib/components/ui/CardSettings.svelte';
+  import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
+
   import {
     getHistoryAnalytics,
     getMe,
@@ -21,7 +27,7 @@
     type Principal,
     type Setting
   } from '$lib/api';
-  import { metricByName, seriesByMetric } from '$lib/monitoring';
+  import { formatBytes, metricByName, seriesByMetric } from '$lib/monitoring';
 
   const HISTORY_WINDOWS: MonitoringWindow[] = ['24h', '7d', '30d'];
   const HOST_CPU = 'host_cpu_utilization';
@@ -163,11 +169,11 @@
     return requestId === monitoringRequestId && window === monitoringWindow;
   }
 
-  function handleMonitoringWindowChange(event: CustomEvent<string>) {
-    const nextWindow = event.detail as MonitoringWindow;
-    if (!HISTORY_WINDOWS.includes(nextWindow) || nextWindow === monitoringWindow) return;
-    monitoringWindow = nextWindow;
-    void reloadMonitoring(nextWindow);
+  function handleMonitoringWindowChange(nextWindow: string) {
+    const window = nextWindow as MonitoringWindow;
+    if (!HISTORY_WINDOWS.includes(window) || window === monitoringWindow) return;
+    monitoringWindow = window;
+    void reloadMonitoring(window);
   }
 
   function metricSeries(metric: string): MonitoringSeries | undefined {
@@ -233,176 +239,270 @@
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
   }
 
-  function formatBytes(value: number): string {
-    if (value < 1024) return `${value} B`;
-    const units = ['KB', 'MB', 'GB', 'TB'];
-    let scaled = value / 1024;
-    let unit = units[0];
-    for (let index = 1; scaled >= 1024 && index < units.length; index += 1) {
-      scaled /= 1024;
-      unit = units[index];
-    }
-    return `${scaled.toFixed(1)} ${unit}`;
-  }
-
   function sessionUser(session: HistoricalSession): string {
     return session.username ?? session.user ?? '—';
   }
+
+  function chartData(metric: string): { timestamp: Date; value: number }[] {
+    const series = metricSeries(metric);
+    if (!series) return [];
+    return series.points
+      .filter(p => Number.isFinite(Date.parse(p.timestamp)) && Number.isFinite(p.value))
+      .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
 </script>
 
-<section class="page-stack">
-  <div class="hero panel">
-    <p class="eyebrow">History</p>
-    <h2>Historical session analytics</h2>
-    <p class="muted">Analytics are read from the local backend API and persisted SQLite history.</p>
+{#if loading}
+  <div class="flex items-center justify-center py-16">
+    <div class="text-center">
+      <div class="w-8 h-8 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin mx-auto mb-3"></div>
+      <p class="text-slate-500 text-sm">Loading history…</p>
+    </div>
   </div>
 
-  {#if loading}
-    <div class="panel">Loading history…</div>
-  {:else if setupRequired}
-    <div class="panel callout warning">
-      <h3>Initial setup required</h3>
-      <p>Create the first owner before viewing historical analytics.</p>
-      <a class="button" href="/setup">Set up owner</a>
+{:else if setupRequired}
+  <div class="bg-amber-50 border border-amber-200 rounded-lg p-6">
+    <h3 class="text-lg font-semibold text-amber-800">Initial setup required</h3>
+    <p class="text-amber-700 text-sm mt-1">Create the first owner before viewing historical analytics.</p>
+    <a class="inline-block mt-4 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-md hover:bg-amber-700 transition-colors" href="/setup">
+      Set up owner
+    </a>
+  </div>
+
+{:else if !principal}
+  <div class="bg-slate-50 border border-slate-200 rounded-lg p-6">
+    <h3 class="text-lg font-semibold text-slate-700">Sign in required</h3>
+    <p class="text-slate-500 text-sm mt-1">Historical analytics require a backend-confirmed session.</p>
+    <a class="inline-block mt-4 px-4 py-2 bg-slate-700 text-white text-sm font-medium rounded-md hover:bg-slate-800 transition-colors" href="/login">
+      Go to login
+    </a>
+    {#if error}
+      <p class="mt-3 text-sm text-red-600">{error}</p>
+    {/if}
+  </div>
+
+{:else if analytics}
+  <div class="mb-6">
+    <h1 class="text-xl font-bold text-slate-700">History</h1>
+    <p class="text-sm text-slate-500 mt-1">Analytics are read from the local backend API and persisted SQLite history.</p>
+  </div>
+
+  {#if sampleWarning}
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+      <strong class="text-amber-800 text-sm">Sample data warning:</strong>
+      <span class="text-amber-700 text-sm ml-1">{sampleWarning}</span>
     </div>
-  {:else if !principal}
-    <div class="panel callout">
-      <h3>Sign in required</h3>
-      <p>Historical analytics require a backend-confirmed session.</p>
-      <a class="button" href="/login">Go to login</a>
-      {#if error}<p class="error-text">{error}</p>{/if}
+  {/if}
+
+  <!-- Summary stat cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
+    <CardStats
+      title="Sessions"
+      value={String(totals.sessionCount)}
+      icon={Users}
+    />
+    <CardStats
+      title="Received"
+      value={formatBytes(totals.rxBytes)}
+      icon={ArrowDown}
+    />
+    <CardStats
+      title="Sent"
+      value={formatBytes(totals.txBytes)}
+      icon={ArrowUp}
+    />
+    <CardStats
+      title="Total traffic"
+      value={formatBytes(totals.totalBytes)}
+      icon={Server}
+    />
+  </div>
+
+  <!-- Monitoring section -->
+  <section aria-labelledby="history-monitoring-heading" class="mb-8">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-1">
+      <div>
+        <h2 id="history-monitoring-heading" class="text-lg font-semibold text-slate-700">Monitoring history</h2>
+      </div>
+      <div class="flex items-center gap-3">
+        <WindowSelector
+          value={monitoringWindow}
+          windows={HISTORY_WINDOWS}
+          onchange={handleMonitoringWindowChange}
+        />
+        <button
+          type="button"
+          disabled={monitoringLoading}
+          onclick={() => reloadMonitoring()}
+          class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {monitoringLoading ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
     </div>
-  {:else if analytics}
-    {#if sampleWarning}
-      <div class="callout warning"><strong>Sample data warning:</strong> {sampleWarning}</div>
+    <p class="text-sm text-slate-500 mt-1">
+      Backend-collected samples for longer history windows. User and ocserv-specific metrics show unavailable states when the backend cannot collect them.
+    </p>
+    <p class="text-sm text-slate-400 mt-1 mb-6">
+      Generated: {formatGeneratedAt(monitoring?.generatedAt)} · Window: {monitoring?.window ?? monitoringWindow}
+    </p>
+
+    {#if monitoringError}
+      <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6" role="status">
+        <strong class="text-red-800 text-sm">Monitoring unavailable</strong>
+        <p class="text-red-700 text-sm mt-1">{monitoringError}</p>
+      </div>
     {/if}
 
-    <div class="grid cards">
-      <article class="panel stat-card"><span>Sessions</span><strong>{totals.sessionCount}</strong></article>
-      <article class="panel stat-card"><span>Received</span><strong>{formatBytes(totals.rxBytes)}</strong></article>
-      <article class="panel stat-card"><span>Sent</span><strong>{formatBytes(totals.txBytes)}</strong></article>
-      <article class="panel stat-card"><span>Total traffic</span><strong>{formatBytes(totals.totalBytes)}</strong></article>
-    </div>
-
-    <section class="panel page-stack" aria-labelledby="history-monitoring-heading">
-      <div class="monitoring-toolbar">
-        <div>
-          <p class="eyebrow">Monitoring history</p>
-          <h3 id="history-monitoring-heading">Resource and traffic trends</h3>
-          <p class="muted">
-            Backend-collected samples for longer history windows. User and ocserv-specific metrics show unavailable states when the backend cannot collect them.
-          </p>
-          <p class="muted">Generated: {formatGeneratedAt(monitoring?.generatedAt)} · Window: {monitoring?.window ?? monitoringWindow}</p>
-        </div>
-        <div class="monitoring-toolbar">
-          <WindowSelector value={monitoringWindow} windows={HISTORY_WINDOWS} on:change={handleMonitoringWindowChange} />
-          <button class="button" type="button" disabled={monitoringLoading} onclick={() => reloadMonitoring()}>
-            {monitoringLoading ? 'Refreshing…' : 'Refresh'}
-          </button>
+    {#if monitoringLoading && !monitoring}
+      <div class="flex items-center justify-center py-12">
+        <div class="text-center">
+          <div class="w-6 h-6 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin mx-auto mb-2"></div>
+          <p class="text-slate-500 text-sm">Loading monitoring history…</p>
         </div>
       </div>
+    {:else}
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {#each chartDefinitions as chart}
+          {#if shouldShowChart(chart.metric)}
+            <CardChart title={chart.title}>
+              <LineChart data={chartData(chart.metric)} x="timestamp" y="value" height={200} />
+            </CardChart>
+          {:else}
+            <CardStats
+              title={chart.title}
+              value="--"
+              unavailable={true}
+              hint={unavailableReason(chart.metric)}
+            />
+          {/if}
+        {/each}
+      </div>
+    {/if}
+  </section>
 
-      {#if monitoringError}
-        <div class="callout warning" role="status">
-          <strong>Monitoring unavailable</strong>
-          <p>{monitoringError}</p>
-        </div>
-      {/if}
+  <!-- Recent historical sessions -->
+  <section aria-labelledby="sessions-heading" class="mb-8">
+    {#if sessions.length > 0}
+      <CardTable title="Recent historical sessions">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50">
+            <tr class="text-left text-slate-500 font-medium">
+              <th class="px-6 py-3">User</th>
+              <th class="px-6 py-3">Started</th>
+              <th class="px-6 py-3">Ended</th>
+              <th class="px-6 py-3">Received</th>
+              <th class="px-6 py-3">Sent</th>
+              <th class="px-6 py-3">Remote</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {#each sessions as session}
+              <tr class="hover:bg-slate-50">
+                <td class="px-6 py-3 text-slate-700">{sessionUser(session)}</td>
+                <td class="px-6 py-3 text-slate-700">{session.connectedAt ?? session.startedAt ?? '—'}</td>
+                <td class="px-6 py-3 text-slate-700">{session.disconnectedAt ?? session.endedAt ?? '—'}</td>
+                <td class="px-6 py-3 text-slate-700">{formatBytes(session.rxBytes ?? session.bytesIn ?? 0)}</td>
+                <td class="px-6 py-3 text-slate-700">{formatBytes(session.txBytes ?? session.bytesOut ?? 0)}</td>
+                <td class="px-6 py-3 text-slate-700">{session.remoteAddress ?? '—'}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </CardTable>
+    {:else}
+      <h2 id="sessions-heading" class="text-lg font-semibold text-slate-700 mb-4">Recent historical sessions</h2>
+      <p class="text-sm text-slate-500">No historical sessions returned yet.</p>
+    {/if}
+  </section>
 
-      {#if monitoringLoading && !monitoring}
-        <div class="panel">Loading monitoring history…</div>
-      {:else}
-        <div class="chart-grid">
-          {#each chartDefinitions as chart}
-            {#if shouldShowChart(chart.metric)}
-              <TimeSeriesChart title={chart.title} series={metricSeries(chart.metric)} />
-            {:else}
-              <UnavailableMetric title={chart.title} reason={unavailableReason(chart.metric)} />
-            {/if}
-          {/each}
-        </div>
-      {/if}
-    </section>
-
-    <section class="panel">
-      <h3>Recent historical sessions</h3>
-      {#if sessions.length > 0}
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>User</th><th>Started</th><th>Ended</th><th>Received</th><th>Sent</th><th>Remote</th></tr></thead>
-            <tbody>
-              {#each sessions as session}
-                <tr>
-                  <td>{sessionUser(session)}</td>
-                  <td>{session.connectedAt ?? session.startedAt ?? '—'}</td>
-                  <td>{session.disconnectedAt ?? session.endedAt ?? '—'}</td>
-                  <td>{formatBytes(session.rxBytes ?? session.bytesIn ?? 0)}</td>
-                  <td>{formatBytes(session.txBytes ?? session.bytesOut ?? 0)}</td>
-                  <td>{session.remoteAddress ?? '—'}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {:else}
-        <p class="muted">No historical sessions returned yet.</p>
-      {/if}
-    </section>
-
-    <section class="panel">
-      <h3>Housekeeping</h3>
-      <p class="muted">Configure automatic data retention. Old records are purged daily based on the retention period.</p>
+  <!-- Housekeeping -->
+  <section class="mb-8">
+    <CardSettings
+      id="housekeeping"
+      title="Housekeeping"
+      description="Configure automatic data retention. Old records are purged daily based on the retention period."
+    >
       {#if isOwner}
-        <form class="form-stack" onsubmit={handleSaveRetention}>
-          <label>
-            Auto-delete records older than
-            <select bind:value={retentionSetting}>
+        <form onsubmit={handleSaveRetention} class="space-y-4">
+          <label class="block">
+            <span class="text-sm font-medium text-slate-700">Auto-delete records older than</span>
+            <select bind:value={retentionSetting} class="mt-1 block w-full max-w-xs rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400">
               <option value="30">30 days</option>
               <option value="90">90 days</option>
               <option value="180">180 days</option>
               <option value="365">365 days (default)</option>
             </select>
           </label>
-          {#if settingsError}<p class="error-text">{settingsError}</p>{/if}
-          {#if settingsSuccess}<p class="success-text">{settingsSuccess}</p>{/if}
-          <button class="button" type="submit" disabled={settingsLoading}>
+          {#if settingsError}
+            <p class="text-sm text-red-600">{settingsError}</p>
+          {/if}
+          {#if settingsSuccess}
+            <p class="text-sm text-emerald-600">{settingsSuccess}</p>
+          {/if}
+          <button
+            type="submit"
+            disabled={settingsLoading}
+            class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
             {settingsLoading ? 'Saving…' : 'Save retention setting'}
           </button>
         </form>
       {:else}
-        <p class="muted">Your role can view analytics but cannot change retention settings.</p>
+        <p class="text-sm text-slate-500">Your role can view analytics but cannot change retention settings.</p>
       {/if}
-    </section>
+    </CardSettings>
+  </section>
 
-    <section class="panel danger-panel">
-      <h3>History retention purge</h3>
+  <!-- History retention purge -->
+  <section class="mb-8">
+    <div class="bg-red-50 border border-red-200 rounded-lg p-6">
+      <p class="text-xs font-bold uppercase tracking-wider text-red-600">History retention purge</p>
+      <h3 class="text-lg font-semibold text-red-800 mt-1">Purge old session records</h3>
+      <p class="text-sm text-red-600 mt-1">Destructive owner-only action. The backend enforces authorization and audit logging.</p>
       {#if isOwner}
-        <p class="muted">Destructive owner-only action. The backend enforces authorization and audit logging.</p>
-        <form class="form-stack" onsubmit={handlePurge}>
-          <label>
-            Keep sessions newer than
-            <select bind:value={retentionDays}>
+        <form onsubmit={handlePurge} class="mt-4 space-y-4">
+          <label class="block">
+            <span class="text-sm font-medium text-red-700">Keep sessions newer than</span>
+            <select bind:value={retentionDays} class="mt-1 block w-full max-w-xs rounded-md border border-red-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400">
               <option value={30}>30 days</option>
               <option value={90}>90 days</option>
               <option value={180}>180 days</option>
               <option value={365}>365 days</option>
             </select>
           </label>
-          <label>
-            Type PURGE to confirm deletion of older history
-            <input bind:value={confirmation} autocomplete="off" />
+          <label class="block">
+            <span class="text-sm font-medium text-red-700">Type PURGE to confirm deletion of older history</span>
+            <input
+              bind:value={confirmation}
+              autocomplete="off"
+              class="mt-1 block w-full max-w-xs rounded-md border border-red-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm placeholder:text-slate-400 focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400"
+              placeholder="PURGE"
+            />
           </label>
-          {#if purgeError}<p class="error-text">{purgeError}</p>{/if}
-          {#if purgeSuccess}<p class="success-text">{purgeSuccess}</p>{/if}
-          <button class="button danger" type="submit" disabled={!purgeEnabled}>
+          {#if purgeError}
+            <p class="text-sm text-red-600">{purgeError}</p>
+          {/if}
+          {#if purgeSuccess}
+            <p class="text-sm text-emerald-600">{purgeSuccess}</p>
+          {/if}
+          <button
+            type="submit"
+            disabled={!purgeEnabled}
+            class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
             {purgeSubmitting ? 'Purging…' : 'Purge old history'}
           </button>
         </form>
       {:else}
-        <p class="muted">Your role can view analytics but cannot purge historical records.</p>
+        <p class="text-sm text-red-600 mt-4">Your role can view analytics but cannot purge historical records.</p>
       {/if}
-    </section>
-  {:else}
-    <div class="panel error-text">{error || 'Historical analytics were not returned.'}</div>
-  {/if}
-</section>
+    </div>
+  </section>
+
+{:else}
+  <div class="bg-red-50 border border-red-200 rounded-lg p-6">
+    <p class="text-red-700 text-sm">{error || 'Historical analytics were not returned.'}</p>
+  </div>
+{/if}
