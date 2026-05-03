@@ -16,7 +16,7 @@
   {#if description}
     <p class="text-sm text-slate-500 mt-1">{description}</p>
   {/if}
-  <div class="mt-4 space-y-4">
+  <div class="mt-4">
     {@render children()}
   </div>
 </section>
