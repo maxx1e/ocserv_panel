@@ -24,7 +24,7 @@
 </script>
 
 {#if description}
-  <span class="relative inline-flex items-center ml-1" onmouseenter={handleMouseEnter} onmouseleave={handleMouseLeave}>
+  <span class="relative inline-flex items-center ml-1" role="img" aria-label="More information" onmouseenter={handleMouseEnter} onmouseleave={handleMouseLeave}>
     <svg
       class="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 transition-colors cursor-help"
       fill="none"
