@@ -5,12 +5,12 @@
     updateSettingByKey,
     getRestartStatus,
     triggerRestart,
-    type SettingsSectionsResponse,
-    type SettingsSection
+    type SettingsSectionsResponse
   } from '$lib/api';
-  import SettingsNav from '$lib/components/settings/SettingsNav.svelte';
-  import RestartBanner from '$lib/components/settings/RestartBanner.svelte';
-  import SettingsSectionComponent from '$lib/components/settings/SettingsSection.svelte';
+  import SettingsNav from '$lib/components/ui/SettingsNav.svelte';
+  import RestartBanner from '$lib/components/ui/RestartBanner.svelte';
+  import SettingField from '$lib/components/ui/SettingField.svelte';
+  import CardSettings from '$lib/components/ui/CardSettings.svelte';
 
   let loading = $state(true);
   let error = $state('');
@@ -153,25 +153,25 @@
   }
 </script>
 
-<section class="page-stack">
-  <div class="hero panel">
-    <p class="eyebrow">Configure</p>
-    <h2>Settings</h2>
-    <p class="muted">
+<div class="flex flex-col gap-6 max-w-4xl mx-auto px-4 py-6">
+  <div class="bg-white rounded-lg shadow-sm p-6">
+    <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Configure</p>
+    <h2 class="text-xl font-semibold text-slate-800 mt-1">Settings</h2>
+    <p class="text-sm text-slate-500 mt-1">
       Adjust ocserv and panel configuration. Changes to config-source settings require a service
       restart; database-source changes take effect immediately.
     </p>
   </div>
 
   {#if loading}
-    <div class="panel">Loading settings…</div>
+    <div class="bg-white rounded-lg shadow-sm p-6 text-sm text-slate-500">Loading settings…</div>
   {:else if error}
-    <div class="panel error-text">{error}</div>
+    <div class="bg-white rounded-lg shadow-sm p-6 text-sm text-red-600">{error}</div>
   {:else if data}
     {#if restartError}
-      <div class="callout warning">
-        <strong>Restart failed</strong>
-        <p>{restartError}</p>
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+        <p class="font-semibold text-amber-800">Restart failed</p>
+        <p class="text-sm text-amber-700 mt-1">{restartError}</p>
       </div>
     {/if}
 
@@ -187,13 +187,20 @@
     />
 
     {#each data.sections as section (section.id)}
-      <SettingsSectionComponent
-        {section}
-        onUpdate={handleUpdate}
-        {savingKey}
-      />
+      <CardSettings
+        id={section.id}
+        title={section.title}
+        label={section.label}
+        description={section.description}
+      >
+        {#each section.settings as setting (setting.key)}
+          <SettingField {setting} onUpdate={handleUpdate} {savingKey} />
+        {/each}
+      </CardSettings>
     {/each}
   {:else}
-    <div class="panel error-text">Settings data was not returned.</div>
+    <div class="bg-white rounded-lg shadow-sm p-6 text-sm text-red-600">
+      Settings data was not returned.
+    </div>
   {/if}
-</section>
+</div>
