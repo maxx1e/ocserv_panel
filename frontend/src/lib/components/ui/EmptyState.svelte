@@ -1,8 +1,6 @@
 <script lang="ts">
-  import type { Component } from 'svelte';
-
   type Props = {
-    icon?: Component;
+    icon?: any; // Accepts Svelte 5 components and Svelte 4 class-based components (e.g. lucide-svelte icons)
     title: string;
     description: string;
     items?: string[];

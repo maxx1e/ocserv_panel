@@ -1,10 +1,13 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import AnalyticsCard from '$lib/components/monitoring/AnalyticsCard.svelte';
-  import MetricCard from '$lib/components/monitoring/MetricCard.svelte';
-  import TimeSeriesChart from '$lib/components/monitoring/TimeSeriesChart.svelte';
-  import UnavailableMetric from '$lib/components/monitoring/UnavailableMetric.svelte';
-  import WindowSelector from '$lib/components/monitoring/WindowSelector.svelte';
+  import { LineChart } from 'layerchart';
+  import { ArrowDown, ArrowUp, Cpu, Database, Server, Shield, Users } from 'lucide-svelte';
+
+  import CardStats from '$lib/components/ui/CardStats.svelte';
+  import CardChart from '$lib/components/ui/CardChart.svelte';
+  import CardTable from '$lib/components/ui/CardTable.svelte';
+  import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
+
   import {
     getDashboardSummary,
     getMe,
@@ -19,6 +22,11 @@
   } from '$lib/api';
   import { formatBytes, formatMetricValue, latestPoint, metricByName, seriesByMetric } from '$lib/monitoring';
 
+  type ChartDefinition = {
+    metric: string;
+    title: string;
+  };
+
   const MONITORING_WINDOWS: MonitoringWindow[] = ['15m', '1h', '6h', '24h'];
   const HOST_CPU = 'host_cpu_utilization';
   const HOST_MEMORY = 'host_memory_utilization';
@@ -28,11 +36,6 @@
   const VPN_TX = 'vpn_interface_tx_bytes';
   const ACTIVE_SESSIONS = 'active_sessions';
   const CONCURRENT_SESSIONS = 'concurrent_sessions';
-
-  type ChartDefinition = {
-    metric: string;
-    title: string;
-  };
 
   const chartDefinitions: ChartDefinition[] = [
     { metric: HOST_CPU, title: 'CPU utilization' },
@@ -117,11 +120,11 @@
     return requestId === monitoringRequestId && window === monitoringWindow;
   }
 
-  function handleMonitoringWindowChange(event: CustomEvent<string>) {
-    const nextWindow = event.detail as MonitoringWindow;
-    if (!MONITORING_WINDOWS.includes(nextWindow) || nextWindow === monitoringWindow) return;
-    monitoringWindow = nextWindow;
-    void reloadMonitoring(nextWindow);
+  function handleMonitoringWindowChange(nextWindow: string) {
+    const window = nextWindow as MonitoringWindow;
+    if (!MONITORING_WINDOWS.includes(window) || window === monitoringWindow) return;
+    monitoringWindow = window;
+    void reloadMonitoring(window);
   }
 
   function metricSeries(metric: string): MonitoringSeries | undefined {
@@ -154,138 +157,242 @@
     return 'No sample data reported.';
   }
 
+  function chartData(metric: string): { timestamp: Date; value: number }[] {
+    const series = metricSeries(metric);
+    if (!series) return [];
+    return series.points
+      .filter(p => Number.isFinite(Date.parse(p.timestamp)) && Number.isFinite(p.value))
+      .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
 </script>
 
-<section class="page-stack">
-  <div class="hero panel">
-    <p class="eyebrow">Dashboard</p>
-    <h2>Local ocserv administration</h2>
-    <p class="muted">
-      This UI reads same-origin backend APIs. It does not access local files, sockets, commands,
-      certificates, or secrets directly.
-    </p>
+{#if loading}
+  <div class="flex items-center justify-center py-16">
+    <div class="text-center">
+      <div class="w-8 h-8 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin mx-auto mb-3"></div>
+      <p class="text-slate-500 text-sm">Loading dashboard state…</p>
+    </div>
   </div>
 
-  {#if loading}
-    <div class="panel">Loading dashboard state…</div>
-  {:else if setupRequired}
-    <div class="panel callout warning">
-      <h3>Initial setup required</h3>
-      <p>Create the first owner before viewing privileged dashboard data.</p>
-      <a class="button" href="/setup">Set up owner</a>
+{:else if setupRequired}
+  <div class="bg-amber-50 border border-amber-200 rounded-lg p-6">
+    <h3 class="text-lg font-semibold text-amber-800">Initial setup required</h3>
+    <p class="text-amber-700 text-sm mt-1">Create the first owner before viewing privileged dashboard data.</p>
+    <a class="inline-block mt-4 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-md hover:bg-amber-700 transition-colors" href="/setup">
+      Set up owner
+    </a>
+  </div>
+
+{:else if !principal}
+  <div class="bg-slate-50 border border-slate-200 rounded-lg p-6">
+    <h3 class="text-lg font-semibold text-slate-700">Sign in required</h3>
+    <p class="text-slate-500 text-sm mt-1">Dashboard data is available only after the backend confirms an HttpOnly session cookie.</p>
+    <a class="inline-block mt-4 px-4 py-2 bg-slate-700 text-white text-sm font-medium rounded-md hover:bg-slate-800 transition-colors" href="/login">
+      Go to login
+    </a>
+    {#if error}
+      <p class="mt-3 text-sm text-red-600">{error}</p>
+    {/if}
+  </div>
+
+{:else if summary}
+  <div class="mb-6">
+    <h1 class="text-xl font-bold text-slate-700">Dashboard</h1>
+    <p class="text-sm text-slate-500 mt-1">Local ocserv administration overview.</p>
+  </div>
+
+  <!-- Summary stat cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
+    <CardStats
+      title="Backend status"
+      value={summary.backendStatus ?? 'unknown'}
+      icon={Server}
+    />
+    <CardStats
+      title="ocserv status"
+      value={summary.ocservStatus ?? 'not_configured'}
+      subtitle="Local-only baseline; no live ocserv control is active."
+      icon={Shield}
+    />
+    <CardStats
+      title="Active sessions"
+      value={String(summary.activeSessionCount ?? 0)}
+      icon={Users}
+    />
+    <CardStats
+      title="Sample data"
+      value={sampleDataMessage}
+      icon={Database}
+    />
+  </div>
+
+  <!-- Monitoring section -->
+  <section aria-labelledby="monitoring-heading" class="mb-8">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-1">
+      <div>
+        <h2 id="monitoring-heading" class="text-lg font-semibold text-slate-700">Monitoring</h2>
+      </div>
+      <div class="flex items-center gap-3">
+        <WindowSelector
+          value={monitoringWindow}
+          windows={MONITORING_WINDOWS}
+          onchange={handleMonitoringWindowChange}
+        />
+        <button
+          type="button"
+          disabled={monitoringLoading}
+          onclick={() => reloadMonitoring()}
+          class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {monitoringLoading ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
     </div>
-  {:else if !principal}
-    <div class="panel callout">
-      <h3>Sign in required</h3>
-      <p>Dashboard data is available only after the backend confirms an HttpOnly session cookie.</p>
-      <a class="button" href="/login">Go to login</a>
-      {#if error}<p class="error-text">{error}</p>{/if}
-    </div>
-  {:else if summary}
-    <div class="grid cards">
-      <article class="panel stat-card">
-        <span>Backend status</span>
-        <strong>{summary.backendStatus ?? 'unknown'}</strong>
-      </article>
-      <article class="panel stat-card">
-        <span>ocserv status</span>
-        <strong>{summary.ocservStatus ?? 'not_configured'}</strong>
-        <small>Local-only baseline; no live ocserv control is active.</small>
-      </article>
-      <article class="panel stat-card">
-        <span>Active sessions</span>
-        <strong>{summary.activeSessionCount ?? 0}</strong>
-      </article>
-      <article class="panel stat-card">
-        <span>Sample data</span>
-        <strong>{sampleDataMessage}</strong>
-      </article>
+    <p class="text-sm text-slate-500 mt-1 mb-6">
+      Latest backend-collected samples for this node. Session-only metrics remain unavailable until the backend can collect them.
+    </p>
+
+    {#if monitoringError}
+      <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6" role="status">
+        <strong class="text-red-800 text-sm">Monitoring unavailable</strong>
+        <p class="text-red-700 text-sm mt-1">{monitoringError}</p>
+      </div>
+    {/if}
+
+    <!-- Metric cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+      <CardStats
+        title="CPU"
+        value={metricValue(HOST_CPU)}
+        icon={Cpu}
+        unavailable={metricState(HOST_CPU) === 'unavailable'}
+        hint={unavailableReason(HOST_CPU)}
+      />
+      <CardStats
+        title="Memory"
+        value={metricValue(HOST_MEMORY)}
+        icon={Server}
+        unavailable={metricState(HOST_MEMORY) === 'unavailable'}
+        hint={unavailableReason(HOST_MEMORY)}
+      />
+      <CardStats
+        title="Network inbound"
+        value={metricValue(NET_RX)}
+        icon={ArrowDown}
+        unavailable={metricState(NET_RX) === 'unavailable'}
+        hint={unavailableReason(NET_RX)}
+      />
+      <CardStats
+        title="Network outbound"
+        value={metricValue(NET_TX)}
+        icon={ArrowUp}
+        unavailable={metricState(NET_TX) === 'unavailable'}
+        hint={unavailableReason(NET_TX)}
+      />
     </div>
 
-    <section class="panel page-stack" aria-labelledby="dashboard-monitoring-heading">
-      <div class="monitoring-toolbar">
-        <div>
-          <p class="eyebrow">Monitoring</p>
-          <h3 id="dashboard-monitoring-heading">Operational overview</h3>
-          <p class="muted">
-            Latest backend-collected samples for this node. Session-only metrics remain unavailable until the backend can collect them.
-          </p>
-        </div>
-        <div class="monitoring-toolbar">
-          <WindowSelector value={monitoringWindow} windows={MONITORING_WINDOWS} on:change={handleMonitoringWindowChange} />
-          <button class="button" type="button" disabled={monitoringLoading} onclick={() => reloadMonitoring()}>
-            {monitoringLoading ? 'Refreshing…' : 'Refresh'}
-          </button>
+    <!-- Chart grid -->
+    {#if monitoringLoading && !monitoring}
+      <div class="flex items-center justify-center py-12">
+        <div class="text-center">
+          <div class="w-6 h-6 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin mx-auto mb-2"></div>
+          <p class="text-slate-500 text-sm">Loading monitoring overview…</p>
         </div>
       </div>
-
-      {#if monitoringError}
-        <div class="callout warning" role="status">
-          <strong>Monitoring unavailable</strong>
-          <p>{monitoringError}</p>
-        </div>
-      {/if}
-
-      <div class="grid cards">
-        <MetricCard label="CPU" value={metricValue(HOST_CPU)} state={metricState(HOST_CPU)} hint={unavailableReason(HOST_CPU)} />
-        <MetricCard label="Memory" value={metricValue(HOST_MEMORY)} state={metricState(HOST_MEMORY)} hint={unavailableReason(HOST_MEMORY)} />
-        <MetricCard label="Network inbound" value={metricValue(NET_RX)} state={metricState(NET_RX)} hint={unavailableReason(NET_RX)} />
-        <MetricCard label="Network outbound" value={metricValue(NET_TX)} state={metricState(NET_TX)} hint={unavailableReason(NET_TX)} />
+    {:else}
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {#each chartDefinitions as chart}
+          {#if shouldShowChart(chart.metric)}
+            <CardChart title={chart.title} latestValue={metricValue(chart.metric)}>
+              <LineChart data={chartData(chart.metric)} x="timestamp" y="value" height={200} />
+            </CardChart>
+          {:else}
+            <CardStats
+              title={chart.title}
+              value="--"
+              unavailable={true}
+              hint={unavailableReason(chart.metric)}
+            />
+          {/if}
+        {/each}
       </div>
+    {/if}
+  </section>
 
-      {#if monitoringLoading && !monitoring}
-        <div class="panel">Loading monitoring overview…</div>
-      {:else}
-        <div class="chart-grid">
-          {#each chartDefinitions as chart}
-            {#if shouldShowChart(chart.metric)}
-              <TimeSeriesChart title={chart.title} series={metricSeries(chart.metric)} />
-            {:else}
-              <UnavailableMetric title={chart.title} reason={unavailableReason(chart.metric)} />
-            {/if}
-          {/each}
-        </div>
-      {/if}
-    </section>
+  <!-- Analytics section -->
+  <section aria-labelledby="analytics-heading" class="mb-8">
+    <h2 id="analytics-heading" class="text-lg font-semibold text-slate-700 mb-4">Analytics Summary</h2>
+    {#if summary?.analytics}
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+        <CardStats
+          title="Total sessions"
+          value={formatMetricValue('totalSessions', summary.analytics.totalSessions as number ?? undefined)}
+          icon={Users}
+        />
+        <CardStats
+          title="Sample sessions"
+          value={formatMetricValue('sampleSessions', summary.analytics.sampleSessions as number ?? undefined)}
+          icon={Database}
+        />
+        <CardStats
+          title="Total received"
+          value={formatBytes(summary.analytics.totalBytesIn as number ?? undefined)}
+          icon={ArrowDown}
+        />
+        <CardStats
+          title="Total sent"
+          value={formatBytes(summary.analytics.totalBytesOut as number ?? undefined)}
+          icon={ArrowUp}
+        />
+        <CardStats
+          title="Total traffic"
+          value={formatBytes(((summary.analytics.totalBytesIn as number ?? 0) + (summary.analytics.totalBytesOut as number ?? 0)))}
+          icon={Server}
+        />
+      </div>
+    {:else}
+      <p class="text-sm text-slate-500">No analytics summary returned yet.</p>
+    {/if}
+  </section>
 
-    <section class="panel">
-      <h3>Analytics summary</h3>
-      {#if summary?.analytics}
-        <div class="grid cards">
-          <AnalyticsCard label="Total sessions" value={formatMetricValue('totalSessions', summary.analytics.totalSessions as number ?? undefined)} unit="sessions" />
-          <AnalyticsCard label="Sample sessions" value={formatMetricValue('sampleSessions', summary.analytics.sampleSessions as number ?? undefined)} unit="sessions" />
-          <AnalyticsCard label="Total received" value={formatBytes(summary.analytics.totalBytesIn as number ?? undefined)} />
-          <AnalyticsCard label="Total sent" value={formatBytes(summary.analytics.totalBytesOut as number ?? undefined)} />
-          <AnalyticsCard label="Total traffic" value={formatBytes(((summary.analytics.totalBytesIn as number ?? 0) + (summary.analytics.totalBytesOut as number ?? 0)))} />
-        </div>
-      {:else}
-        <p class="muted">No analytics summary returned yet.</p>
-      {/if}
-    </section>
+  <!-- Recent audit section -->
+  <section aria-labelledby="audit-heading" class="mb-8">
+    {#if recentAudit.length > 0}
+      <CardTable title="Recent Audit">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50">
+            <tr class="text-left text-slate-500 font-medium">
+              <th class="px-6 py-3">Time</th>
+              <th class="px-6 py-3">Actor</th>
+              <th class="px-6 py-3">Action</th>
+              <th class="px-6 py-3">Result</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {#each recentAudit as event}
+              <tr class="hover:bg-slate-50">
+                <td class="px-6 py-3 text-slate-700 whitespace-nowrap">{event.createdAt ?? event.timestamp ?? '—'}</td>
+                <td class="px-6 py-3 text-slate-700">{event.actorUsername ?? event.actor ?? '—'}</td>
+                <td class="px-6 py-3 text-slate-700">{event.action ?? event.message ?? '—'}</td>
+                <td class="px-6 py-3">
+                  <span class="inline-block px-2 py-0.5 text-xs font-medium rounded-full {event.outcome === 'success' || event.result === 'success' ? 'bg-emerald-50 text-emerald-700' : event.outcome === 'failure' || event.result === 'failure' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'}">
+                    {event.outcome ?? event.result ?? '—'}
+                  </span>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </CardTable>
+    {:else}
+      <h2 id="audit-heading" class="text-lg font-semibold text-slate-700 mb-4">Recent Audit</h2>
+      <p class="text-sm text-slate-500">No audit events returned yet.</p>
+    {/if}
+  </section>
 
-    <section class="panel">
-      <h3>Recent audit</h3>
-      {#if recentAudit.length > 0}
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Result</th></tr></thead>
-            <tbody>
-              {#each recentAudit as event}
-                <tr>
-                  <td>{event.createdAt ?? event.timestamp ?? '—'}</td>
-                  <td>{event.actorUsername ?? event.actor ?? '—'}</td>
-                  <td>{event.action ?? event.message ?? '—'}</td>
-                  <td>{event.outcome ?? event.result ?? '—'}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {:else}
-        <p class="muted">No audit events returned yet.</p>
-      {/if}
-    </section>
-  {:else}
-    <div class="panel error-text">{error || 'Dashboard summary was not returned.'}</div>
-  {/if}
-</section>
+{:else}
+  <div class="bg-red-50 border border-red-200 rounded-lg p-6">
+    <p class="text-red-700 text-sm">{error || 'Dashboard summary was not returned.'}</p>
+  </div>
+{/if}

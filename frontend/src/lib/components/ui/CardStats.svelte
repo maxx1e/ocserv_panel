@@ -1,12 +1,11 @@
 <script lang="ts">
-  import type { Component } from 'svelte';
   import type { Snippet } from 'svelte';
 
   type Props = {
     title: string;
     value: string;
     subtitle?: string;
-    icon?: Component;
+    icon?: any; // Accepts Svelte 5 components and Svelte 4 class-based components (e.g. lucide-svelte icons)
     trend?: { direction: 'up' | 'down'; value: string };
     unavailable?: boolean;
     hint?: string;
