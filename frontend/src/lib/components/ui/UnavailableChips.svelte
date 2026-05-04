@@ -8,7 +8,7 @@
     chips: Chip[];
   };
 
-  let { chips }: Props = $props();
+  let { chips = [] }: Props = $props();
 </script>
 
 {#if chips.length > 0}

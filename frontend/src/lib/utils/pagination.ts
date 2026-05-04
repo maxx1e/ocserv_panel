@@ -21,14 +21,15 @@ export function paginate<T>(
   page: number,
   pageSize: number
 ): PaginationResult<T> {
-  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const safePageSize = Math.max(1, pageSize);
+  const totalPages = Math.max(1, Math.ceil(items.length / safePageSize));
   const clampedPage = Math.min(Math.max(1, page), totalPages);
-  const start = (clampedPage - 1) * pageSize;
-  const end = start + pageSize;
+  const start = (clampedPage - 1) * safePageSize;
+  const end = start + safePageSize;
   return {
     items: items.slice(start, end),
     totalPages,
     page: clampedPage,
-    pageSize
+    pageSize: safePageSize
   };
 }

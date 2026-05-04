@@ -24,6 +24,7 @@
 </script>
 
 <span
+  role="img"
   class="inline-block rounded-full flex-shrink-0 {colorClass} {sizeClass}"
   aria-label="{status} status"
   title={status}
