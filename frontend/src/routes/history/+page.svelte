@@ -8,6 +8,11 @@
   import CardTable from '$lib/components/ui/CardTable.svelte';
   import CardSettings from '$lib/components/ui/CardSettings.svelte';
   import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
+  import UnavailableChips from '$lib/components/ui/UnavailableChips.svelte';
+  import PaginatedTable from '$lib/components/ui/PaginatedTable.svelte';
+  import type { Chip } from '$lib/components/ui/UnavailableChips.svelte';
+  import { formatRelativeTime, formatAbsoluteTime } from '$lib/utils/format';
+  import { paginate } from '$lib/utils/pagination';
 
   import {
     getHistoryAnalytics,
@@ -77,12 +82,19 @@
   let settingsLoading = $state(false);
   let settingsError = $state('');
   let settingsSuccess = $state('');
+  let sessionsPage = $state(1);
 
   const isOwner = $derived(hasOwnerRole(principal));
   const sessions = $derived(analytics?.recentSessions ?? analytics?.sessions ?? []);
   const sampleWarning = $derived(sampleDataWarning(analytics));
   const totals = $derived(calculateTotals(sessions, analytics?.summary));
   const purgeEnabled = $derived(isOwner && confirmation === 'PURGE' && !purgeSubmitting);
+  const pagedSessions = $derived(paginate(sessions, sessionsPage, 10));
+  const unavailableChips = $derived<Chip[]>(
+    chartDefinitions
+      .filter(chart => !shouldShowChart(chart.metric))
+      .map(chart => ({ name: chart.title, reason: unavailableReason(chart.metric) }))
+  );
 
   onMount(() => {
     void loadHistory();
@@ -100,6 +112,7 @@
   });
 
   async function loadHistory() {
+    sessionsPage = 1;
     loading = true;
     error = '';
     try {
@@ -187,14 +200,9 @@
     return 'Metric data has not been collected for this window yet.';
   }
 
-  function formatGeneratedAt(value: string | undefined): string {
-    if (!value) return 'not loaded yet';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short'
-    }).format(date);
+  function shouldShowChart(metric: string): boolean {
+    if (metricByName(monitoring?.catalog, metric)?.state === 'unavailable') return false;
+    return chartData(metric).length > 0;
   }
 
   async function handlePurge(event: SubmitEvent) {
@@ -341,7 +349,7 @@
       Backend-collected samples for longer history windows. User and ocserv-specific metrics show unavailable states when the backend cannot collect them.
     </p>
     <p class="text-sm text-slate-400 mt-1 mb-6">
-      Generated: {formatGeneratedAt(monitoring?.generatedAt)} · Window: {monitoring?.window ?? monitoringWindow}
+      Generated: {formatAbsoluteTime(monitoring?.generatedAt)} · Window: {monitoring?.window ?? monitoringWindow}
     </p>
 
     {#if monitoringError}
@@ -361,11 +369,14 @@
     {:else}
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {#each chartDefinitions as chart}
-          <CardChart title={chart.title} chartHeight={200}>
-            <MetricChart data={chartData(chart.metric)} metric={chart.metric} height={200} />
-          </CardChart>
+          {#if shouldShowChart(chart.metric)}
+            <CardChart title={chart.title} chartHeight={200}>
+              <MetricChart data={chartData(chart.metric)} metric={chart.metric} height={200} />
+            </CardChart>
+          {/if}
         {/each}
       </div>
+      <UnavailableChips chips={unavailableChips} />
     {/if}
   </section>
 
@@ -373,30 +384,36 @@
   <section aria-labelledby="sessions-heading" class="mb-8">
     {#if sessions.length > 0}
       <CardTable title="Recent historical sessions">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50">
-            <tr class="text-left text-slate-500 font-medium">
-              <th class="px-6 py-3">User</th>
-              <th class="px-6 py-3">Started</th>
-              <th class="px-6 py-3">Ended</th>
-              <th class="px-6 py-3">Received</th>
-              <th class="px-6 py-3">Sent</th>
-              <th class="px-6 py-3">Remote</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            {#each sessions as session}
-              <tr class="hover:bg-slate-50">
-                <td class="px-6 py-3 text-slate-700">{sessionUser(session)}</td>
-                <td class="px-6 py-3 text-slate-700">{session.connectedAt ?? session.startedAt ?? '—'}</td>
-                <td class="px-6 py-3 text-slate-700">{session.disconnectedAt ?? session.endedAt ?? '—'}</td>
-                <td class="px-6 py-3 text-slate-700">{formatBytes(session.rxBytes ?? session.bytesIn ?? 0)}</td>
-                <td class="px-6 py-3 text-slate-700">{formatBytes(session.txBytes ?? session.bytesOut ?? 0)}</td>
-                <td class="px-6 py-3 text-slate-700">{session.remoteAddress ?? '—'}</td>
+        <PaginatedTable
+          totalPages={pagedSessions.totalPages}
+          currentPage={pagedSessions.page}
+          onPageChange={(p) => (sessionsPage = p)}
+        >
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50">
+              <tr class="text-left text-slate-500 font-medium">
+                <th class="px-6 py-3">User</th>
+                <th class="px-6 py-3">Started</th>
+                <th class="px-6 py-3">Ended</th>
+                <th class="px-6 py-3">Received</th>
+                <th class="px-6 py-3">Sent</th>
+                <th class="px-6 py-3">Remote</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              {#each pagedSessions.items as session}
+                <tr class="hover:bg-slate-50">
+                  <td class="px-6 py-3 text-slate-700">{sessionUser(session)}</td>
+                  <td class="px-6 py-3 text-slate-700" title={session.connectedAt ?? session.startedAt ?? ''}>{formatRelativeTime(session.connectedAt ?? session.startedAt)}</td>
+                  <td class="px-6 py-3 text-slate-700" title={session.disconnectedAt ?? session.endedAt ?? ''}>{formatRelativeTime(session.disconnectedAt ?? session.endedAt)}</td>
+                  <td class="px-6 py-3 text-slate-700">{formatBytes(session.rxBytes ?? session.bytesIn ?? 0)}</td>
+                  <td class="px-6 py-3 text-slate-700">{formatBytes(session.txBytes ?? session.bytesOut ?? 0)}</td>
+                  <td class="px-6 py-3 text-slate-700">{session.remoteAddress ?? '—'}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </PaginatedTable>
       </CardTable>
     {:else}
       <h2 id="sessions-heading" class="text-lg font-semibold text-slate-700 mb-4">Recent historical sessions</h2>
