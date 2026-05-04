@@ -60,8 +60,11 @@ func AllSettingDefs() []SettingDef {
 		{Key: "installation.log_dir", Label: "Log Directory", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/var/log/ocserv-panel", SortOrder: 3},
 		{Key: "installation.ocserv_config_path", Label: "ocserv Config Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/etc/ocserv/ocserv.conf", SortOrder: 4},
 		{Key: "installation.ocserv_socket_path", Label: "ocserv Socket Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/var/run/ocserv-socket", SortOrder: 5},
-		{Key: "installation.ocpasswd_path", Label: "ocpasswd Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/etc/ocserv/ocpasswd", SortOrder: 6},
-		{Key: "installation.cert_dir", Label: "Certificate Directory", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/etc/ocserv/certs", SortOrder: 7},
+		{Key: "installation.ocserv_bin_path", Label: "ocserv Binary Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/usr/local/sbin/ocserv", SortOrder: 6},
+		{Key: "installation.occtl_bin_path", Label: "occtl Binary Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/usr/local/bin/occtl", SortOrder: 7},
+		{Key: "installation.ocpasswd_bin_path", Label: "ocpasswd Binary Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/usr/local/bin/ocpasswd", SortOrder: 8},
+		{Key: "installation.ocpasswd_file_path", Label: "ocpasswd Password File", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/etc/ocserv/ocpasswd", SortOrder: 9},
+		{Key: "installation.cert_dir", Label: "Certificate Directory", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/etc/ocserv/certs", SortOrder: 10},
 
 		// Service
 		{Key: "service.name", Label: "Service Name", Section: "service", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "ocserv-panel", SortOrder: 1},
@@ -70,6 +73,7 @@ func AllSettingDefs() []SettingDef {
 		{Key: "service.start_on_boot", Label: "Start on Boot", Section: "service", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "true", SortOrder: 4},
 		{Key: "service.restart_on_failure", Label: "Restart on Failure", Section: "service", Type: SettingTypeToggle, Source: SettingSourceDatabase, RequiresRestart: false, Default: "true", SortOrder: 5},
 		{Key: "service.maintenance_mode", Label: "Maintenance Mode", Section: "service", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "false", SortOrder: 6},
+		{Key: "service.systemd_unit_name", Label: "Systemd Unit Name", Section: "service", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "ocserv", SortOrder: 7},
 
 		// Web Access
 		{Key: "web.host", Label: "Listen Host", Section: "web", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "127.0.0.1", SortOrder: 1},

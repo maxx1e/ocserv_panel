@@ -17,6 +17,10 @@ func unmarshalTOML(data []byte, cfg *Config) error {
 	return toml.Unmarshal(data, cfg)
 }
 
+func unmarshalTOMLRaw(data []byte, v any) error {
+	return toml.Unmarshal(data, v)
+}
+
 func marshalTOML(cfg Config) ([]byte, error) {
 	return toml.Marshal(cfg)
 }

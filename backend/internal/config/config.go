@@ -22,7 +22,10 @@ type InstallationConfig struct {
 	LogDir           string `toml:"log_dir"`
 	OcservConfigPath string `toml:"ocserv_config_path"`
 	OcservSocketPath string `toml:"ocserv_socket_path"`
-	OcpasswdPath     string `toml:"ocpasswd_path"`
+	OcservBinPath    string `toml:"ocserv_bin_path"`
+	OcctlBinPath     string `toml:"occtl_bin_path"`
+	OcpasswdBinPath  string `toml:"ocpasswd_bin_path"`
+	OcpasswdFilePath string `toml:"ocpasswd_file_path"`
 	CertDir          string `toml:"cert_dir"`
 }
 
@@ -33,6 +36,7 @@ type ServiceConfig struct {
 	Group           string `toml:"group"`
 	StartOnBoot     bool   `toml:"start_on_boot"`
 	MaintenanceMode bool   `toml:"maintenance_mode"`
+	SystemdUnitName string `toml:"systemd_unit_name"`
 }
 
 // WebConfig holds web server settings.
@@ -94,7 +98,10 @@ func Defaults() Config {
 			LogDir:           "/var/log/ocserv-panel",
 			OcservConfigPath: "/etc/ocserv/ocserv.conf",
 			OcservSocketPath: "/var/run/ocserv-socket",
-			OcpasswdPath:     "/etc/ocserv/ocpasswd",
+			OcservBinPath:    "/usr/local/sbin/ocserv",
+			OcctlBinPath:     "/usr/local/bin/occtl",
+			OcpasswdBinPath:  "/usr/local/bin/ocpasswd",
+			OcpasswdFilePath: "/etc/ocserv/ocpasswd",
 			CertDir:          "/etc/ocserv/certs",
 		},
 		Service: ServiceConfig{
@@ -103,6 +110,7 @@ func Defaults() Config {
 			Group:           "ocserv-panel",
 			StartOnBoot:     true,
 			MaintenanceMode: false,
+			SystemdUnitName: "ocserv",
 		},
 		Web: WebConfig{
 			Host:    "127.0.0.1",
@@ -141,6 +149,20 @@ func Load(path string) (Config, error) {
 	if err := unmarshalTOML(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config file %s: %w", path, err)
 	}
+
+	// Backward compatibility: if OcpasswdFilePath is empty, try the legacy
+	// ocpasswd_path TOML key that was renamed in v2.
+	if cfg.Installation.OcpasswdFilePath == "" {
+		var raw map[string]any
+		if err := unmarshalTOMLRaw(data, &raw); err == nil {
+			if inst, ok := raw["installation"].(map[string]any); ok {
+				if v, ok := inst["ocpasswd_path"].(string); ok && v != "" {
+					cfg.Installation.OcpasswdFilePath = v
+				}
+			}
+		}
+	}
+
 	return cfg, nil
 }
 
