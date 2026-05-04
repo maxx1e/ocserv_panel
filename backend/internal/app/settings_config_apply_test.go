@@ -1,0 +1,159 @@
+package app
+
+import (
+	"errors"
+	"strconv"
+	"testing"
+
+	"ocserv_panel/backend/internal/config"
+)
+
+func TestApplySettingToConfigUnknownKey(t *testing.T) {
+	cfg := config.Defaults()
+	err := applySettingToConfig(&cfg, "does.not.exist", "value")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown key err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestApplySettingToConfigStringField(t *testing.T) {
+	cfg := config.Defaults()
+	if err := applySettingToConfig(&cfg, "installation.ocserv_bin_path", "/custom/ocserv"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if cfg.Installation.OcservBinPath != "/custom/ocserv" {
+		t.Fatalf("OcservBinPath = %q, want %q", cfg.Installation.OcservBinPath, "/custom/ocserv")
+	}
+}
+
+func TestApplySettingToConfigNumberField(t *testing.T) {
+	cfg := config.Defaults()
+	if err := applySettingToConfig(&cfg, "web.port", "9090"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if cfg.Web.Port != 9090 {
+		t.Fatalf("Web.Port = %d, want 9090", cfg.Web.Port)
+	}
+}
+
+func TestApplySettingToConfigNumberFieldInvalid(t *testing.T) {
+	cfg := config.Defaults()
+	err := applySettingToConfig(&cfg, "web.port", "notanumber")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("invalid number err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestApplySettingToConfigBoolField(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Service.StartOnBoot = true
+	if err := applySettingToConfig(&cfg, "service.start_on_boot", "false"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if cfg.Service.StartOnBoot != false {
+		t.Fatalf("Service.StartOnBoot = %v, want false", cfg.Service.StartOnBoot)
+	}
+}
+
+func TestApplySettingToConfigBoolFieldInvalid(t *testing.T) {
+	cfg := config.Defaults()
+	err := applySettingToConfig(&cfg, "service.start_on_boot", "yes")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("invalid bool err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestConfigValueForKeyAllConfigSourceKeys(t *testing.T) {
+	cfg := config.Defaults()
+	keys := []struct {
+		key   string
+		value string
+	}{
+		{"general.app_name", "MyPanel"},
+		{"general.timezone", "UTC"},
+		{"installation.config_path", "/etc/panel.toml"},
+		{"installation.data_dir", "/var/lib/panel"},
+		{"installation.log_dir", "/var/log/panel"},
+		{"installation.ocserv_config_path", "/etc/ocserv/ocserv.conf"},
+		{"installation.ocserv_socket_path", "/run/ocserv.sock"},
+		{"installation.ocserv_bin_path", "/usr/sbin/ocserv"},
+		{"installation.occtl_bin_path", "/usr/bin/occtl"},
+		{"installation.ocpasswd_bin_path", "/usr/bin/ocpasswd"},
+		{"installation.ocpasswd_file_path", "/etc/ocserv/ocpasswd"},
+		{"installation.cert_dir", "/etc/certs"},
+		{"service.name", "my-panel"},
+		{"service.user", "paneluser"},
+		{"service.group", "panelgroup"},
+		{"service.start_on_boot", "false"},
+		{"service.maintenance_mode", "true"},
+		{"service.systemd_unit_name", "ocserv"},
+		{"web.host", "0.0.0.0"},
+		{"web.port", "9443"},
+		{"web.base_url", "https://panel.example.com"},
+		{"web.reverse_proxy", "true"},
+		{"web.trusted_proxies", "10.0.0.1"},
+		{"web.https", "true"},
+		{"security.allowed_admin_ips", "192.168.1.0/24"},
+		{"security.tls_cert_path", "/etc/certs/tls.crt"},
+		{"security.tls_key_path", "/etc/certs/tls.key"},
+		{"security.encryption_key_path", "/etc/certs/enc.key"},
+		{"security.csrf_enabled", "false"},
+		{"security.security_headers", "false"},
+		{"database.dsn", "custom.db"},
+		{"database.max_open_conns", "10"},
+		{"database.max_idle_conns", "3"},
+		{"database.conn_max_lifetime", "600"},
+		{"monitoring.health_endpoint", "false"},
+		{"monitoring.metrics_endpoint", "true"},
+		{"monitoring.dashboard_refresh_interval", "30"},
+	}
+	for _, tc := range keys {
+		t.Run(tc.key, func(t *testing.T) {
+			c := cfg // copy
+			if err := applySettingToConfig(&c, tc.key, tc.value); err != nil {
+				t.Fatalf("applySettingToConfig(%q, %q): %v", tc.key, tc.value, err)
+			}
+			got := configValueForKey(c, tc.key)
+			if got != tc.value {
+				t.Fatalf("configValueForKey after apply = %q, want %q", got, tc.value)
+			}
+		})
+	}
+}
+
+func TestComputePendingChangesNoDiff(t *testing.T) {
+	cfg := config.Defaults()
+	pending := computePendingChanges(cfg, cfg)
+	if len(pending) != 0 {
+		t.Fatalf("expected no pending changes when configs are identical, got %v", pending)
+	}
+}
+
+func TestComputePendingChangesDetectsDiff(t *testing.T) {
+	startup := config.Defaults()
+	current := config.Defaults()
+	current.Installation.OcservBinPath = "/new/path/ocserv"
+	current.Web.Port = 9090
+
+	pending := computePendingChanges(startup, current)
+	if len(pending) == 0 {
+		t.Fatal("expected pending changes when configs differ")
+	}
+
+	found := map[string]bool{}
+	for _, k := range pending {
+		found[k] = true
+	}
+	if !found["installation.ocserv_bin_path"] {
+		t.Errorf("expected installation.ocserv_bin_path in pending, got %v", pending)
+	}
+	if !found["web.port"] {
+		t.Errorf("expected web.port in pending, got %v", pending)
+	}
+}
+
+// Helper: parse int without error (only call after validation).
+func mustAtoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
