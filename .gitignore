@@ -31,3 +31,6 @@ frontend/.vite/
 
 # Metrics runtime data (Prometheus TSDB)
 backend/data/
+
+# Reference design assets (notus-svelte template)
+notus-svelte-main/
