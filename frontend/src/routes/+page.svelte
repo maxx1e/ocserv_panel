@@ -7,6 +7,11 @@
   import CardChart from '$lib/components/ui/CardChart.svelte';
   import CardTable from '$lib/components/ui/CardTable.svelte';
   import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
+  import UnavailableChips from '$lib/components/ui/UnavailableChips.svelte';
+  import PaginatedTable from '$lib/components/ui/PaginatedTable.svelte';
+  import type { Chip } from '$lib/components/ui/UnavailableChips.svelte';
+  import { formatRelativeTime } from '$lib/utils/format';
+  import { paginate } from '$lib/utils/pagination';
 
   import {
     getDashboardSummary,
@@ -59,9 +64,18 @@
   let monitoringError = $state('');
   let monitoringRequestId = 0;
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
+  let auditPage = $state(1);
 
   const sampleDataMessage = $derived(sampleDataText(summary?.sampleData));
   const recentAudit = $derived(summary?.recentAudit ?? []);
+
+  const unavailableChips = $derived<Chip[]>(
+    chartDefinitions
+      .filter(chart => !shouldShowChart(chart.metric))
+      .map(chart => ({ name: chart.title, reason: unavailableReason(chart.metric) }))
+  );
+
+  const pagedAudit = $derived(paginate(recentAudit, auditPage, 10));
 
   onMount(() => {
     void loadDashboard();
@@ -79,6 +93,7 @@
   });
 
   async function loadDashboard() {
+    auditPage = 1;
     loading = true;
     error = '';
     try {
@@ -148,7 +163,8 @@
   }
 
   function shouldShowChart(metric: string): boolean {
-    return metricByName(monitoring?.catalog, metric)?.state !== 'unavailable' && Boolean(metricSeries(metric));
+    if (metricByName(monitoring?.catalog, metric)?.state === 'unavailable') return false;
+    return chartData(metric).length > 0;
   }
 
   function sampleDataText(value: DashboardSummary['sampleData']): string {
@@ -207,11 +223,13 @@
     <CardStats
       title="Backend status"
       value={summary.backendStatus ?? 'unknown'}
+      statusValue={summary.backendStatus ?? 'unknown'}
       icon={Server}
     />
     <CardStats
       title="ocserv status"
       value={summary.ocserv?.status ?? summary.ocservStatus ?? 'not_configured'}
+      statusValue={summary.ocserv?.status ?? summary.ocservStatus ?? 'not_configured'}
       subtitle={summary.ocserv?.message ?? 'Local-only baseline; no live ocserv control is active.'}
       icon={Shield}
     />
@@ -307,16 +325,10 @@
             <CardChart title={chart.title} latestValue={metricValue(chart.metric)} chartHeight={200}>
               <MetricChart data={chartData(chart.metric)} metric={chart.metric} height={200} />
             </CardChart>
-          {:else}
-            <CardStats
-              title={chart.title}
-              value="--"
-              unavailable={true}
-              hint={unavailableReason(chart.metric)}
-            />
           {/if}
         {/each}
       </div>
+      <UnavailableChips chips={unavailableChips} />
     {/if}
   </section>
 
@@ -360,30 +372,36 @@
   <section aria-labelledby="audit-heading" class="mb-8">
     {#if recentAudit.length > 0}
       <CardTable title="Recent Audit">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-50">
-            <tr class="text-left text-slate-500 font-medium">
-              <th class="px-6 py-3">Time</th>
-              <th class="px-6 py-3">Actor</th>
-              <th class="px-6 py-3">Action</th>
-              <th class="px-6 py-3">Result</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            {#each recentAudit as event}
-              <tr class="hover:bg-slate-50">
-                <td class="px-6 py-3 text-slate-700 whitespace-nowrap">{event.createdAt ?? event.timestamp ?? '—'}</td>
-                <td class="px-6 py-3 text-slate-700">{event.actorUsername ?? event.actor ?? '—'}</td>
-                <td class="px-6 py-3 text-slate-700">{event.action ?? event.message ?? '—'}</td>
-                <td class="px-6 py-3">
-                  <span class="inline-block px-2 py-0.5 text-xs font-medium rounded-full {event.outcome === 'success' || event.result === 'success' ? 'bg-emerald-50 text-emerald-700' : event.outcome === 'failure' || event.result === 'failure' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'}">
-                    {event.outcome ?? event.result ?? '—'}
-                  </span>
-                </td>
+        <PaginatedTable
+          totalPages={pagedAudit.totalPages}
+          currentPage={pagedAudit.page}
+          onPageChange={(p) => (auditPage = p)}
+        >
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50">
+              <tr class="text-left text-slate-500 font-medium">
+                <th class="px-6 py-3">Time</th>
+                <th class="px-6 py-3">Actor</th>
+                <th class="px-6 py-3">Action</th>
+                <th class="px-6 py-3">Result</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              {#each pagedAudit.items as event}
+                <tr class="hover:bg-slate-50">
+                  <td class="px-6 py-3 text-slate-700 whitespace-nowrap" title={event.createdAt ?? event.timestamp ?? ''}>{formatRelativeTime(event.createdAt ?? event.timestamp)}</td>
+                  <td class="px-6 py-3 text-slate-700">{event.actorUsername ?? event.actor ?? '—'}</td>
+                  <td class="px-6 py-3 text-slate-700">{event.action ?? event.message ?? '—'}</td>
+                  <td class="px-6 py-3">
+                    <span class="inline-block px-2 py-0.5 text-xs font-medium rounded-full {event.outcome === 'success' || event.result === 'success' ? 'bg-emerald-50 text-emerald-700' : event.outcome === 'failure' || event.result === 'failure' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'}">
+                      {event.outcome ?? event.result ?? '—'}
+                    </span>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </PaginatedTable>
       </CardTable>
     {:else}
       <h2 id="audit-heading" class="text-lg font-semibold text-slate-700 mb-4">Recent Audit</h2>
