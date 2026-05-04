@@ -102,6 +102,26 @@ func (a *OcctlAdapter) ListUsers(ctx context.Context) ([]User, error) {
 	return users, nil
 }
 
+// occtlSessionDetail is an intermediate struct that captures the JSON field names
+// that occtl uses in its `show session <id> --output-type json` output.
+// Fields are mapped to SessionDetail after parsing.
+type occtlSessionDetail struct {
+	ID             string   `json:"id"`
+	Username       string   `json:"username"`
+	RemoteAddress  string   `json:"remote_address"`
+	ConnectedAt    string   `json:"connected_at"`
+	VPNAddress     string   `json:"vpn_address"`
+	IPv4           string   `json:"vpn_ipv4"`
+	IPv6           string   `json:"vpn_ipv6"`
+	RxBytes        int64    `json:"rx_bytes"`
+	TxBytes        int64    `json:"tx_bytes"`
+	UserAgent      string   `json:"user_agent"`
+	Device         string   `json:"device"`
+	Routes         []string `json:"routes"`
+	DNS            []string `json:"dns"`
+	ReconnectCount int      `json:"reconnect_count"`
+}
+
 // GetSessionDetails calls `occtl show session <id> --output-type json`.
 // Timeout: 10 seconds.
 func (a *OcctlAdapter) GetSessionDetails(ctx context.Context, id string) (*SessionDetail, error) {
@@ -116,11 +136,45 @@ func (a *OcctlAdapter) GetSessionDetails(ctx context.Context, id string) (*Sessi
 		return nil, fmt.Errorf("get session details %s: %s", id, strings.TrimSpace(result.Stderr))
 	}
 
-	var detail SessionDetail
-	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &detail); err != nil {
+	var raw occtlSessionDetail
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &raw); err != nil {
 		return nil, fmt.Errorf("parse session detail: %w", err)
 	}
-	return &detail, nil
+
+	connectedAt, _ := time.Parse(time.RFC3339, raw.ConnectedAt)
+	detail := &SessionDetail{
+		ID:             raw.ID,
+		Username:       raw.Username,
+		RemoteAddress:  raw.RemoteAddress,
+		ConnectedAt:    connectedAt,
+		VPNAddress:     raw.VPNAddress,
+		IPv4:           raw.IPv4,
+		IPv6:           raw.IPv6,
+		RxBytes:        raw.RxBytes,
+		TxBytes:        raw.TxBytes,
+		UserAgent:      raw.UserAgent,
+		Device:         raw.Device,
+		Routes:         raw.Routes,
+		DNS:            raw.DNS,
+		ReconnectCount: raw.ReconnectCount,
+	}
+	return detail, nil
+}
+
+// TerminateSession calls `occtl terminate id <sessionID>`.
+// Timeout: 15 seconds.
+func (a *OcctlAdapter) TerminateSession(ctx context.Context, sessionID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	result, err := a.runner.Run(ctx, a.occtlPath, a.withSocket([]string{"terminate", "id", sessionID}), nil)
+	if err != nil {
+		return fmt.Errorf("terminate session %s: %w", sessionID, err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("terminate session %s: %s", sessionID, strings.TrimSpace(result.Stderr))
+	}
+	return nil
 }
 
 // withSocket prepends --socket-file if a socket path was configured.

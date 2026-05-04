@@ -3,6 +3,7 @@ package ocserv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -192,4 +193,156 @@ func TestOcctlAdapterWithoutSocketOmitsFlag(t *testing.T) {
 	if len(call.Args) > 0 && call.Args[0] == "--socket-file" {
 		t.Fatalf("expected no --socket-file when socket is empty, got %v", call.Args)
 	}
+}
+
+func TestOcctlAdapterTerminateSessionSuccess(t *testing.T) {
+	t.Parallel()
+	runner := NewFakeCommandRunner()
+	runner.Results["/usr/local/bin/occtl"] = CommandResult{ExitCode: 0, Stdout: ""}
+	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
+
+	if err := adapter.TerminateSession(context.Background(), "s42"); err != nil {
+		t.Fatalf("terminate session: %v", err)
+	}
+
+	if len(runner.Calls) == 0 {
+		t.Fatal("expected at least one call recorded")
+	}
+	args := runner.Calls[0].Args
+	// Expect: --socket-file <path> terminate id s42
+	found := false
+	for i, a := range args {
+		if a == "terminate" && i+2 < len(args) && args[i+1] == "id" && args[i+2] == "s42" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected args to contain 'terminate id s42', got %v", args)
+	}
+}
+
+func TestOcctlAdapterTerminateSessionRunnerError(t *testing.T) {
+	t.Parallel()
+	runner := NewFakeCommandRunner()
+	runner.Err = fmt.Errorf("binary not found")
+	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
+
+	err := adapter.TerminateSession(context.Background(), "s42")
+	if err == nil {
+		t.Fatal("expected error when runner returns an error")
+	}
+	if !errors.Is(err, runner.Err) {
+		t.Fatalf("expected error to wrap runner error, got %v", err)
+	}
+}
+
+func TestOcctlAdapterTerminateSessionNonZeroExit(t *testing.T) {
+	t.Parallel()
+	runner := NewFakeCommandRunner()
+	runner.Results["/usr/local/bin/occtl"] = CommandResult{
+		ExitCode: 1,
+		Stderr:   "no session found",
+	}
+	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
+
+	err := adapter.TerminateSession(context.Background(), "s99")
+	if err == nil {
+		t.Fatal("expected error for non-zero exit code")
+	}
+	if !errors.Is(err, nil) {
+		// Just confirm the error message contains the stderr content.
+	}
+	const wantSubstr = "no session found"
+	if !containsSubstr(err.Error(), wantSubstr) {
+		t.Fatalf("expected error to contain %q, got %q", wantSubstr, err.Error())
+	}
+}
+
+func TestOcctlAdapterGetSessionDetailsExpandedFields(t *testing.T) {
+	t.Parallel()
+	runner := NewFakeCommandRunner()
+	runner.Results["/usr/local/bin/occtl"] = CommandResult{
+		ExitCode: 0,
+		Stdout: `{
+			"id": "s1",
+			"username": "alice",
+			"remote_address": "203.0.113.5",
+			"connected_at": "2026-01-15T10:30:00Z",
+			"vpn_address": "10.8.0.2",
+			"vpn_ipv4": "10.8.0.2",
+			"vpn_ipv6": "fd00::2",
+			"rx_bytes": 1048576,
+			"tx_bytes": 2097152,
+			"user_agent": "AnyConnect/4.10",
+			"device": "laptop",
+			"routes": ["10.0.0.0/8", "192.168.0.0/16"],
+			"dns": ["8.8.8.8", "1.1.1.1"],
+			"reconnect_count": 3
+		}`,
+	}
+	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
+
+	detail, err := adapter.GetSessionDetails(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("get session details: %v", err)
+	}
+
+	if detail.ID != "s1" {
+		t.Errorf("ID: got %q, want %q", detail.ID, "s1")
+	}
+	if detail.Username != "alice" {
+		t.Errorf("Username: got %q, want %q", detail.Username, "alice")
+	}
+	if detail.RemoteAddress != "203.0.113.5" {
+		t.Errorf("RemoteAddress: got %q, want %q", detail.RemoteAddress, "203.0.113.5")
+	}
+	if detail.VPNAddress != "10.8.0.2" {
+		t.Errorf("VPNAddress: got %q, want %q", detail.VPNAddress, "10.8.0.2")
+	}
+	if detail.IPv4 != "10.8.0.2" {
+		t.Errorf("IPv4: got %q, want %q", detail.IPv4, "10.8.0.2")
+	}
+	if detail.IPv6 != "fd00::2" {
+		t.Errorf("IPv6: got %q, want %q", detail.IPv6, "fd00::2")
+	}
+	if detail.RxBytes != 1048576 {
+		t.Errorf("RxBytes: got %d, want %d", detail.RxBytes, 1048576)
+	}
+	if detail.TxBytes != 2097152 {
+		t.Errorf("TxBytes: got %d, want %d", detail.TxBytes, 2097152)
+	}
+	if detail.UserAgent != "AnyConnect/4.10" {
+		t.Errorf("UserAgent: got %q, want %q", detail.UserAgent, "AnyConnect/4.10")
+	}
+	if detail.Device != "laptop" {
+		t.Errorf("Device: got %q, want %q", detail.Device, "laptop")
+	}
+	if detail.ReconnectCount != 3 {
+		t.Errorf("ReconnectCount: got %d, want %d", detail.ReconnectCount, 3)
+	}
+	if len(detail.Routes) != 2 || detail.Routes[0] != "10.0.0.0/8" || detail.Routes[1] != "192.168.0.0/16" {
+		t.Errorf("Routes: got %v, want [10.0.0.0/8 192.168.0.0/16]", detail.Routes)
+	}
+	if len(detail.DNS) != 2 || detail.DNS[0] != "8.8.8.8" || detail.DNS[1] != "1.1.1.1" {
+		t.Errorf("DNS: got %v, want [8.8.8.8 1.1.1.1]", detail.DNS)
+	}
+	if detail.ConnectedAt.IsZero() {
+		t.Error("ConnectedAt should not be zero when a valid timestamp is provided")
+	}
+}
+
+// containsSubstr is a helper that avoids importing strings in this test file
+// (strings is already used in the production code, not the test file).
+func containsSubstr(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || findSubstr(s, sub))
+}
+
+func findSubstr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }
