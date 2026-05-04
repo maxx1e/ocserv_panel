@@ -462,7 +462,7 @@ export function getOcservConfigIssues(): Promise<OcservConfigIssue[]> {
   return apiFetch<OcservConfigIssue[]>('/api/ocserv/config/issues');
 }
 
-
+export function principalFromAuth(auth: AuthSummary | null): Principal | null {
   if (!auth) return null;
   const principal = auth.principal ?? auth.user;
   if (!principal) return null;
