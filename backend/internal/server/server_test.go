@@ -1000,3 +1000,96 @@ func TestHealthzRejectsNonGET(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusMethodNotAllowed, rec.Code)
 	}
 }
+
+func TestHandleRestartStatusNoChanges(t *testing.T) {
+	h := newTestHarnessWithTempConfig(t)
+	token := h.login(t, "owner", "owner-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/settings/restart-status", nil, token)
+
+	assertStatus(t, rec, http.StatusOK)
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+	if body["restart_required"] != false {
+		t.Errorf("restart_required = %v, want false", body["restart_required"])
+	}
+}
+
+func TestHandleRestartStatusAfterConfigUpdate(t *testing.T) {
+	h := newTestHarnessWithTempConfig(t)
+	token := h.login(t, "owner", "owner-password")
+
+	// Update a config-source setting to trigger a pending change.
+	updateRec := serveAPI(
+		t,
+		h.router,
+		http.MethodPut,
+		"/api/settings/installation.ocserv_bin_path",
+		map[string]string{"value": "/new/ocserv"},
+		token,
+	)
+	assertStatus(t, updateRec, http.StatusOK)
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/settings/restart-status", nil, token)
+
+	assertStatus(t, rec, http.StatusOK)
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+	if body["restart_required"] != true {
+		t.Errorf("restart_required = %v, want true", body["restart_required"])
+	}
+}
+
+// newTestHarnessWithTempConfig creates a testHarness where the SettingsService
+// is backed by a real temporary TOML config file so that config-source settings
+// can be updated and RestartStatus can detect pending changes.
+func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
+	t.Helper()
+
+	ctx := context.Background()
+	database, err := db.OpenSQLite(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Fatalf("close sqlite: %v", err)
+		}
+	})
+	if err := db.ApplyMigrations(ctx, database, migrationsDir(t)); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+
+	// Write an initial TOML config file to a temp directory.
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "panel.toml")
+	initialCfg := config.Defaults()
+	if err := config.Save(initialCfg, cfgPath); err != nil {
+		t.Fatalf("write initial config: %v", err)
+	}
+
+	s := store.New(database)
+	recorder := audit.NewSQLiteRecorder(s)
+	authService := app.NewAuthService(s, recorder)
+	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
+	monitoringService := app.NewMonitoringService(metrics.NewMemoryStore(), rbac.NewDefaultAuthorizer(), nil, recorder)
+	settingsService := app.NewSettingsService(&initialCfg, cfgPath, s, recorder, rbac.NewDefaultAuthorizer())
+	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
+
+	h := &testHarness{
+		database:   database,
+		store:      s,
+		ocservFake: fakeManager,
+		router: NewAppRouter(
+			authService,
+			dashboardService,
+			monitoringService,
+			settingsService,
+			ocservSvc,
+			rbac.NewDefaultAuthorizer(),
+			AppOptions{CookieSecure: true},
+		),
+	}
+	h.createOwner(t, "owner", "owner-password")
+	return h
+}

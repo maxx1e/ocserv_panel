@@ -56,14 +56,17 @@ func (a *App) handleRestartStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.authorizer.Allowed(principalRoles(principal), rbac.PermissionSettingsRead) {
-		writeError(w, http.StatusForbidden, "permission denied")
+	required, pending, err := a.settingsService.RestartStatus(r.Context(), principal)
+	if err != nil {
+		a.writeAppError(w, err)
 		return
 	}
-	// Placeholder: config diffing not yet implemented.
+	if pending == nil {
+		pending = []string{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"restart_required": false,
-		"pending_changes":  []string{},
+		"restart_required": required,
+		"pending_changes":  pending,
 	})
 }
 
