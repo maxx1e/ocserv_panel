@@ -208,6 +208,144 @@ func TestOcservServiceListUsersAllowedForViewer(t *testing.T) {
 	}
 }
 
+// capturingRecorder records audit events for test assertions.
+type capturingRecorder struct {
+	events []audit.Event
+}
+
+func (r *capturingRecorder) Record(_ context.Context, event audit.Event) error {
+	r.events = append(r.events, event)
+	return nil
+}
+
+// newTestOcservServiceWithRecorder is like newTestOcservService but uses a
+// capturing recorder so tests can inspect audit events.
+func newTestOcservServiceWithRecorder(t *testing.T, svcStatus ocserv.ServiceStatus) (
+	*OcservService,
+	*ocserv.FakeManager,
+	*capturingRecorder,
+) {
+	t.Helper()
+
+	runner := ocserv.NewFakeCommandRunner()
+	fakeSvc := ocserv.NewFakeServiceManager(svcStatus)
+	checker := ocserv.NewReadinessChecker(ocserv.ReadinessConfig{}, runner, fakeSvc)
+
+	fakeManager := ocserv.NewFakeManager()
+	fakePasswd := ocserv.NewFakePasswdManager()
+	validator := ocserv.NewConfigValidator("/nonexistent/ocserv.conf")
+	recorder := &capturingRecorder{}
+
+	svc := NewOcservService(
+		checker,
+		fakeManager,
+		fakePasswd,
+		fakeSvc,
+		validator,
+		recorder,
+		rbac.NewDefaultAuthorizer(),
+	)
+	return svc, fakeManager, recorder
+}
+
+// TerminateSession tests
+
+func TestOcservServiceTerminateSessionDeniedForViewer(t *testing.T) {
+	t.Parallel()
+	svc, _, rec := newTestOcservServiceWithRecorder(t, ocserv.ServiceActive)
+	err := svc.TerminateSession(context.Background(), viewerPrincipal(), "s1")
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("expected ErrPermissionDenied for viewer, got %v", err)
+	}
+	if len(rec.events) != 1 {
+		t.Fatalf("expected 1 audit event from requirePerm deny, got %d", len(rec.events))
+	}
+	if rec.events[0].Outcome != audit.OutcomeDenied {
+		t.Fatalf("expected denied outcome, got %q", rec.events[0].Outcome)
+	}
+}
+
+func TestOcservServiceTerminateSessionSuccess(t *testing.T) {
+	t.Parallel()
+	svc, fakeManager, rec := newTestOcservServiceWithRecorder(t, ocserv.ServiceActive)
+	fakeManager.TerminateErr = nil
+
+	if err := svc.TerminateSession(context.Background(), ownerPrincipal(), "s42"); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(rec.events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(rec.events))
+	}
+	ev := rec.events[0]
+	if ev.Action != "ocserv.sessions.terminate" {
+		t.Errorf("expected action %q, got %q", "ocserv.sessions.terminate", ev.Action)
+	}
+	if ev.ResourceType != "ocserv_session" {
+		t.Errorf("expected resource type %q, got %q", "ocserv_session", ev.ResourceType)
+	}
+	if ev.ResourceID != "s42" {
+		t.Errorf("expected resource id %q, got %q", "s42", ev.ResourceID)
+	}
+	if ev.Outcome != audit.OutcomeSuccess {
+		t.Errorf("expected success outcome, got %q", ev.Outcome)
+	}
+}
+
+func TestOcservServiceTerminateSessionManagerFailure(t *testing.T) {
+	t.Parallel()
+	svc, fakeManager, rec := newTestOcservServiceWithRecorder(t, ocserv.ServiceActive)
+	fakeManager.TerminateErr = errors.New("socket unavailable")
+
+	err := svc.TerminateSession(context.Background(), ownerPrincipal(), "s9")
+	if err == nil {
+		t.Fatal("expected error on manager failure, got nil")
+	}
+	if len(rec.events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(rec.events))
+	}
+	if rec.events[0].Outcome != audit.OutcomeFailure {
+		t.Errorf("expected failure outcome, got %q", rec.events[0].Outcome)
+	}
+}
+
+// GetSessionDetail tests
+
+func TestOcservServiceGetSessionDetailDeniedForViewer(t *testing.T) {
+	t.Parallel()
+	// viewer does not have sessions:terminate, but does have sessions:read —
+	// GetSessionDetail uses sessions:read, so viewer IS allowed. Test unauthenticated instead.
+	svc, _, _ := newTestOcservServiceWithRecorder(t, ocserv.ServiceActive)
+	_, err := svc.GetSessionDetail(context.Background(), auth.Principal{}, "s1")
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("expected ErrUnauthenticated for anonymous principal, got %v", err)
+	}
+}
+
+func TestOcservServiceGetSessionDetailSuccess(t *testing.T) {
+	t.Parallel()
+	svc, fakeManager, _ := newTestOcservServiceWithRecorder(t, ocserv.ServiceActive)
+	want := &ocserv.SessionDetail{ID: "s5", Username: "bob"}
+	fakeManager.SessionDetails["s5"] = want
+
+	got, err := svc.GetSessionDetail(context.Background(), viewerPrincipal(), "s5")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got.ID != want.ID || got.Username != want.Username {
+		t.Errorf("expected %+v, got %+v", want, got)
+	}
+}
+
+func TestOcservServiceGetSessionDetailManagerError(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newTestOcservServiceWithRecorder(t, ocserv.ServiceActive)
+	// FakeManager returns ErrNotConfigured for unknown ids by default.
+	_, err := svc.GetSessionDetail(context.Background(), ownerPrincipal(), "unknown")
+	if err == nil {
+		t.Fatal("expected error for unknown session id, got nil")
+	}
+}
+
 // Config issues tests
 
 func TestOcservServiceConfigIssuesAllowedForViewer(t *testing.T) {

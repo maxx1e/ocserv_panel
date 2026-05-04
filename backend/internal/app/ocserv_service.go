@@ -137,6 +137,32 @@ func (s *OcservService) DisconnectSession(ctx context.Context, principal auth.Pr
 	return nil
 }
 
+// TerminateSession terminates an active ocserv session by ID.
+func (s *OcservService) TerminateSession(ctx context.Context, principal auth.Principal, sessionID string) error {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsTerminate, "ocserv.sessions.terminate"); err != nil {
+		return err
+	}
+	actorID := principal.ID
+	if err := s.sessions.TerminateSession(ctx, sessionID); err != nil {
+		_ = s.record(ctx, &actorID, "ocserv.sessions.terminate", "ocserv_session", sessionID, audit.OutcomeFailure, err.Error(), nil)
+		return fmt.Errorf("terminate ocserv session %s: %w", sessionID, err)
+	}
+	_ = s.record(ctx, &actorID, "ocserv.sessions.terminate", "ocserv_session", sessionID, audit.OutcomeSuccess, "ocserv session terminated", nil)
+	return nil
+}
+
+// GetSessionDetail returns detailed information for a single ocserv session.
+func (s *OcservService) GetSessionDetail(ctx context.Context, principal auth.Principal, sessionID string) (*ocserv.SessionDetail, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.sessions.detail"); err != nil {
+		return nil, err
+	}
+	detail, err := s.sessions.GetSessionDetails(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("get ocserv session detail %s: %w", sessionID, err)
+	}
+	return detail, nil
+}
+
 // ListOcservUsers returns ocserv password-based users.
 func (s *OcservService) ListOcservUsers(ctx context.Context, principal auth.Principal) ([]ocserv.PasswdUser, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersRead, "ocserv.users.list"); err != nil {
