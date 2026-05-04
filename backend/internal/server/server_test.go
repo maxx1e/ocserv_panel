@@ -580,9 +580,10 @@ func TestRepresentativeWrongMethodsReturn405(t *testing.T) {
 }
 
 type testHarness struct {
-	database *sql.DB
-	store    *store.Store
-	router   http.Handler
+	database    *sql.DB
+	store       *store.Store
+	router      http.Handler
+	ocservFake  *ocserv.FakeManager
 }
 
 func newTestHarness(t *testing.T) *testHarness {
@@ -614,16 +615,18 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	monitoringService := app.NewMonitoringService(metrics.NewMemoryStore(), rbac.NewDefaultAuthorizer(), nil, recorder)
 	cfg := config.Defaults()
 	settingsService := app.NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
 
 	return &testHarness{
-		database: database,
-		store:    s,
+		database:   database,
+		store:      s,
+		ocservFake: fakeManager,
 		router: NewAppRouter(
 			authService,
 			dashboardService,
 			monitoringService,
 			settingsService,
-			newTestOcservService(s, recorder),
+			ocservSvc,
 			rbac.NewDefaultAuthorizer(),
 			AppOptions{CookieSecure: cookieSecure},
 		),
@@ -631,19 +634,33 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 }
 
 func newTestOcservService(s *store.Store, recorder audit.SQLiteRecorder) *app.OcservService {
+	svc, _ := newTestOcservServiceWithFake(s, recorder)
+	return svc
+}
+
+func newTestOcservServiceWithFake(s *store.Store, recorder audit.SQLiteRecorder) (*app.OcservService, *ocserv.FakeManager) {
 	runner := ocserv.NewFakeCommandRunner()
 	fakeSvc := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
 	checker := ocserv.NewReadinessChecker(ocserv.ReadinessConfig{}, runner, fakeSvc)
 	validator := ocserv.NewConfigValidator("/nonexistent/ocserv.conf")
+	fakeManager := ocserv.NewFakeManager()
 	return app.NewOcservService(
 		checker,
-		ocserv.NewFakeManager(),
+		fakeManager,
 		ocserv.NewFakePasswdManager(),
 		fakeSvc,
 		validator,
 		recorder,
 		rbac.NewDefaultAuthorizer(),
-	)
+	), fakeManager
+}
+
+func (h *testHarness) fakeManager(t *testing.T) *ocserv.FakeManager {
+	t.Helper()
+	if h.ocservFake == nil {
+		t.Fatal("testHarness.ocservFake is nil — use newTestHarness to get one")
+	}
+	return h.ocservFake
 }
 
 func (h *testHarness) createOwner(t *testing.T, username string, password string) {

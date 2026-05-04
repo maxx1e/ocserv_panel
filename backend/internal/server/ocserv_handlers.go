@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"time"
 
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/ocserv"
@@ -26,10 +27,34 @@ type ocservServiceStatusResponse struct {
 }
 
 type ocservSessionResponse struct {
-	ID            string `json:"id"`
-	Username      string `json:"username"`
-	RemoteAddress string `json:"remoteAddress"`
-	ConnectedAt   string `json:"connectedAt,omitempty"`
+	ID             string `json:"id"`
+	Username       string `json:"username"`
+	RemoteAddress  string `json:"remoteAddress"`
+	ConnectedAt    string `json:"connectedAt,omitempty"`
+	VPNAddress     string `json:"vpnAddress"`
+	RxBytes        int64  `json:"rxBytes"`
+	TxBytes        int64  `json:"txBytes"`
+	UserAgent      string `json:"userAgent"`
+	Device         string `json:"device"`
+	ReconnectCount int    `json:"reconnectCount"`
+}
+
+type ocservSessionDetailResponse struct {
+	ID             string   `json:"id"`
+	Username       string   `json:"username"`
+	RemoteAddress  string   `json:"remoteAddress"`
+	VPNAddress     string   `json:"vpnAddress"`
+	ConnectedAt    string   `json:"connectedAt,omitempty"`
+	DurationSecs   int64    `json:"durationSeconds"`
+	RxBytes        int64    `json:"rxBytes"`
+	TxBytes        int64    `json:"txBytes"`
+	UserAgent      string   `json:"userAgent"`
+	Device         string   `json:"device"`
+	IPv4           string   `json:"ipv4"`
+	IPv6           string   `json:"ipv6"`
+	Routes         []string `json:"routes"`
+	DNS            []string `json:"dns"`
+	ReconnectCount int      `json:"reconnectCount"`
 }
 
 type ocservUserResponse struct {
@@ -46,6 +71,10 @@ type ocservConfigIssueResponse struct {
 }
 
 type disconnectSessionRequest struct {
+	SessionID string `json:"sessionId"`
+}
+
+type terminateSessionRequest struct {
 	SessionID string `json:"sessionId"`
 }
 
@@ -189,6 +218,54 @@ func (a *App) handleOcservSessionDisconnect(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := a.ocservService.DisconnectSession(r.Context(), principal, req.SessionID); err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleOcservSessionDetail returns full detail for a single session.
+func (a *App) handleOcservSessionDetail(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		_, _ = a.ocservService.GetSessionDetail(r.Context(), auth.Principal{}, "")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+	detail, err := a.ocservService.GetSessionDetail(r.Context(), principal, id)
+	if err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ocservSessionDetailToResponse(detail))
+}
+
+// handleOcservSessionTerminate terminates a session by ID.
+func (a *App) handleOcservSessionTerminate(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodPost) {
+		return
+	}
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		_ = a.ocservService.TerminateSession(r.Context(), auth.Principal{}, "")
+		return
+	}
+	var req terminateSessionRequest
+	if !decodeRequestJSON(w, r, &req) {
+		return
+	}
+	if req.SessionID == "" {
+		writeError(w, http.StatusBadRequest, "sessionId is required")
+		return
+	}
+	if err := a.ocservService.TerminateSession(r.Context(), principal, req.SessionID); err != nil {
 		a.writeAppError(w, err)
 		return
 	}
@@ -345,10 +422,54 @@ func ocservSessionToResponse(s ocserv.Session) ocservSessionResponse {
 		connectedAt = s.ConnectedAt.UTC().Format("2006-01-02T15:04:05Z")
 	}
 	return ocservSessionResponse{
-		ID:            s.ID,
-		Username:      s.Username,
-		RemoteAddress: s.RemoteAddress,
-		ConnectedAt:   connectedAt,
+		ID:             s.ID,
+		Username:       s.Username,
+		RemoteAddress:  s.RemoteAddress,
+		ConnectedAt:    connectedAt,
+		VPNAddress:     s.VPNAddress,
+		RxBytes:        s.RxBytes,
+		TxBytes:        s.TxBytes,
+		UserAgent:      s.UserAgent,
+		Device:         s.Device,
+		ReconnectCount: s.ReconnectCount,
+	}
+}
+
+func ocservSessionDetailToResponse(d *ocserv.SessionDetail) ocservSessionDetailResponse {
+	if d == nil {
+		return ocservSessionDetailResponse{
+			Routes: []string{},
+			DNS:    []string{},
+		}
+	}
+	connectedAt := ""
+	if !d.ConnectedAt.IsZero() {
+		connectedAt = d.ConnectedAt.UTC().Format(time.RFC3339)
+	}
+	routes := d.Routes
+	if routes == nil {
+		routes = []string{}
+	}
+	dns := d.DNS
+	if dns == nil {
+		dns = []string{}
+	}
+	return ocservSessionDetailResponse{
+		ID:             d.ID,
+		Username:       d.Username,
+		RemoteAddress:  d.RemoteAddress,
+		VPNAddress:     d.VPNAddress,
+		ConnectedAt:    connectedAt,
+		DurationSecs:   int64(d.Duration.Seconds()),
+		RxBytes:        d.RxBytes,
+		TxBytes:        d.TxBytes,
+		UserAgent:      d.UserAgent,
+		Device:         d.Device,
+		IPv4:           d.IPv4,
+		IPv6:           d.IPv6,
+		Routes:         routes,
+		DNS:            dns,
+		ReconnectCount: d.ReconnectCount,
 	}
 }
 

@@ -10,6 +10,9 @@ import (
 // ErrNotConfigured is returned by placeholder integrations that cannot touch live ocserv state.
 var ErrNotConfigured = errors.New("ocserv integration is not configured")
 
+// ErrSessionNotFound is returned when a requested session ID does not exist.
+var ErrSessionNotFound = errors.New("ocserv session not found")
+
 // Session represents an active ocserv session as reported by occtl show sessions.
 type Session struct {
 	ID             string    `json:"ID"`
@@ -65,21 +68,23 @@ var _ Manager = (*FakeManager)(nil)
 // FakeManager is a test double that returns configurable results.
 // Use NewFakeManager to construct one.
 type FakeManager struct {
-	Sessions       []Session
-	SessionDetails map[string]*SessionDetail
-	Users          []User
-	DisconnectErr  error
-	TerminateErr   error
-	ListUsersErr   error
+	Sessions              []Session
+	SessionDetails        map[string]*SessionDetail
+	SessionDetailNotFound map[string]bool
+	Users                 []User
+	DisconnectErr         error
+	TerminateErr          error
+	ListUsersErr          error
 }
 
 // NewFakeManager returns a FakeManager with empty default data.
 // By default, DisconnectSession and TerminateSession return ErrNotConfigured.
 func NewFakeManager() *FakeManager {
 	return &FakeManager{
-		SessionDetails: make(map[string]*SessionDetail),
-		DisconnectErr:  ErrNotConfigured,
-		TerminateErr:   ErrNotConfigured,
+		SessionDetails:        make(map[string]*SessionDetail),
+		SessionDetailNotFound: make(map[string]bool),
+		DisconnectErr:         ErrNotConfigured,
+		TerminateErr:          ErrNotConfigured,
 	}
 }
 
@@ -109,12 +114,15 @@ func (f *FakeManager) ListUsers(ctx context.Context) ([]User, error) {
 	return f.Users, f.ListUsersErr
 }
 
-// GetSessionDetails returns the detail for the given id, or ErrNotConfigured
-// if no detail is configured for that id.
+// GetSessionDetails returns the detail for the given id, ErrSessionNotFound when
+// configured as not-found for that id, or ErrNotConfigured for unknown ids.
 func (f *FakeManager) GetSessionDetails(ctx context.Context, id string) (*SessionDetail, error) {
 	_ = ctx
 	if detail, ok := f.SessionDetails[id]; ok {
 		return detail, nil
+	}
+	if f.SessionDetailNotFound[id] {
+		return nil, ErrSessionNotFound
 	}
 	return nil, ErrNotConfigured
 }

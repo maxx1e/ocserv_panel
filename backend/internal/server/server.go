@@ -212,7 +212,9 @@ func NewAppRouter(
 	mux.HandleFunc("/api/ocserv/service/stop", appHandler.handleOcservServiceStop)
 	mux.HandleFunc("/api/ocserv/service/restart", appHandler.handleOcservServiceRestart)
 	mux.HandleFunc("/api/ocserv/sessions", appHandler.handleOcservSessions)
-	mux.HandleFunc("/api/ocserv/sessions/disconnect", appHandler.handleOcservSessionDisconnect)
+	mux.HandleFunc("POST /api/ocserv/sessions/disconnect", appHandler.handleOcservSessionDisconnect)
+	mux.HandleFunc("POST /api/ocserv/sessions/terminate", appHandler.handleOcservSessionTerminate)
+	mux.HandleFunc("GET /api/ocserv/sessions/{id}", appHandler.handleOcservSessionDetail)
 	mux.HandleFunc("/api/ocserv/users", appHandler.handleOcservUsers)
 	mux.HandleFunc("/api/ocserv/users/create", appHandler.handleOcservUserCreate)
 	mux.HandleFunc("/api/ocserv/users/{username}/password", appHandler.handleOcservUserUpdatePassword)
@@ -485,6 +487,8 @@ func (a *App) writeAppError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "invalid retention")
 	case errors.Is(err, ocserv.ErrNotConfigured):
 		writeError(w, http.StatusServiceUnavailable, "ocserv is not available")
+	case errors.Is(err, ocserv.ErrSessionNotFound):
+		writeError(w, http.StatusNotFound, "session not found")
 	case isMetricsValidationError(err):
 		writeError(w, http.StatusBadRequest, "invalid request")
 	default:
