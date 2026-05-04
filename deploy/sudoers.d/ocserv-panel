@@ -23,6 +23,11 @@ ocserv-panel ALL=(root) NOPASSWD: \
     /usr/bin/systemctl status ocserv, \
     /usr/bin/systemctl is-enabled ocserv
 
+# Allow the panel service account to terminate active VPN sessions by ID.
+# The wildcard (*) matches a session ID argument supplied by the backend.
+# No password is required for this session management operation.
+ocserv-panel ALL=(root) NOPASSWD: /usr/local/bin/occtl terminate id *
+
 # If the ocserv unit uses a non-default name (e.g. ocserv@.service with an
 # instance), add the appropriate pattern here. Only the exact unit name(s)
 # used in production should appear in this file.
