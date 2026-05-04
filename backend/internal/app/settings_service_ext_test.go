@@ -3,18 +3,22 @@ package app
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
+	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/config"
+	"ocserv_panel/backend/internal/db"
 	"ocserv_panel/backend/internal/rbac"
+	"ocserv_panel/backend/internal/store"
 )
 
 func TestSettingsServiceGetAllSectionsRequiresAuth(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.GetAllSections(ctx, auth.Principal{})
 	if !errors.Is(err, ErrUnauthenticated) {
@@ -27,7 +31,7 @@ func TestSettingsServiceGetAllSectionsRequiresPermission(t *testing.T) {
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	// Viewer has settings:read permission, so this should succeed
 	_, err := service.GetAllSections(ctx, viewer)
@@ -41,7 +45,7 @@ func TestSettingsServiceGetAllSectionsReturnsAllSections(t *testing.T) {
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	resp, err := service.GetAllSections(ctx, owner)
 	if err != nil {
@@ -64,7 +68,7 @@ func TestSettingsServiceUpdateSettingRequiresAuth(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, auth.Principal{}, "general.theme", "dark")
 	if !errors.Is(err, ErrUnauthenticated) {
@@ -77,7 +81,7 @@ func TestSettingsServiceUpdateSettingRequiresOwner(t *testing.T) {
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, viewer, "general.theme", "dark")
 	if !errors.Is(err, ErrPermissionDenied) {
@@ -90,7 +94,7 @@ func TestSettingsServiceUpdateSettingRejectsUnknownKey(t *testing.T) {
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, owner, "unknown.key", "value")
 	if !errors.Is(err, ErrInvalidInput) {
@@ -103,7 +107,7 @@ func TestSettingsServiceUpdateSettingSavesDatabaseSetting(t *testing.T) {
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	result, err := service.UpdateSetting(ctx, owner, "general.theme", "dark")
 	if err != nil {
@@ -128,7 +132,7 @@ func TestSettingsServiceUpdateSettingValidatesToggle(t *testing.T) {
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, owner, "security.csrf_enabled", "maybe")
 	if !errors.Is(err, ErrInvalidInput) {
@@ -141,7 +145,7 @@ func TestSettingsServiceUpdateSettingValidatesSelect(t *testing.T) {
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	_, err := service.UpdateSetting(ctx, owner, "general.theme", "invalid_theme")
 	if !errors.Is(err, ErrInvalidInput) {
@@ -153,10 +157,16 @@ func TestSettingsServiceUpdateSettingValidatesNumber(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
 
-	// Port must be between 1 and 65535
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	defaults := config.Defaults()
+	if err := config.Save(defaults, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	service := NewSettingsService(&defaults, cfgPath, s, recorder, rbac.NewDefaultAuthorizer())
+
+	// Port must be between 1 and 65535 — validation happens before config write.
 	_, err := service.UpdateSetting(ctx, owner, "web.port", "0")
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("port 0 UpdateSetting err = %v, want ErrInvalidInput", err)
@@ -167,7 +177,7 @@ func TestSettingsServiceUpdateSettingValidatesNumber(t *testing.T) {
 		t.Fatalf("port 99999 UpdateSetting err = %v, want ErrInvalidInput", err)
 	}
 
-	// Valid port should succeed
+	// Valid port should succeed.
 	_, err = service.UpdateSetting(ctx, owner, "web.port", "8080")
 	if err != nil {
 		t.Fatalf("valid port UpdateSetting err = %v", err)
@@ -198,5 +208,226 @@ func TestValidateNumberWithConstraints(t *testing.T) {
 				t.Errorf("validateNumberWithConstraints(%q, %q) error = %v, wantErr %v", tt.value, tt.validation, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// newSettingsSvcWithPath creates a SettingsService backed by an in-memory SQLite
+// store and the given TOML config path. Use t.TempDir() to produce a
+// config path that has already been written with config.Save.
+func newSettingsSvcWithPath(t *testing.T, cfgPath string) *SettingsService {
+	t.Helper()
+	database, err := db.OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "svc.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	if err := db.ApplyMigrations(context.Background(), database, "../../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(database)
+	defaults := config.Defaults()
+	return NewSettingsService(&defaults, cfgPath, s, audit.NoopRecorder{}, rbac.NewDefaultAuthorizer())
+}
+
+func TestSettingsServiceUpdateSettingConfigSourceWritesToTOML(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	defaults := config.Defaults()
+	if err := config.Save(defaults, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	_, err := svc.UpdateSetting(context.Background(), principal, "installation.ocserv_bin_path", "/custom/ocserv")
+	if err != nil {
+		t.Fatalf("UpdateSetting: %v", err)
+	}
+
+	// Read back from TOML — should have new value.
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Installation.OcservBinPath != "/custom/ocserv" {
+		t.Errorf("TOML OcservBinPath = %q, want /custom/ocserv", updated.Installation.OcservBinPath)
+	}
+}
+
+func TestSettingsServiceUpdateSettingDatabaseSourceDoesNotWriteTOML(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	defaults := config.Defaults()
+	if err := config.Save(defaults, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	// notifications.enabled is database-source.
+	_, err := svc.UpdateSetting(context.Background(), principal, "notifications.enabled", "true")
+	if err != nil {
+		t.Fatalf("UpdateSetting database-source: %v", err)
+	}
+
+	// TOML should be unchanged (still default config).
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Web.Port != defaults.Web.Port {
+		t.Errorf("TOML was modified for database-source setting: port %d != %d", updated.Web.Port, defaults.Web.Port)
+	}
+}
+
+func TestSettingsServiceGetAllSectionsReadsConfigSourceFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+
+	// Write a custom config to TOML.
+	defaults := config.Defaults()
+	defaults.Installation.OcservBinPath = "/custom/path/ocserv"
+	if err := config.Save(defaults, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	resp, err := svc.GetAllSections(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("GetAllSections: %v", err)
+	}
+
+	// Find installation section.
+	var installSec *SettingsSection
+	for i := range resp.Sections {
+		if resp.Sections[i].ID == "installation" {
+			installSec = &resp.Sections[i]
+			break
+		}
+	}
+	if installSec == nil {
+		t.Fatal("installation section not found")
+	}
+
+	// Find the ocserv_bin_path setting.
+	var found bool
+	for _, s := range installSec.Settings {
+		if s.Key == "installation.ocserv_bin_path" {
+			if s.Value != "/custom/path/ocserv" {
+				t.Errorf("setting value = %q, want /custom/path/ocserv", s.Value)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("installation.ocserv_bin_path not found in section settings")
+	}
+}
+
+func TestSettingsServiceGetAllSectionsRestartRequired(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	defaults := config.Defaults()
+	if err := config.Save(defaults, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	// Initially no pending changes.
+	resp, err := svc.GetAllSections(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("GetAllSections: %v", err)
+	}
+	for _, sec := range resp.Sections {
+		if sec.RestartRequired {
+			t.Errorf("section %q has RestartRequired=true but nothing changed", sec.ID)
+		}
+	}
+
+	// Update a config-source setting.
+	if _, err := svc.UpdateSetting(context.Background(), principal, "installation.ocserv_bin_path", "/new/ocserv"); err != nil {
+		t.Fatalf("UpdateSetting: %v", err)
+	}
+
+	// Now installation section should have RestartRequired=true.
+	resp, err = svc.GetAllSections(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("GetAllSections after change: %v", err)
+	}
+
+	var installSec *SettingsSection
+	for i := range resp.Sections {
+		if resp.Sections[i].ID == "installation" {
+			installSec = &resp.Sections[i]
+			break
+		}
+	}
+	if installSec == nil {
+		t.Fatal("installation section not found")
+	}
+	if !installSec.RestartRequired {
+		t.Error("expected RestartRequired=true after config-source update")
+	}
+	found := false
+	for _, k := range installSec.PendingChanges {
+		if k == "installation.ocserv_bin_path" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected installation.ocserv_bin_path in PendingChanges, got %v", installSec.PendingChanges)
+	}
+}
+
+func TestSettingsServiceRestartStatusMethod(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	defaults := config.Defaults()
+	if err := config.Save(defaults, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	// No changes — restart not required.
+	required, pending, err := svc.RestartStatus(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("RestartStatus: %v", err)
+	}
+	if required {
+		t.Error("expected restart_required=false with no changes")
+	}
+	if len(pending) != 0 {
+		t.Errorf("expected empty pending, got %v", pending)
+	}
+
+	// Update a config-source key.
+	if _, err := svc.UpdateSetting(context.Background(), principal, "web.port", "9443"); err != nil {
+		t.Fatalf("UpdateSetting: %v", err)
+	}
+
+	required, pending, err = svc.RestartStatus(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("RestartStatus after change: %v", err)
+	}
+	if !required {
+		t.Error("expected restart_required=true after config-source change")
+	}
+	found := false
+	for _, k := range pending {
+		if k == "web.port" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected web.port in pending, got %v", pending)
 	}
 }

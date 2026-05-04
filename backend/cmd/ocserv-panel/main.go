@@ -58,7 +58,7 @@ func main() {
 	}
 	config.MergeEnv(&cfg, os.Getenv)
 
-	settingsService := app.NewSettingsService(&cfg, persistence, recorder, rbac.NewDefaultAuthorizer())
+	settingsService := app.NewSettingsService(&cfg, configPath, persistence, recorder, rbac.NewDefaultAuthorizer())
 
 	// Build ocserv integration components from config.
 	runner := ocserv.NewOSCommandRunner()

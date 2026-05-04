@@ -28,7 +28,7 @@ func TestHousekeepingSchedulerPurgesOnSchedule(t *testing.T) {
 
 	// Set retention to 365 days
 	cfg := config.Defaults()
-	settingsService := NewSettingsService(&cfg, s, audit.NoopRecorder{}, rbac.NewDefaultAuthorizer())
+	settingsService := NewSettingsService(&cfg, "", s, audit.NoopRecorder{}, rbac.NewDefaultAuthorizer())
 	if err := settingsService.SetRetentionDays(ctx, owner, 365); err != nil {
 		t.Fatalf("SetRetentionDays: %v", err)
 	}

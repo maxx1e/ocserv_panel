@@ -16,7 +16,7 @@ func TestSettingsServiceGetRetentionDaysDefault(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	days := service.GetRetentionDays(ctx)
 
@@ -39,7 +39,7 @@ func TestSettingsServiceSetAndGetRetentionDays(t *testing.T) {
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	// Set to 180.
 	if err := service.SetRetentionDays(ctx, owner, 180); err != nil {
@@ -74,7 +74,7 @@ func TestSettingsServiceSetRetentionDaysValidatesAllowed(t *testing.T) {
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	invalidValues := []int{0, 1, 7, 60, 100, 730}
 	for _, days := range invalidValues {
@@ -114,7 +114,7 @@ func TestSettingsServiceSetRetentionDaysRequiresAuth(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	err := service.SetRetentionDays(ctx, auth.Principal{}, 90)
 	if !errors.Is(err, ErrUnauthenticated) {
@@ -133,7 +133,7 @@ func TestSettingsServiceSetRetentionDaysRequiresOwner(t *testing.T) {
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	err := service.SetRetentionDays(ctx, viewer, 90)
 	if !errors.Is(err, ErrPermissionDenied) {
@@ -152,7 +152,7 @@ func TestSettingsServiceGetAllSettings(t *testing.T) {
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
 	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 
 	// Initially empty.
 	settings, err := service.GetAll(ctx, owner)

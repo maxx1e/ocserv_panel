@@ -627,7 +627,7 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 	monitoringService := app.NewMonitoringService(metrics.NewMemoryStore(), rbac.NewDefaultAuthorizer(), nil, recorder)
 	cfg := config.Defaults()
-	settingsService := app.NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())
+	settingsService := app.NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
 
 	return &testHarness{

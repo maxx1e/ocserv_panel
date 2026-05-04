@@ -23,6 +23,8 @@ type Setting struct {
 // SettingsService manages application settings stored in app_settings.
 type SettingsService struct {
 	config        *config.Config
+	configPath    string
+	startupCfg    config.Config
 	settingsStore settingsStore
 	recorder      audit.Recorder
 	authorizer    rbac.Authorizer
@@ -35,11 +37,27 @@ type settingsStore interface {
 }
 
 // NewSettingsService returns a SettingsService backed by SQLite storage.
-func NewSettingsService(cfg *config.Config, s *store.Store, recorder audit.Recorder, authorizer rbac.Authorizer) *SettingsService {
+// configPath is the path to the TOML config file for config-source settings.
+// Pass an empty string to skip TOML persistence (e.g. in tests without a file).
+func NewSettingsService(
+	cfg *config.Config,
+	configPath string,
+	s *store.Store,
+	recorder audit.Recorder,
+	authorizer rbac.Authorizer,
+) *SettingsService {
 	if recorder == nil {
 		recorder = audit.NoopRecorder{}
 	}
-	return &SettingsService{config: cfg, settingsStore: s, recorder: recorder, authorizer: authorizer, now: func() time.Time { return time.Now().UTC() }}
+	return &SettingsService{
+		config:        cfg,
+		configPath:    configPath,
+		startupCfg:    *cfg,
+		settingsStore: s,
+		recorder:      recorder,
+		authorizer:    authorizer,
+		now:           func() time.Time { return time.Now().UTC() },
+	}
 }
 
 // GetRetentionDays returns the configured history retention in days, defaulting
@@ -135,11 +153,13 @@ func defaultForSetting(key string) string {
 
 // SettingsSection represents a group of related settings.
 type SettingsSection struct {
-	ID          string       `json:"id"`
-	Label       string       `json:"label"`
-	Title       string       `json:"title"`
-	Description string       `json:"description,omitempty"`
-	Settings    []SettingDef `json:"settings"`
+	ID             string       `json:"id"`
+	Label          string       `json:"label"`
+	Title          string       `json:"title"`
+	Description    string       `json:"description,omitempty"`
+	Settings       []SettingDef `json:"settings"`
+	RestartRequired bool        `json:"restart_required"`
+	PendingChanges  []string    `json:"pending_changes,omitempty"`
 }
 
 // SettingsSectionsResponse is the full API response for GET /api/settings.
@@ -161,6 +181,21 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 		return nil, ErrPermissionDenied
 	}
 
+	// Load live TOML config; fall back to startup snapshot on error.
+	liveCfg := s.startupCfg
+	if s.configPath != "" {
+		if loaded, err := config.Load(s.configPath); err == nil {
+			liveCfg = loaded
+		}
+	}
+
+	// Compute which config-source keys have changed since startup.
+	pendingKeys := computePendingChanges(s.startupCfg, liveCfg)
+	pendingSet := make(map[string]bool, len(pendingKeys))
+	for _, k := range pendingKeys {
+		pendingSet[k] = true
+	}
+
 	sectionDefs := AllSectionDefs()
 	defsBySection := SettingDefsBySection()
 	sections := make([]SettingsSection, 0, len(sectionDefs))
@@ -168,19 +203,35 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 	for _, sec := range sectionDefs {
 		defs := defsBySection[sec.ID]
 		settings := make([]SettingDef, 0, len(defs))
+
+		// Collect pending keys that belong to this section.
+		var secPending []string
 		for _, d := range defs {
-			value := d.Default
-			if d.Source == SettingSourceDatabase {
+			if d.Source == SettingSourceConfig && pendingSet[d.Key] {
+				secPending = append(secPending, d.Key)
+			}
+		}
+
+		for _, d := range defs {
+			var value string
+			switch d.Source {
+			case SettingSourceConfig:
+				value = configValueForKey(liveCfg, d.Key)
+				if value == "" {
+					value = d.Default
+				}
+			default:
+				value = d.Default
 				stored, err := s.settingsStore.GetSetting(ctx, d.Key)
 				if err == nil && stored != "" {
 					value = stored
 				}
 			}
-			// Mask password-type values
+			// Mask password-type values.
 			if d.Type == SettingTypePassword && len(value) > 4 {
 				value = "****" + value[len(value)-4:]
 			}
-			setting := SettingDef{
+			settings = append(settings, SettingDef{
 				Key:             d.Key,
 				Label:           d.Label,
 				Section:         d.Section,
@@ -192,16 +243,19 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 				Options:         d.Options,
 				Validation:      d.Validation,
 				SortOrder:       d.SortOrder,
-			}
-			settings = append(settings, setting)
+			})
 		}
-		sections = append(sections, SettingsSection{
-			ID:          sec.ID,
-			Label:       sec.Label,
-			Title:       sec.Title,
-			Description: sec.Description,
-			Settings:    settings,
-		})
+
+		sec := SettingsSection{
+			ID:              sec.ID,
+			Label:           sec.Label,
+			Title:           sec.Title,
+			Description:     sec.Description,
+			Settings:        settings,
+			RestartRequired: len(secPending) > 0,
+			PendingChanges:  secPending,
+		}
+		sections = append(sections, sec)
 	}
 
 	if err := s.record(ctx, &actorID, "settings.get_sections", "setting", "", audit.OutcomeSuccess, "settings get_sections loaded", nil); err != nil {
@@ -210,8 +264,8 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 
 	return &SettingsSectionsResponse{
 		Sections:        sections,
-		RestartRequired: false, // will be computed from config state
-		PendingChanges:  []string{},
+		RestartRequired: len(pendingKeys) > 0,
+		PendingChanges:  pendingKeys,
 	}, nil
 }
 
@@ -244,11 +298,36 @@ func (s *SettingsService) UpdateSetting(ctx context.Context, principal auth.Prin
 		oldValue = def.Default
 	}
 
-	// Store the value in app_settings regardless of source.
-	// Config-sourced settings will be written to TOML in a later task.
-	if err := s.settingsStore.SetSetting(ctx, key, value); err != nil {
-		_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update save failed", map[string]string{"value": value})
-		return SettingDef{}, fmt.Errorf("update setting %q: %w", key, err)
+	switch def.Source {
+	case SettingSourceConfig:
+		// Config-source settings are persisted to the TOML file only.
+		if s.configPath == "" {
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update config path not set", map[string]string{"value": value})
+			return SettingDef{}, fmt.Errorf("update setting %q: config path is not configured", key)
+		}
+		current, err := config.Load(s.configPath)
+		if err != nil {
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update load config failed", map[string]string{"value": value})
+			return SettingDef{}, fmt.Errorf("update setting %q: load config: %w", key, err)
+		}
+		if err := applySettingToConfig(&current, key, value); err != nil {
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update apply failed", map[string]string{"value": value})
+			return SettingDef{}, err
+		}
+		if err := config.Validate(current); err != nil {
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeDenied, "settings update validation failed", map[string]string{"value": value, "error": err.Error()})
+			return SettingDef{}, fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
+		}
+		if err := config.Save(current, s.configPath); err != nil {
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update save config failed", map[string]string{"value": value})
+			return SettingDef{}, fmt.Errorf("update setting %q: save config: %w", key, err)
+		}
+	default:
+		// Database-source settings are persisted to SQLite only.
+		if err := s.settingsStore.SetSetting(ctx, key, value); err != nil {
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update save failed", map[string]string{"value": value})
+			return SettingDef{}, fmt.Errorf("update setting %q: %w", key, err)
+		}
 	}
 
 	_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeSuccess, "settings update saved", map[string]string{"old_value": oldValue, "new_value": value})
@@ -323,4 +402,28 @@ func validateNumberWithConstraints(value string, validation string) error {
 
 func (s *SettingsService) record(ctx context.Context, actorID *int64, action string, resourceType string, resourceID string, outcome audit.Outcome, message string, metadata map[string]string) error {
 	return s.recorder.Record(ctx, audit.Event{ActorID: actorID, Action: action, ResourceType: resourceType, ResourceID: resourceID, Outcome: outcome, Message: message, Metadata: metadata, CreatedAt: s.now()})
+}
+
+// RestartStatus reports whether a service restart is needed to apply pending
+// config-source changes and returns the list of changed keys.
+func (s *SettingsService) RestartStatus(ctx context.Context, principal auth.Principal) (restartRequired bool, pendingChanges []string, err error) {
+	if !principal.Authenticated() {
+		_ = s.record(ctx, nil, "settings.restart_status", "setting", "", audit.OutcomeDenied, "restart status authentication required", nil)
+		return false, nil, ErrUnauthenticated
+	}
+	actorID := principal.ID
+	if !s.authorizer.Allowed(principalRoles(principal), rbac.PermissionSettingsRead) {
+		_ = s.record(ctx, &actorID, "settings.restart_status", "setting", "", audit.OutcomeDenied, "restart status permission denied", nil)
+		return false, nil, ErrPermissionDenied
+	}
+
+	liveCfg := s.startupCfg
+	if s.configPath != "" {
+		if loaded, loadErr := config.Load(s.configPath); loadErr == nil {
+			liveCfg = loaded
+		}
+	}
+
+	pending := computePendingChanges(s.startupCfg, liveCfg)
+	return len(pending) > 0, pending, nil
 }
