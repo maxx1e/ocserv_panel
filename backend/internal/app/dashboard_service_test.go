@@ -16,7 +16,7 @@ import (
 func TestDashboardServiceSummaryAndHistoryRequireAuth(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 
 	if _, err := service.Summary(ctx, auth.Principal{}); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("summary unauthenticated err = %v, want ErrUnauthenticated", err)
@@ -38,7 +38,7 @@ func TestDashboardServiceSummaryAndHistoryRequireAuth(t *testing.T) {
 func TestDashboardServiceUnauthenticatedPurgeIsAuditedAsDenied(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 
 	if _, err := service.PurgeHistory(ctx, auth.Principal{}, 90, "PURGE"); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("unauthenticated purge err = %v, want ErrUnauthenticated", err)
@@ -55,7 +55,7 @@ func TestDashboardServiceViewerCanReadButCannotPurge(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 	if err := s.RecordAudit(ctx, store.AuditEvent{Action: "test.seed", ResourceType: "dashboard", Outcome: string(audit.OutcomeSuccess), Message: "seed event", Metadata: map[string]string{"safe": "value"}, CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("seed audit event: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestDashboardServiceViewerCanReadButCannotPurge(t *testing.T) {
 func TestDashboardServiceAuthenticatedPrincipalWithoutDashboardPermissionIsAuditedDenied(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 	principal := createAdminWithoutRoles(t, ctx, s, "limited")
 
 	if _, err := service.Summary(ctx, principal); !errors.Is(err, ErrPermissionDenied) {
@@ -124,7 +124,7 @@ func TestDashboardServiceSummaryAuditsSuccessfulRead(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 
 	if _, err := service.Summary(ctx, viewer); err != nil {
 		t.Fatalf("summary: %v", err)
@@ -142,7 +142,7 @@ func TestDashboardServiceHistoryAnalyticsAuditsSuccessfulRead(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 
 	if _, err := service.HistoryAnalytics(ctx, viewer); err != nil {
 		t.Fatalf("history analytics: %v", err)
@@ -160,7 +160,7 @@ func TestDashboardServiceSummaryAuditsStoreFailure(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 	service.store = failingDashboardStore{adminCountErr: errors.New("forced summary failure")}
 
 	if _, err := service.Summary(ctx, viewer); err == nil {
@@ -179,7 +179,7 @@ func TestDashboardServiceHistoryAnalyticsAuditsStoreFailure(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	viewer := createAdminWithRole(t, ctx, s, "viewer", rbac.RoleViewer)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 	service.store = failingDashboardStore{analyticsSummaryErr: errors.New("forced history failure")}
 
 	if _, err := service.HistoryAnalytics(ctx, viewer); err == nil {
@@ -198,7 +198,7 @@ func TestDashboardServiceOwnerPurgeValidationAndDeletion(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 	now := time.Now().UTC()
 	oldDisconnected := now.AddDate(0, 0, -120)
 	newDisconnected := now.AddDate(0, 0, -10)
@@ -234,7 +234,7 @@ func TestDashboardServicePurgeHistoryAllowsDocumentedRetentionDays(t *testing.T)
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 
 	for _, retentionDays := range []int{30, 90, 180, 365} {
 		t.Run(fmt.Sprintf("%d days", retentionDays), func(t *testing.T) {
@@ -253,7 +253,7 @@ func TestDashboardServicePurgeHistoryAuditsStoreFailure(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	service := NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 	service.store = failingDashboardStore{purgeErr: errors.New("forced purge failure")}
 
 	if _, err := service.PurgeHistory(ctx, owner, 90, "PURGE"); err == nil {

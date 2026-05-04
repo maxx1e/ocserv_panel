@@ -47,7 +47,7 @@ func main() {
 	persistence := store.New(database)
 	recorder := audit.NewSQLiteRecorder(persistence)
 	authService := app.NewAuthService(persistence, recorder)
-	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer())
+	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), nil)
 
 	configPath := envOrDefault("OCSERV_PANEL_CONFIG_PATH", "/etc/ocserv-panel/config.toml")
 	cfg, cfgErr := config.Load(configPath)

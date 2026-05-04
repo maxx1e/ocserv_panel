@@ -608,7 +608,7 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	s := store.New(database)
 	recorder := audit.NewSQLiteRecorder(s)
 	authService := app.NewAuthService(s, recorder)
-	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer())
+	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
 	monitoringService := app.NewMonitoringService(metrics.NewMemoryStore(), rbac.NewDefaultAuthorizer(), nil, recorder)
 	cfg := config.Defaults()
 	settingsService := app.NewSettingsService(&cfg, s, recorder, rbac.NewDefaultAuthorizer())

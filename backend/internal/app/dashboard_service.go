@@ -7,6 +7,7 @@ import (
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
+	"ocserv_panel/backend/internal/ocserv"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
@@ -16,6 +17,7 @@ type DashboardService struct {
 	store      dashboardStore
 	recorder   audit.Recorder
 	authorizer rbac.Authorizer
+	readiness  *ocserv.ReadinessChecker
 	now        func() time.Time
 }
 
@@ -61,11 +63,12 @@ type PurgeHistoryResult struct {
 }
 
 // NewDashboardService returns a dashboard service using local SQLite data only.
-func NewDashboardService(s *store.Store, recorder audit.Recorder, authorizer rbac.Authorizer) *DashboardService {
+// readiness may be nil; in that case, ocserv status is reported as not_configured.
+func NewDashboardService(s *store.Store, recorder audit.Recorder, authorizer rbac.Authorizer, readiness *ocserv.ReadinessChecker) *DashboardService {
 	if recorder == nil {
 		recorder = audit.NoopRecorder{}
 	}
-	return &DashboardService{store: s, recorder: recorder, authorizer: authorizer, now: func() time.Time { return time.Now().UTC() }}
+	return &DashboardService{store: s, recorder: recorder, authorizer: authorizer, readiness: readiness, now: func() time.Time { return time.Now().UTC() }}
 }
 
 // Summary returns local no-op ocserv status and SQLite-backed counts.
@@ -134,11 +137,48 @@ func (s *DashboardService) Summary(ctx context.Context, principal auth.Principal
 		RecentAudit:        recentAudit,
 		Analytics:          history,
 		SampleData:         history.SampleSessions > 0,
-		Ocserv:             OcservStatusSummary{Status: "not_configured", Configured: false, Message: "live ocserv integration is not configured"},
+		Ocserv:             s.buildOcservStatus(ctx),
 		SetupRequired:      adminCount == 0,
 		AdminCount:         adminCount,
 		History:            history,
 	}, nil
+}
+
+// buildOcservStatus returns the OcservStatusSummary based on the readiness checker.
+// When no readiness checker is configured, returns not_configured.
+func (s *DashboardService) buildOcservStatus(ctx context.Context) OcservStatusSummary {
+	if s.readiness == nil {
+		return OcservStatusSummary{
+			Status:     "not_configured",
+			Configured: false,
+			Message:    "live ocserv integration is not configured",
+		}
+	}
+	r, err := s.readiness.Check(ctx)
+	if err != nil {
+		return OcservStatusSummary{
+			Status:     "error",
+			Configured: false,
+			Message:    fmt.Sprintf("readiness check failed: %v", err),
+		}
+	}
+	return readinessToStatus(r)
+}
+
+// readinessToStatus maps OcservReadiness to the dashboard OcservStatusSummary.
+func readinessToStatus(r *ocserv.OcservReadiness) OcservStatusSummary {
+	switch {
+	case r.BinaryPresent && r.ServiceRunning && r.ConfigValid:
+		return OcservStatusSummary{Status: "running", Configured: true, Message: "ocserv is running"}
+	case r.BinaryPresent && r.ConfigValid:
+		return OcservStatusSummary{Status: "installed", Configured: true, Message: "ocserv is installed but not running"}
+	case r.BinaryPresent && !r.ConfigValid && r.ConfigErrors != "":
+		return OcservStatusSummary{Status: "misconfigured", Configured: false, Message: fmt.Sprintf("ocserv config error: %s", r.ConfigErrors)}
+	case !r.BinaryPresent:
+		return OcservStatusSummary{Status: "not_installed", Configured: false, Message: "ocserv binary not found"}
+	default:
+		return OcservStatusSummary{Status: "unknown", Configured: false, Message: "ocserv status unknown"}
+	}
 }
 
 // HistoryAnalytics returns sample-backed persisted historical analytics.
