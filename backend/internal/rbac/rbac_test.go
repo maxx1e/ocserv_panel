@@ -44,3 +44,62 @@ func TestAuthorizerDeniesUnknownRole(t *testing.T) {
 		t.Fatal("expected unknown role to be denied")
 	}
 }
+
+func TestAuthorizerOwnerHasAllOcservPermissions(t *testing.T) {
+	t.Parallel()
+
+	authorizer := NewDefaultAuthorizer()
+	ocservPerms := []Permission{
+		PermissionOcservRead,
+		PermissionOcservServiceRead,
+		PermissionOcservServiceManage,
+		PermissionOcservSessionsRead,
+		PermissionOcservSessionsDisconnect,
+		PermissionOcservUsersRead,
+		PermissionOcservUsersCreate,
+		PermissionOcservUsersDelete,
+		PermissionOcservUsersUpdate,
+		PermissionOcservConfigRead,
+	}
+	for _, perm := range ocservPerms {
+		if !authorizer.Allowed([]Role{RoleOwner}, perm) {
+			t.Fatalf("expected owner to have permission %s", perm)
+		}
+	}
+}
+
+func TestAuthorizerViewerHasOcservReadPermissions(t *testing.T) {
+	t.Parallel()
+
+	authorizer := NewDefaultAuthorizer()
+	readPerms := []Permission{
+		PermissionOcservRead,
+		PermissionOcservServiceRead,
+		PermissionOcservSessionsRead,
+		PermissionOcservUsersRead,
+		PermissionOcservConfigRead,
+	}
+	for _, perm := range readPerms {
+		if !authorizer.Allowed([]Role{RoleViewer}, perm) {
+			t.Fatalf("expected viewer to have read permission %s", perm)
+		}
+	}
+}
+
+func TestAuthorizerViewerDeniedOcservMutatePermissions(t *testing.T) {
+	t.Parallel()
+
+	authorizer := NewDefaultAuthorizer()
+	mutatePerms := []Permission{
+		PermissionOcservServiceManage,
+		PermissionOcservSessionsDisconnect,
+		PermissionOcservUsersCreate,
+		PermissionOcservUsersDelete,
+		PermissionOcservUsersUpdate,
+	}
+	for _, perm := range mutatePerms {
+		if authorizer.Allowed([]Role{RoleViewer}, perm) {
+			t.Fatalf("expected viewer to be denied mutate permission %s", perm)
+		}
+	}
+}
