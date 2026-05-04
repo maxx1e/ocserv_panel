@@ -33,7 +33,7 @@ type ReadinessConfig struct {
 
 // ReadinessChecker probes the system for ocserv installation and runtime state.
 type ReadinessChecker struct {
-	cfg    ReadinessConfig
+	cfgFn  func() ReadinessConfig
 	runner CommandRunner
 	svc    ServiceManager
 }
@@ -43,32 +43,35 @@ var _ interface {
 	Check(ctx context.Context) (*OcservReadiness, error)
 } = (*ReadinessChecker)(nil)
 
-// NewReadinessChecker returns a ReadinessChecker with the given configuration.
-func NewReadinessChecker(cfg ReadinessConfig, runner CommandRunner, svc ServiceManager) *ReadinessChecker {
-	return &ReadinessChecker{cfg: cfg, runner: runner, svc: svc}
+// NewReadinessChecker returns a ReadinessChecker that calls cfgFn on every
+// Check invocation, so path changes written to the TOML config are picked up
+// without a process restart.
+func NewReadinessChecker(cfgFn func() ReadinessConfig, runner CommandRunner, svc ServiceManager) *ReadinessChecker {
+	return &ReadinessChecker{cfgFn: cfgFn, runner: runner, svc: svc}
 }
 
 // Check probes the system and returns the current ocserv readiness state.
 // Each probe is independent — a failure in one does not block the others.
 func (c *ReadinessChecker) Check(ctx context.Context) (*OcservReadiness, error) {
+	cfg := c.cfgFn()
 	r := &OcservReadiness{}
 
 	// Binary existence checks (filesystem only — fast and safe).
-	r.BinaryPresent = fileExists(c.cfg.OcservBinPath)
-	r.OcctlPresent = fileExists(c.cfg.OcctlBinPath)
-	r.OcpasswdPresent = fileExists(c.cfg.OcpasswdBinPath)
+	r.BinaryPresent = fileExists(cfg.OcservBinPath)
+	r.OcctlPresent = fileExists(cfg.OcctlBinPath)
+	r.OcpasswdPresent = fileExists(cfg.OcpasswdBinPath)
 
 	// Version from binary — only if binary exists.
 	if r.BinaryPresent {
-		r.BinaryVersion = c.checkVersion(ctx)
+		r.BinaryVersion = c.checkVersion(ctx, cfg)
 	}
 
 	// Config file presence.
-	r.ConfigPresent = fileExists(c.cfg.ConfigPath)
+	r.ConfigPresent = fileExists(cfg.ConfigPath)
 
 	// Config validation — only if both binary and config are present.
 	if r.ConfigPresent && r.BinaryPresent {
-		r.ConfigValid, r.ConfigErrors = c.validateConfig(ctx)
+		r.ConfigValid, r.ConfigErrors = c.validateConfig(ctx, cfg)
 	}
 
 	// Service status from ServiceManager.
@@ -77,17 +80,17 @@ func (c *ReadinessChecker) Check(ctx context.Context) (*OcservReadiness, error) 
 	}
 
 	// Management socket presence.
-	r.SocketPresent = fileExists(c.cfg.SocketPath)
+	r.SocketPresent = fileExists(cfg.SocketPath)
 
 	return r, nil
 }
 
 // checkVersion runs the binary with --version and extracts the first line.
-func (c *ReadinessChecker) checkVersion(ctx context.Context) string {
+func (c *ReadinessChecker) checkVersion(ctx context.Context, cfg ReadinessConfig) string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	result, err := c.runner.Run(ctx, c.cfg.OcservBinPath, []string{"--version"}, nil)
+	result, err := c.runner.Run(ctx, cfg.OcservBinPath, []string{"--version"}, nil)
 	if err != nil {
 		return ""
 	}
@@ -104,11 +107,11 @@ func (c *ReadinessChecker) checkVersion(ctx context.Context) string {
 }
 
 // validateConfig runs `ocserv -f -t` to check the configuration file.
-func (c *ReadinessChecker) validateConfig(ctx context.Context) (bool, string) {
+func (c *ReadinessChecker) validateConfig(ctx context.Context, cfg ReadinessConfig) (bool, string) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	result, err := c.runner.Run(ctx, c.cfg.OcservBinPath, []string{"-f", "-t"}, nil)
+	result, err := c.runner.Run(ctx, cfg.OcservBinPath, []string{"-f", "-t"}, nil)
 	if err != nil {
 		return false, fmt.Sprintf("config validation failed: %v", err)
 	}

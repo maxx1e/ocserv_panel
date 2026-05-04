@@ -654,7 +654,7 @@ func newTestOcservService(s *store.Store, recorder audit.SQLiteRecorder) *app.Oc
 func newTestOcservServiceWithFake(s *store.Store, recorder audit.SQLiteRecorder) (*app.OcservService, *ocserv.FakeManager) {
 	runner := ocserv.NewFakeCommandRunner()
 	fakeSvc := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
-	checker := ocserv.NewReadinessChecker(ocserv.ReadinessConfig{}, runner, fakeSvc)
+	checker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, runner, fakeSvc)
 	validator := ocserv.NewConfigValidator("/nonexistent/ocserv.conf")
 	fakeManager := ocserv.NewFakeManager()
 	return app.NewOcservService(

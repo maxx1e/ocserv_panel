@@ -22,7 +22,7 @@ func newTestOcservService(t *testing.T, svcStatus ocserv.ServiceStatus) (
 
 	runner := ocserv.NewFakeCommandRunner()
 	fakeSvc := ocserv.NewFakeServiceManager(svcStatus)
-	checker := ocserv.NewReadinessChecker(ocserv.ReadinessConfig{}, runner, fakeSvc)
+	checker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, runner, fakeSvc)
 
 	fakeManager := ocserv.NewFakeManager()
 	fakeManager.DisconnectErr = nil // allow disconnect by default in service tests
@@ -230,7 +230,7 @@ func newTestOcservServiceWithRecorder(t *testing.T, svcStatus ocserv.ServiceStat
 
 	runner := ocserv.NewFakeCommandRunner()
 	fakeSvc := ocserv.NewFakeServiceManager(svcStatus)
-	checker := ocserv.NewReadinessChecker(ocserv.ReadinessConfig{}, runner, fakeSvc)
+	checker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, runner, fakeSvc)
 
 	fakeManager := ocserv.NewFakeManager()
 	fakePasswd := ocserv.NewFakePasswdManager()

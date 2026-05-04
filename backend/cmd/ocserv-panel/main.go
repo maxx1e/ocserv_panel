@@ -62,16 +62,25 @@ func main() {
 
 	// Build ocserv integration components from config.
 	runner := ocserv.NewOSCommandRunner()
-	ocservCfg := ocserv.ReadinessConfig{
-		OcservBinPath:   cfg.Installation.OcservBinPath,
-		OcctlBinPath:    cfg.Installation.OcctlBinPath,
-		OcpasswdBinPath: cfg.Installation.OcpasswdBinPath,
-		ConfigPath:      cfg.Installation.OcservConfigPath,
-		SocketPath:      cfg.Installation.OcservSocketPath,
-		UnitName:        cfg.Service.SystemdUnitName,
-	}
 	svcManager := ocserv.NewSystemdManager(cfg.Service.SystemdUnitName, runner)
-	readinessChecker := ocserv.NewReadinessChecker(ocservCfg, runner, svcManager)
+	readinessChecker := ocserv.NewReadinessChecker(
+		func() ocserv.ReadinessConfig {
+			liveCfg, err := config.Load(configPath)
+			if err != nil {
+				liveCfg = cfg
+			}
+			return ocserv.ReadinessConfig{
+				OcservBinPath:   liveCfg.Installation.OcservBinPath,
+				OcctlBinPath:    liveCfg.Installation.OcctlBinPath,
+				OcpasswdBinPath: liveCfg.Installation.OcpasswdBinPath,
+				ConfigPath:      liveCfg.Installation.OcservConfigPath,
+				SocketPath:      liveCfg.Installation.OcservSocketPath,
+				UnitName:        liveCfg.Service.SystemdUnitName,
+			}
+		},
+		runner,
+		svcManager,
+	)
 	sessionManager := ocserv.NewOcctlAdapter(cfg.Installation.OcctlBinPath, cfg.Installation.OcservSocketPath, runner)
 	passwdManager := ocserv.NewOcpasswdAdapter(cfg.Installation.OcpasswdBinPath, cfg.Installation.OcpasswdFilePath, cfg.Installation.OcservConfigPath, runner)
 	configValidator := ocserv.NewConfigValidator(cfg.Installation.OcservConfigPath)
