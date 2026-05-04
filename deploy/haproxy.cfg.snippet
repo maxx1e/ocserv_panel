@@ -1,0 +1,52 @@
+# HAProxy TLS termination snippet for ocserv-panel
+#
+# This is an excerpt to be merged into your existing haproxy.cfg.
+# It terminates HTTPS on port 443 and forwards decrypted traffic
+# to the panel backend listening on 127.0.0.1:8080.
+#
+# Prerequisites:
+#   - HAProxy 2.4 or later
+#   - Certificate and key files (e.g. from Let's Encrypt / certbot)
+#   - Adjust "bind", "server", and cert paths to match your deployment
+#
+# Install:
+#   1. Review and merge the sections below into /etc/haproxy/haproxy.cfg
+#   2. Validate: haproxy -c -f /etc/haproxy/haproxy.cfg
+#   3. Reload: systemctl reload haproxy
+#
+# This file does NOT configure the ocserv VPN listener (port 443/UDP).
+# ocserv and HAProxy can share port 443 using the port-sharing technique
+# described in the ocserv documentation if needed.
+
+#---------------------------------------------------------------------
+# Frontend: accept HTTPS connections from clients
+#---------------------------------------------------------------------
+frontend ocserv_panel_https
+    bind *:8443 ssl crt /etc/ssl/private/ocserv-panel.pem alpn h2,http/1.1
+    # Redirect plain HTTP to HTTPS if you also bind port 80:
+    # bind *:80
+    # redirect scheme https unless { ssl_fc }
+
+    # Security headers forwarded to backend
+    http-request set-header X-Forwarded-Proto https
+    http-request set-header X-Real-IP %[src]
+
+    default_backend ocserv_panel_backend
+
+#---------------------------------------------------------------------
+# Backend: forward to the local panel process
+#---------------------------------------------------------------------
+backend ocserv_panel_backend
+    mode http
+    balance roundrobin
+
+    # The panel listens on loopback only; HAProxy runs on the same host.
+    server ocserv_panel_local 127.0.0.1:8080 check
+
+    # Health check endpoint
+    option httpchk GET /api/health
+    http-check expect string "ok"
+
+    # Timeouts
+    timeout connect 5s
+    timeout server  30s

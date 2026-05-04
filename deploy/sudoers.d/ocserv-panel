@@ -1,0 +1,28 @@
+# Sudoers rules for the ocserv-panel service account
+#
+# SECURITY: This file grants the ocserv-panel service user specific, narrow
+# privileges for managing the ocserv service via systemctl. It does NOT grant
+# general sudo access or the ability to modify system configuration.
+#
+# Installation:
+#   sudo visudo -f /etc/sudoers.d/ocserv-panel
+#   # or copy and validate:
+#   sudo cp deploy/sudoers.d/ocserv-panel /etc/sudoers.d/ocserv-panel
+#   sudo chmod 440 /etc/sudoers.d/ocserv-panel
+#   sudo visudo -c  # validate syntax
+#
+# Required: ocserv-panel service runs as user "ocserv-panel"
+# Adjust the username and unit name to match your deployment.
+
+# Allow the panel service account to manage the ocserv systemd unit only.
+# No password is required for these service control operations.
+ocserv-panel ALL=(root) NOPASSWD: \
+    /usr/bin/systemctl start ocserv, \
+    /usr/bin/systemctl stop ocserv, \
+    /usr/bin/systemctl restart ocserv, \
+    /usr/bin/systemctl status ocserv, \
+    /usr/bin/systemctl is-enabled ocserv
+
+# If the ocserv unit uses a non-default name (e.g. ocserv@.service with an
+# instance), add the appropriate pattern here. Only the exact unit name(s)
+# used in production should appear in this file.
