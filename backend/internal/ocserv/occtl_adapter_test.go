@@ -95,6 +95,21 @@ func TestOcctlAdapterDisconnectSessionFails(t *testing.T) {
 	}
 }
 
+func TestOcctlAdapterDisconnectSessionNotConfigured(t *testing.T) {
+	t.Parallel()
+	runner := NewFakeCommandRunner()
+	runner.Results["/usr/local/bin/occtl"] = CommandResult{
+		ExitCode: 1,
+		Stderr:   "occtl: connect: no such file or directory",
+	}
+	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
+
+	err := adapter.DisconnectSession(context.Background(), "s99")
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("expected ErrNotConfigured, got %v", err)
+	}
+}
+
 func TestOcctlAdapterListUsersEmpty(t *testing.T) {
 	t.Parallel()
 	runner := NewFakeCommandRunner()

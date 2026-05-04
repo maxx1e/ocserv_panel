@@ -68,6 +68,9 @@ func (a *OcctlAdapter) DisconnectSession(ctx context.Context, sessionID string) 
 		return fmt.Errorf("disconnect session %s: %w", sessionID, err)
 	}
 	if result.ExitCode != 0 {
+		if a.isNotConfiguredErr(result.Stderr) {
+			return ErrNotConfigured
+		}
 		return fmt.Errorf("disconnect session %s: %s", sessionID, strings.TrimSpace(result.Stderr))
 	}
 	return nil
@@ -142,7 +145,7 @@ func (a *OcctlAdapter) GetSessionDetails(ctx context.Context, id string) (*Sessi
 	}
 
 	connectedAt, _ := time.Parse(time.RFC3339, raw.ConnectedAt)
-	detail := &SessionDetail{
+	sd := &SessionDetail{
 		ID:             raw.ID,
 		Username:       raw.Username,
 		RemoteAddress:  raw.RemoteAddress,
@@ -158,7 +161,10 @@ func (a *OcctlAdapter) GetSessionDetails(ctx context.Context, id string) (*Sessi
 		DNS:            raw.DNS,
 		ReconnectCount: raw.ReconnectCount,
 	}
-	return detail, nil
+	if !sd.ConnectedAt.IsZero() {
+		sd.Duration = time.Since(sd.ConnectedAt)
+	}
+	return sd, nil
 }
 
 // TerminateSession calls `occtl terminate id <sessionID>`.
