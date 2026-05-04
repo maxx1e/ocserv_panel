@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-04
 **Branch:** master
-**Ahead of origin:** 4 commits (+ uncommitted frontend chart improvements)
+**Sync status:** In sync with origin/master (working tree clean)
 
 ---
 
@@ -119,7 +119,9 @@ Replacing the `NoopManager` stub and hardcoded "not_configured" dashboard status
 | 12 | Sudoers Rules | `deploy/sudoers.d/ocserv-panel` |
 | 13 | Full Integration Verification | All tests + build |
 
-### 5. Frontend Chart Improvements (Uncommitted)
+### 5. Frontend Chart Improvements (Completed)
+
+**Commit:** `94a1217` (part of memory-tasks.md commit)
 
 **Changes:**
 - New `MetricChart.svelte` component wrapping LayerChart with metric-aware colors, gradients, and tooltips
