@@ -26,6 +26,7 @@ func newTestOcservService(t *testing.T, svcStatus ocserv.ServiceStatus) (
 
 	fakeManager := ocserv.NewFakeManager()
 	fakeManager.DisconnectErr = nil // allow disconnect by default in service tests
+	fakeManager.TerminateErr = nil  // allow terminate by default in service tests
 
 	fakePasswd := ocserv.NewFakePasswdManager()
 	validator := ocserv.NewConfigValidator("/nonexistent/ocserv.conf")
@@ -310,7 +311,7 @@ func TestOcservServiceTerminateSessionManagerFailure(t *testing.T) {
 
 // GetSessionDetail tests
 
-func TestOcservServiceGetSessionDetailDeniedForViewer(t *testing.T) {
+func TestOcservServiceGetSessionDetailDeniedForUnauthenticated(t *testing.T) {
 	t.Parallel()
 	// viewer does not have sessions:terminate, but does have sessions:read —
 	// GetSessionDetail uses sessions:read, so viewer IS allowed. Test unauthenticated instead.
