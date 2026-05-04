@@ -2,7 +2,6 @@ package app
 
 import (
 	"errors"
-	"strconv"
 	"testing"
 
 	"ocserv_panel/backend/internal/config"
@@ -150,10 +149,62 @@ func TestComputePendingChangesDetectsDiff(t *testing.T) {
 	if !found["web.port"] {
 		t.Errorf("expected web.port in pending, got %v", pending)
 	}
+
+	// Verify the returned slice is sorted.
+	for i := 1; i < len(pending); i++ {
+		if pending[i] < pending[i-1] {
+			t.Errorf("expected pending changes to be sorted, got %v", pending)
+			break
+		}
+	}
 }
 
-// Helper: parse int without error (only call after validation).
-func mustAtoi(s string) int {
-	n, _ := strconv.Atoi(s)
-	return n
+// TestConfigValueForKeyCoversAllRegistryConfigSourceKeys verifies that every
+// config-source key in the settings registry is handled by both
+// applySettingToConfig and configValueForKey. A key missing from either switch
+// is caught here before it can silently corrupt computePendingChanges.
+func TestConfigValueForKeyCoversAllRegistryConfigSourceKeys(t *testing.T) {
+	for _, def := range AllSettingDefs() {
+		if def.Source != SettingSourceConfig {
+			continue
+		}
+		t.Run(def.Key, func(t *testing.T) {
+			// Use a sentinel value for string-type fields so that a missing
+			// case in configValueForKey (which returns "") is distinguishable
+			// from a legitimately empty default value.
+			const sentinel = "__coverage_sentinel__"
+
+			applyValue := def.Default
+			expectValue := def.Default
+			switch def.Type {
+			case SettingTypeText, SettingTypePassword, SettingTypeSelect:
+				applyValue = sentinel
+				expectValue = sentinel
+			}
+
+			cfg := config.Defaults()
+
+			// applySettingToConfig must not return an error for a valid value.
+			if err := applySettingToConfig(&cfg, def.Key, applyValue); err != nil {
+				t.Fatalf("applySettingToConfig(%q, %q) returned unexpected error: %v — key may be missing from applySettingToConfig switch", def.Key, applyValue, err)
+			}
+
+			// configValueForKey must return the applied value, confirming the
+			// key is present in its switch statement.
+			got := configValueForKey(cfg, def.Key)
+			if got != expectValue {
+				t.Fatalf("configValueForKey(%q) = %q, want %q — key may be missing from configValueForKey switch", def.Key, got, expectValue)
+			}
+		})
+	}
+}
+
+func TestApplySettingToConfigEmptyStringField(t *testing.T) {
+	cfg := config.Defaults()
+	if err := applySettingToConfig(&cfg, "general.app_name", ""); err != nil {
+		t.Fatalf("expected no error for empty string field, got: %v", err)
+	}
+	if cfg.General.AppName != "" {
+		t.Errorf("expected empty app name, got %q", cfg.General.AppName)
+	}
 }
