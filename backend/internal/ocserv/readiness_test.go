@@ -2,6 +2,8 @@ package ocserv
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -177,44 +179,50 @@ func TestReadinessCheckerCfgFnCalledEachCheck(t *testing.T) {
 func TestReadinessCheckerPicksUpPathChange(t *testing.T) {
 	t.Parallel()
 
-	firstPath := "/first/ocserv"
-	secondPath := "/second/ocserv"
-	currentPath := firstPath
+	// Create two real files so fileExists returns true and the runner is invoked.
+	dir := t.TempDir()
+	firstBin := filepath.Join(dir, "ocserv-v1")
+	secondBin := filepath.Join(dir, "ocserv-v2")
+	for _, p := range []string{firstBin, secondBin} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh"), 0o755); err != nil {
+			t.Fatalf("create temp binary: %v", err)
+		}
+	}
 
+	currentPath := firstBin
 	cfgFn := func() ReadinessConfig {
 		return ReadinessConfig{OcservBinPath: currentPath}
 	}
 
 	runner := NewFakeCommandRunner()
-	runner.Results[firstPath+" --version"] = CommandResult{ExitCode: 0, Stdout: "ocserv 1.2.3\n"}
-	runner.Results[secondPath+" --version"] = CommandResult{ExitCode: 0, Stdout: "ocserv 1.2.3\n"}
+	runner.Results[firstBin+" --version"] = CommandResult{ExitCode: 0, Stdout: "ocserv 1.0.0\n"}
+	runner.Results[secondBin+" --version"] = CommandResult{ExitCode: 0, Stdout: "ocserv 2.0.0\n"}
 
 	checker := NewReadinessChecker(cfgFn, runner, NewFakeServiceManager(ServiceInactive))
 	ctx := context.Background()
 
-	// First call — firstPath is used. Binary doesn't exist on disk so version
-	// extraction is skipped, but the binary path is read from cfgFn.
+	// First Check uses firstBin.
 	checker.Check(ctx) //nolint:errcheck
 
-	currentPath = secondPath
+	// Mutate the path — second Check should pick up secondBin.
+	currentPath = secondBin
 	checker.Check(ctx) //nolint:errcheck
 
-	// Confirm cfgFn was consulted on each call: the only way we can prove that
-	// is to check that the second call did NOT use firstPath for any runner
-	// invocation. Since neither path exists on disk, the runner won't be called
-	// for version checks; the important guarantee is that cfgFn is invoked twice.
-	//
-	// We verify indirectly: if cfgFn were cached, both calls would reference
-	// firstPath — after currentPath changed, the second call would still see
-	// firstPath. The call-count test above already covers the contract; this
-	// test additionally verifies the path value is re-read on each call by
-	// confirming no stale-path runner calls occurred after the path changed.
+	// Verify the runner was called with firstBin on the first pass
+	// and secondBin on the second pass.
+	var sawFirst, sawSecond bool
 	for _, call := range runner.Calls {
-		if call.Name == secondPath {
-			// secondPath was reached via cfgFn on the second Check — test passes.
-			return
+		if call.Name == firstBin {
+			sawFirst = true
+		}
+		if call.Name == secondBin {
+			sawSecond = true
 		}
 	}
-	// Neither path existed on disk so runner was never called — that is fine;
-	// the cfgFn-per-call guarantee is covered by TestReadinessCheckerCfgFnCalledEachCheck.
+	if !sawFirst {
+		t.Error("expected runner to be called with firstBin on first Check()")
+	}
+	if !sawSecond {
+		t.Error("expected runner to be called with secondBin after path change")
+	}
 }
