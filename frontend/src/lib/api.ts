@@ -379,7 +379,31 @@ export type OcservSession = {
   id: string;
   username: string;
   remoteAddress: string;
+  vpnAddress: string;
   connectedAt?: string;
+  rxBytes: number;
+  txBytes: number;
+  userAgent: string;
+  device: string;
+  reconnectCount: number;
+};
+
+export type OcservSessionDetail = {
+  id: string;
+  username: string;
+  remoteAddress: string;
+  vpnAddress: string;
+  connectedAt?: string;
+  durationSeconds: number;
+  rxBytes: number;
+  txBytes: number;
+  userAgent: string;
+  device: string;
+  ipv4: string;
+  ipv6: string;
+  routes: string[];
+  dns: string[];
+  reconnectCount: number;
 };
 
 export type OcservUser = {
@@ -429,6 +453,17 @@ export function getOcservSessions(): Promise<OcservSession[]> {
 
 export function disconnectOcservSession(sessionId: string): Promise<void> {
   return apiFetch<void>('/api/ocserv/sessions/disconnect', {
+    method: 'POST',
+    body: { sessionId }
+  });
+}
+
+export function getOcservSessionDetail(id: string): Promise<OcservSessionDetail> {
+  return apiFetch<OcservSessionDetail>(`/api/ocserv/sessions/${encodeURIComponent(id)}`);
+}
+
+export function terminateOcservSession(sessionId: string): Promise<void> {
+  return apiFetch<void>('/api/ocserv/sessions/terminate', {
     method: 'POST',
     body: { sessionId }
   });
