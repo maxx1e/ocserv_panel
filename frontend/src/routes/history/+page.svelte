@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { LineChart } from 'layerchart';
+  import MetricChart from '$lib/components/ui/MetricChart.svelte';
   import { ArrowDown, ArrowUp, Server, Users } from 'lucide-svelte';
 
   import CardStats from '$lib/components/ui/CardStats.svelte';
@@ -187,10 +187,6 @@
     return 'Metric data has not been collected for this window yet.';
   }
 
-  function shouldShowChart(metric: string): boolean {
-    return metricByName(monitoring?.catalog, metric)?.state !== 'unavailable' && Boolean(metricSeries(metric));
-  }
-
   function formatGeneratedAt(value: string | undefined): string {
     if (!value) return 'not loaded yet';
     const date = new Date(value);
@@ -365,18 +361,9 @@
     {:else}
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {#each chartDefinitions as chart}
-          {#if shouldShowChart(chart.metric)}
-            <CardChart title={chart.title}>
-              <LineChart data={chartData(chart.metric)} x="timestamp" y="value" height={200} />
-            </CardChart>
-          {:else}
-            <CardStats
-              title={chart.title}
-              value="--"
-              unavailable={true}
-              hint={unavailableReason(chart.metric)}
-            />
-          {/if}
+          <CardChart title={chart.title} chartHeight={200}>
+            <MetricChart data={chartData(chart.metric)} metric={chart.metric} height={200} />
+          </CardChart>
         {/each}
       </div>
     {/if}
