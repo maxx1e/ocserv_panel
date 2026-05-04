@@ -28,8 +28,9 @@ const (
 	PermissionOcservRead              Permission = "ocserv:read"
 	PermissionOcservServiceRead       Permission = "ocserv:service:read"
 	PermissionOcservServiceManage     Permission = "ocserv:service:manage"
-	PermissionOcservSessionsRead      Permission = "ocserv:sessions:read"
+	PermissionOcservSessionsRead       Permission = "ocserv:sessions:read"
 	PermissionOcservSessionsDisconnect Permission = "ocserv:sessions:disconnect"
+	PermissionOcservSessionsTerminate  Permission = "ocserv:sessions:terminate"
 	PermissionOcservUsersRead         Permission = "ocserv:users:read"
 	PermissionOcservUsersCreate       Permission = "ocserv:users:create"
 	PermissionOcservUsersDelete       Permission = "ocserv:users:delete"
@@ -62,6 +63,7 @@ func NewDefaultAuthorizer() Authorizer {
 				PermissionOcservServiceManage:      {},
 				PermissionOcservSessionsRead:       {},
 				PermissionOcservSessionsDisconnect: {},
+				PermissionOcservSessionsTerminate:  {},
 				PermissionOcservUsersRead:          {},
 				PermissionOcservUsersCreate:        {},
 				PermissionOcservUsersDelete:        {},

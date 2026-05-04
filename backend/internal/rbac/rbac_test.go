@@ -55,6 +55,7 @@ func TestAuthorizerOwnerHasAllOcservPermissions(t *testing.T) {
 		PermissionOcservServiceManage,
 		PermissionOcservSessionsRead,
 		PermissionOcservSessionsDisconnect,
+		PermissionOcservSessionsTerminate,
 		PermissionOcservUsersRead,
 		PermissionOcservUsersCreate,
 		PermissionOcservUsersDelete,
@@ -93,6 +94,7 @@ func TestAuthorizerViewerDeniedOcservMutatePermissions(t *testing.T) {
 	mutatePerms := []Permission{
 		PermissionOcservServiceManage,
 		PermissionOcservSessionsDisconnect,
+		PermissionOcservSessionsTerminate,
 		PermissionOcservUsersCreate,
 		PermissionOcservUsersDelete,
 		PermissionOcservUsersUpdate,
@@ -101,5 +103,18 @@ func TestAuthorizerViewerDeniedOcservMutatePermissions(t *testing.T) {
 		if authorizer.Allowed([]Role{RoleViewer}, perm) {
 			t.Fatalf("expected viewer to be denied mutate permission %s", perm)
 		}
+	}
+}
+
+func TestAuthorizerAllowsOnlyOwnerToTerminateSessions(t *testing.T) {
+	t.Parallel()
+
+	authorizer := NewDefaultAuthorizer()
+
+	if !authorizer.Allowed([]Role{RoleOwner}, PermissionOcservSessionsTerminate) {
+		t.Fatal("expected owner role to terminate sessions")
+	}
+	if authorizer.Allowed([]Role{RoleViewer}, PermissionOcservSessionsTerminate) {
+		t.Fatal("expected viewer role to be denied session termination")
 	}
 }
