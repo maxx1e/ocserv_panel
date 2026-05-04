@@ -13,6 +13,7 @@ Build the system with:
 - Go backend for API, system integration, RBAC, audit logging, and privileged operations
 - SvelteKit frontend for dashboard and admin UI
 - SQLite for local persistence
+- tsdb for the monitoring metrics
 - systemd service for runtime management
 - HAProxy for TLS termination is optional deployment feature
 - HTTP is a default connection protocol
@@ -20,6 +21,11 @@ Build the system with:
 
 
 Do not introduce external services unless explicitly requested.
+
+## Allowed Dependencies
+- `https://github.com/rs/zerolog` - for go lang logs
+- `https://github.com/nakabonne/tstorage` - for the monitoring metrics
+- `https://github.com/mattn/go-sqlite31` - for the sqllite integrations
 
 ## Scope
 
@@ -184,7 +190,7 @@ Use Go for:
 - RBAC enforcement
 - SQLite access
 - Audit logging
-- Interactions with `occtl`, `ocpasswd`, ocserv config files, certificate files, logs, and the ocserv management socket
+- Interactions with `occtl`, `ocpasswd`, ocserv config files, certificate files (cerbot), logs, and the ocserv management socket
 - systemd-aware runtime behavior where needed
 
 Design backend code so privileged operations are isolated behind explicit interfaces. Favor narrow functions that validate inputs, perform one operation, and return actionable errors.
@@ -201,7 +207,8 @@ Use SvelteKit for:
 - Historical analytics views
 - Configuration editing workflows
 - Certificate views and lifecycle controls
-- MUST use reference design from the `notus-svelte-main` folder
+- Must use tailwind css framework
+- MUST use reference design from the `svelteforge-admin-main` folder
 
 The frontend should call backend APIs rather than shelling out or assuming direct filesystem access.
 
@@ -306,3 +313,17 @@ Keep this structure unless implementation reveals a better minimal layout.
 When changing architecture, privilege boundaries, deployment assumptions, or `ocserv` integration behavior, update documentation in the same change.
 
 Prefer ADR-style notes for major decisions.
+## Auto-Update Memory (MANDATORY)
+
+**Update memory files AS YOU GO, not at the end.** When you learn something new, update immediately.
+
+| Trigger                             | Action                                   |
+| ----------------------------------- | ---------------------------------------- |
+| User shares a fact about themselves | → Update `memory-profile.md`             |
+| User states a preference            | → Update `memory-preferences.md`         |
+| A decision is made                  | → Update `memory-decisions.md` with date |
+| Completing substantive work         | → Add to `memory-sessions.md`            |
+
+**Skip:** Quick factual questions, trivial tasks with no new info.
+
+**DO NOT ASK. Just update the files when you learn something.**

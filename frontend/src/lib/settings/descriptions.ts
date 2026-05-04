@@ -11,7 +11,10 @@ export const settingDescriptions: Record<string, string> = {
   'installation.log_dir': 'Directory where application log files are written.',
   'installation.ocserv_config_path': 'Path to the ocserv configuration file.',
   'installation.ocserv_socket_path': 'Path to the ocserv management socket for runtime control.',
-  'installation.ocpasswd_path': 'Path to the ocpasswd file for password-based user authentication.',
+  'installation.ocserv_bin_path': 'Path to the ocserv binary used for version detection and config validation.',
+  'installation.occtl_bin_path': 'Path to the occtl binary used for session management.',
+  'installation.ocpasswd_bin_path': 'Path to the ocpasswd binary used for password-based user management.',
+  'installation.ocpasswd_file_path': 'Path to the ocpasswd file containing password-based user accounts.',
   'installation.cert_dir': 'Directory containing TLS certificates for VPN users.',
 
   // Service
@@ -21,6 +24,7 @@ export const settingDescriptions: Record<string, string> = {
   'service.start_on_boot': 'Automatically start the panel service when the system boots.',
   'service.restart_on_failure': 'Automatically restart the service if it crashes.',
   'service.maintenance_mode': 'Enable maintenance mode to block user access during upgrades.',
+  'service.systemd_unit_name': 'Name of the systemd unit controlling the ocserv process (used for start/stop/restart operations).',
 
   // Web Access
   'web.host': 'IP address the HTTP server listens on. Use 0.0.0.0 for all interfaces.',
