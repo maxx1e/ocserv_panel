@@ -1,4 +1,6 @@
 <script lang="ts">
+  import StatusDot from '$lib/components/ui/StatusDot.svelte';
+
   type Props = {
     title: string;
     value: string;
@@ -7,9 +9,10 @@
     trend?: { direction: 'up' | 'down'; value: string };
     unavailable?: boolean;
     hint?: string;
+    statusValue?: string;
   };
 
-  let { title, value, subtitle, icon, trend, unavailable = false, hint }: Props = $props();
+  let { title, value, subtitle, icon, trend, unavailable = false, hint, statusValue }: Props = $props();
 </script>
 
 <article
@@ -19,7 +22,12 @@
   <div class="flex items-center justify-between">
     <div class="flex-1 min-w-0">
       <p class="text-sm font-semibold text-slate-500 uppercase tracking-wide">{title}</p>
-      <p class="mt-1 text-2xl font-bold {unavailable ? 'text-slate-400' : 'text-slate-700'} truncate">{value}</p>
+      <div class="mt-1 flex items-center gap-2">
+        <p class="text-2xl font-bold {unavailable ? 'text-slate-400' : 'text-slate-700'} truncate">{value}</p>
+        {#if statusValue}
+          <StatusDot status={statusValue} size="md" />
+        {/if}
+      </div>
       {#if trend}
         <p class="mt-1 text-sm">
           <span class={trend.direction === 'up' ? 'text-emerald-600' : 'text-red-600'}>
