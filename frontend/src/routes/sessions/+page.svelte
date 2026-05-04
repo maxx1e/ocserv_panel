@@ -3,7 +3,7 @@
   import EmptyState from '$lib/components/ui/EmptyState.svelte';
   import CardTable from '$lib/components/ui/CardTable.svelte';
   import PaginatedTable from '$lib/components/ui/PaginatedTable.svelte';
-  import { RefreshCw, X, Link, AlertTriangle } from 'lucide-svelte';
+  import { RefreshCw, X, Copy, AlertTriangle } from 'lucide-svelte';
   import { formatRelativeTime, formatAbsoluteTime } from '$lib/utils/format';
   import { paginate } from '$lib/utils/pagination';
   import {
@@ -35,6 +35,8 @@
   let sessionsPage = $state(1);
   let lastRefreshed = $state(new Date());
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
+  let nowTick = $state(Date.now());
+  let tickInterval: ReturnType<typeof setInterval> | null = null;
 
   // ── sorting ───────────────────────────────────────────────────────────────
 
@@ -91,9 +93,11 @@
   const totalTx = $derived(sessions.reduce((sum, s) => sum + (s.txBytes ?? 0), 0));
 
   const updatedAgoText = $derived((() => {
-    const diffSec = Math.floor((Date.now() - lastRefreshed.getTime()) / 1000);
-    if (diffSec < 5) return 'just now';
-    return `${diffSec}s ago`;
+    const diffSec = Math.floor((nowTick - lastRefreshed.getTime()) / 1000);
+    if (diffSec < 10) return 'just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    return `${diffMin}m ago`;
   })());
 
   // ── helpers ───────────────────────────────────────────────────────────────
@@ -158,10 +162,12 @@
   onMount(() => {
     void loadSessions();
     refreshInterval = setInterval(() => void loadSessions(), 30_000);
+    tickInterval = setInterval(() => { nowTick = Date.now(); }, 1000);
   });
 
   onDestroy(() => {
     if (refreshInterval) clearInterval(refreshInterval);
+    if (tickInterval) clearInterval(tickInterval);
   });
 
   // ── data loading ──────────────────────────────────────────────────────────
@@ -171,12 +177,13 @@
       // silent refresh — don't reset the whole page
       try {
         const data = await getOcservSessions();
+        const prevSessions = sessions;
         sessions = data;
         lastRefreshed = new Date();
         // If the selected session disappeared, surface a notice
         if (selectedSessionId && !data.some(s => s.id === selectedSessionId)) {
-          const gone = sessions.find(s => s.id === selectedSessionId);
-          sessionGoneNotice = gone ? gone.username : selectedSessionId ?? '';
+          const gone = prevSessions.find(s => s.id === selectedSessionId);
+          sessionGoneNotice = gone?.username ?? selectedSessionId ?? '';
           selectedSessionId = null;
           selectedDetail = null;
           sessionGone = false;
@@ -499,7 +506,18 @@
                         {session.username}
                       </td>
                       <td class="px-4 py-3">
-                        <span class="font-mono text-xs text-slate-500">{session.id.slice(0, 8)}</span>
+                        <div class="flex items-center gap-1">
+                          <span class="font-mono text-xs text-slate-500">{session.id.slice(0, 8)}</span>
+                          <button
+                            type="button"
+                            title="Copy full session ID"
+                            onclick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(session.id); }}
+                            class="p-0.5 text-slate-300 hover:text-slate-500 transition-colors"
+                            aria-label="Copy session ID"
+                          >
+                            <Copy class="w-3 h-3" />
+                          </button>
+                        </div>
                       </td>
                       <td class="px-4 py-3">
                         <span class="font-mono text-xs text-slate-700">{session.vpnAddress || '—'}</span>
