@@ -172,6 +172,9 @@ func (a *OcctlAdapter) TerminateSession(ctx context.Context, sessionID string) e
 		return fmt.Errorf("terminate session %s: %w", sessionID, err)
 	}
 	if result.ExitCode != 0 {
+		if a.isNotConfiguredErr(result.Stderr) {
+			return ErrNotConfigured
+		}
 		return fmt.Errorf("terminate session %s: %s", sessionID, strings.TrimSpace(result.Stderr))
 	}
 	return nil

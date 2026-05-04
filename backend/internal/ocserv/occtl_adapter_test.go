@@ -250,12 +250,24 @@ func TestOcctlAdapterTerminateSessionNonZeroExit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-zero exit code")
 	}
-	if !errors.Is(err, nil) {
-		// Just confirm the error message contains the stderr content.
-	}
 	const wantSubstr = "no session found"
 	if !containsSubstr(err.Error(), wantSubstr) {
 		t.Fatalf("expected error to contain %q, got %q", wantSubstr, err.Error())
+	}
+}
+
+func TestOcctlAdapterTerminateSessionNotConfigured(t *testing.T) {
+	t.Parallel()
+	runner := NewFakeCommandRunner()
+	runner.Results["/usr/local/bin/occtl"] = CommandResult{
+		ExitCode: 1,
+		Stderr:   "occtl: connect: no such file or directory",
+	}
+	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
+
+	err := adapter.TerminateSession(context.Background(), "s99")
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("expected ErrNotConfigured, got %v", err)
 	}
 }
 
