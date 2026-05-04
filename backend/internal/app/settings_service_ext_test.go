@@ -51,8 +51,8 @@ func TestSettingsServiceGetAllSectionsReturnsAllSections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAllSections: %v", err)
 	}
-	if len(resp.Sections) != 12 {
-		t.Fatalf("expected 12 sections, got %d", len(resp.Sections))
+	if len(resp.Sections) != len(AllSectionDefs()) {
+		t.Fatalf("expected %d sections, got %d", len(AllSectionDefs()), len(resp.Sections))
 	}
 	// Verify first section is "general"
 	if resp.Sections[0].ID != "general" {

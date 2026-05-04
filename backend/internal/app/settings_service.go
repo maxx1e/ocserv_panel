@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -186,6 +187,8 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 	if s.configPath != "" {
 		if loaded, err := config.Load(s.configPath); err == nil {
 			liveCfg = loaded
+		} else {
+			slog.Warn("settings: failed to load TOML config for GetAllSections, using startup snapshot", "path", s.configPath, "error", err)
 		}
 	}
 
@@ -289,7 +292,7 @@ func (s *SettingsService) UpdateSetting(ctx context.Context, principal auth.Prin
 
 	// Validate the value based on type
 	if err := validateSettingValue(def, value); err != nil {
-		_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeDenied, "settings update validation failed", map[string]string{"value": value, "error": err.Error()})
+		_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeDenied, "settings update validation failed", map[string]string{"value": auditValue(def, value), "error": err.Error()})
 		return SettingDef{}, err
 	}
 
@@ -302,35 +305,37 @@ func (s *SettingsService) UpdateSetting(ctx context.Context, principal auth.Prin
 	case SettingSourceConfig:
 		// Config-source settings are persisted to the TOML file only.
 		if s.configPath == "" {
-			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update config path not set", map[string]string{"value": value})
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update config path not set", map[string]string{"value": auditValue(def, value)})
 			return SettingDef{}, fmt.Errorf("update setting %q: config path is not configured", key)
 		}
 		current, err := config.Load(s.configPath)
 		if err != nil {
-			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update load config failed", map[string]string{"value": value})
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update load config failed", map[string]string{"value": auditValue(def, value)})
 			return SettingDef{}, fmt.Errorf("update setting %q: load config: %w", key, err)
 		}
+		// For config-source settings, get the real prior value from the TOML, not SQLite.
+		oldValue = configValueForKey(current, key)
 		if err := applySettingToConfig(&current, key, value); err != nil {
-			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update apply failed", map[string]string{"value": value})
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update apply failed", map[string]string{"value": auditValue(def, value)})
 			return SettingDef{}, err
 		}
 		if err := config.Validate(current); err != nil {
-			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeDenied, "settings update validation failed", map[string]string{"value": value, "error": err.Error()})
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeDenied, "settings update validation failed", map[string]string{"value": auditValue(def, value), "error": err.Error()})
 			return SettingDef{}, fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 		}
 		if err := config.Save(current, s.configPath); err != nil {
-			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update save config failed", map[string]string{"value": value})
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update save config failed", map[string]string{"value": auditValue(def, value)})
 			return SettingDef{}, fmt.Errorf("update setting %q: save config: %w", key, err)
 		}
 	default:
 		// Database-source settings are persisted to SQLite only.
 		if err := s.settingsStore.SetSetting(ctx, key, value); err != nil {
-			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update save failed", map[string]string{"value": value})
+			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update save failed", map[string]string{"value": auditValue(def, value)})
 			return SettingDef{}, fmt.Errorf("update setting %q: %w", key, err)
 		}
 	}
 
-	_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeSuccess, "settings update saved", map[string]string{"old_value": oldValue, "new_value": value})
+	_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeSuccess, "settings update saved", map[string]string{"old_value": auditValue(def, oldValue), "new_value": auditValue(def, value)})
 
 	return SettingDef{
 		Key:             def.Key,
@@ -345,6 +350,15 @@ func (s *SettingsService) UpdateSetting(ctx context.Context, principal auth.Prin
 		Validation:      def.Validation,
 		SortOrder:       def.SortOrder,
 	}, nil
+}
+
+// auditValue returns a safe string for audit logging: redacts values for
+// password-type settings so TLS key paths and DSNs are not logged verbatim.
+func auditValue(def SettingDef, value string) string {
+	if def.Type == SettingTypePassword {
+		return "[redacted]"
+	}
+	return value
 }
 
 // validateSettingValue checks a value against its setting definition.
@@ -421,6 +435,8 @@ func (s *SettingsService) RestartStatus(ctx context.Context, principal auth.Prin
 	if s.configPath != "" {
 		if loaded, loadErr := config.Load(s.configPath); loadErr == nil {
 			liveCfg = loaded
+		} else {
+			slog.Warn("settings: failed to load TOML config for RestartStatus, using startup snapshot", "path", s.configPath, "error", loadErr)
 		}
 	}
 
