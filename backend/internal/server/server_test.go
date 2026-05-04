@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -919,6 +920,29 @@ func assertDeniedAuditAction(t *testing.T, s *store.Store, action string) {
 		}
 	}
 	t.Fatalf("expected denied audit action %q in %#v", action, events)
+}
+
+func TestWriteAppErrorMapsErrNotConfiguredTo503(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	app := &App{}
+	app.writeAppError(rec, ocserv.ErrNotConfigured)
+
+	assertStatus(t, rec, http.StatusServiceUnavailable)
+	assertJSONField(t, rec, "error", "ocserv is not available")
+}
+
+func TestWriteAppErrorMapsWrappedErrNotConfiguredTo503(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	wrapped := fmt.Errorf("list ocserv sessions: %w", ocserv.ErrNotConfigured)
+	a := &App{}
+	a.writeAppError(rec, wrapped)
+
+	assertStatus(t, rec, http.StatusServiceUnavailable)
+	assertJSONField(t, rec, "error", "ocserv is not available")
 }
 
 func assertNoAuditActionPrefix(t *testing.T, s *store.Store, prefix string) {

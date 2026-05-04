@@ -10,6 +10,7 @@ import (
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/metrics"
+	"ocserv_panel/backend/internal/ocserv"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
@@ -482,6 +483,8 @@ func (a *App) writeAppError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "invalid confirmation")
 	case errors.Is(err, app.ErrInvalidRetention):
 		writeError(w, http.StatusBadRequest, "invalid retention")
+	case errors.Is(err, ocserv.ErrNotConfigured):
+		writeError(w, http.StatusServiceUnavailable, "ocserv is not available")
 	case isMetricsValidationError(err):
 		writeError(w, http.StatusBadRequest, "invalid request")
 	default:
