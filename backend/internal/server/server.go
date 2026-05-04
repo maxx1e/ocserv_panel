@@ -39,6 +39,7 @@ type App struct {
 	dashboardService  *app.DashboardService
 	monitoringService *app.MonitoringService
 	settingsService   *app.SettingsService
+	ocservService     *app.OcservService
 	authorizer        rbac.Authorizer
 	cookieSecure      bool
 	now               func() time.Time
@@ -165,6 +166,7 @@ func NewAppRouter(
 	dashboardService *app.DashboardService,
 	monitoringService *app.MonitoringService,
 	settingsService *app.SettingsService,
+	ocservService *app.OcservService,
 	authorizer rbac.Authorizer,
 	opts AppOptions,
 ) http.Handler {
@@ -177,6 +179,7 @@ func NewAppRouter(
 		dashboardService:  dashboardService,
 		monitoringService: monitoringService,
 		settingsService:   settingsService,
+		ocservService:     ocservService,
 		authorizer:        authorizer,
 		cookieSecure:      opts.CookieSecure,
 		now:               now,
@@ -201,6 +204,19 @@ func NewAppRouter(
 	mux.HandleFunc("/api/settings/restart", appHandler.handleRestart)
 	mux.HandleFunc("/api/settings", appHandler.handleSettingsSectionsGet)
 	mux.HandleFunc("/api/settings/", appHandler.handleSettingsUpdate)
+	// ocserv management API
+	mux.HandleFunc("/api/ocserv/readiness", appHandler.handleOcservReadiness)
+	mux.HandleFunc("/api/ocserv/service/status", appHandler.handleOcservServiceStatus)
+	mux.HandleFunc("/api/ocserv/service/start", appHandler.handleOcservServiceStart)
+	mux.HandleFunc("/api/ocserv/service/stop", appHandler.handleOcservServiceStop)
+	mux.HandleFunc("/api/ocserv/service/restart", appHandler.handleOcservServiceRestart)
+	mux.HandleFunc("/api/ocserv/sessions", appHandler.handleOcservSessions)
+	mux.HandleFunc("/api/ocserv/sessions/disconnect", appHandler.handleOcservSessionDisconnect)
+	mux.HandleFunc("/api/ocserv/users", appHandler.handleOcservUsers)
+	mux.HandleFunc("/api/ocserv/users/create", appHandler.handleOcservUserCreate)
+	mux.HandleFunc("/api/ocserv/users/{username}/password", appHandler.handleOcservUserUpdatePassword)
+	mux.HandleFunc("/api/ocserv/users/{username}", appHandler.handleOcservUserDelete)
+	mux.HandleFunc("/api/ocserv/config/issues", appHandler.handleOcservConfigIssues)
 
 	return securityHeaders(mux)
 }

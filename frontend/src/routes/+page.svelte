@@ -211,8 +211,8 @@
     />
     <CardStats
       title="ocserv status"
-      value={summary.ocservStatus ?? 'not_configured'}
-      subtitle="Local-only baseline; no live ocserv control is active."
+      value={summary.ocserv?.status ?? summary.ocservStatus ?? 'not_configured'}
+      subtitle={summary.ocserv?.message ?? 'Local-only baseline; no live ocserv control is active.'}
       icon={Shield}
     />
     <CardStats
@@ -327,27 +327,27 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
         <CardStats
           title="Total sessions"
-          value={formatMetricValue('totalSessions', summary.analytics.totalSessions as number ?? undefined)}
+          value={formatMetricValue('totalSessions', summary.analytics?.totalSessions)}
           icon={Users}
         />
         <CardStats
           title="Sample sessions"
-          value={formatMetricValue('sampleSessions', summary.analytics.sampleSessions as number ?? undefined)}
+          value={formatMetricValue('sampleSessions', summary.analytics?.sampleSessions)}
           icon={Database}
         />
         <CardStats
           title="Total received"
-          value={formatBytes(summary.analytics.totalBytesIn as number ?? undefined)}
+          value={formatBytes(summary.analytics?.totalBytesIn)}
           icon={ArrowDown}
         />
         <CardStats
           title="Total sent"
-          value={formatBytes(summary.analytics.totalBytesOut as number ?? undefined)}
+          value={formatBytes(summary.analytics?.totalBytesOut)}
           icon={ArrowUp}
         />
         <CardStats
           title="Total traffic"
-          value={formatBytes(((summary.analytics.totalBytesIn as number ?? 0) + (summary.analytics.totalBytesOut as number ?? 0)))}
+          value={formatBytes((summary.analytics?.totalBytesIn ?? 0) + (summary.analytics?.totalBytesOut ?? 0))}
           icon={Server}
         />
       </div>

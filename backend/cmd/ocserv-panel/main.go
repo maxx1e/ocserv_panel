@@ -18,6 +18,7 @@ import (
 	"ocserv_panel/backend/internal/db"
 	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/monitoring"
+	"ocserv_panel/backend/internal/ocserv"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/server"
 	"ocserv_panel/backend/internal/store"
@@ -47,7 +48,6 @@ func main() {
 	persistence := store.New(database)
 	recorder := audit.NewSQLiteRecorder(persistence)
 	authService := app.NewAuthService(persistence, recorder)
-	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), nil)
 
 	configPath := envOrDefault("OCSERV_PANEL_CONFIG_PATH", "/etc/ocserv-panel/config.toml")
 	cfg, cfgErr := config.Load(configPath)
@@ -59,6 +59,25 @@ func main() {
 	config.MergeEnv(&cfg, os.Getenv)
 
 	settingsService := app.NewSettingsService(&cfg, persistence, recorder, rbac.NewDefaultAuthorizer())
+
+	// Build ocserv integration components from config.
+	runner := ocserv.NewOSCommandRunner()
+	ocservCfg := ocserv.ReadinessConfig{
+		OcservBinPath:   cfg.Installation.OcservBinPath,
+		OcctlBinPath:    cfg.Installation.OcctlBinPath,
+		OcpasswdBinPath: cfg.Installation.OcpasswdBinPath,
+		ConfigPath:      cfg.Installation.OcservConfigPath,
+		SocketPath:      cfg.Installation.OcservSocketPath,
+		UnitName:        cfg.Service.SystemdUnitName,
+	}
+	svcManager := ocserv.NewSystemdManager(cfg.Service.SystemdUnitName, runner)
+	readinessChecker := ocserv.NewReadinessChecker(ocservCfg, runner, svcManager)
+	sessionManager := ocserv.NewOcctlAdapter(cfg.Installation.OcctlBinPath, cfg.Installation.OcservSocketPath, runner)
+	passwdManager := ocserv.NewOcpasswdAdapter(cfg.Installation.OcpasswdBinPath, cfg.Installation.OcpasswdFilePath, cfg.Installation.OcservConfigPath, runner)
+	configValidator := ocserv.NewConfigValidator(cfg.Installation.OcservConfigPath)
+	ocservService := app.NewOcservService(readinessChecker, sessionManager, passwdManager, svcManager, configValidator, recorder, rbac.NewDefaultAuthorizer())
+
+	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker)
 
 	// Create housekeeping scheduler
 	housekeepingScheduler := app.NewHousekeepingScheduler(
@@ -116,7 +135,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
+		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -47,8 +47,22 @@ export type DashboardSummary = {
   ocservStatus?: string;
   activeSessionCount?: number;
   recentAudit?: AuditEvent[];
-  analytics?: Record<string, unknown>;
+  analytics?: {
+    totalSessions?: number;
+    sampleSessions?: number;
+    totalBytesIn?: number;
+    totalBytesOut?: number;
+  };
   sampleData?: boolean | { enabled?: boolean; present?: boolean; message?: string };
+  ocserv?: OcservStatus;
+  setupRequired?: boolean;
+  adminCount?: number;
+  history?: {
+    totalSessions?: number;
+    sampleSessions?: number;
+    totalBytesIn?: number;
+    totalBytesOut?: number;
+  };
   [key: string]: unknown;
 };
 
@@ -345,7 +359,110 @@ export function triggerRestart(): Promise<{ ok: boolean; message?: string }> {
   return apiFetch<{ ok: boolean; message?: string }>('/api/settings/restart', { method: 'POST' });
 }
 
-export function principalFromAuth(auth: AuthSummary | null): Principal | null {
+export type OcservReadiness = {
+  binaryPresent: boolean;
+  binaryVersion: string;
+  configPresent: boolean;
+  configValid: boolean;
+  serviceRunning: boolean;
+  socketPresent: boolean;
+  occtlPresent: boolean;
+  ocpasswdPresent: boolean;
+};
+
+export type OcservServiceStatus = {
+  status: 'active' | 'inactive' | 'failed' | 'not_found';
+  message: string;
+};
+
+export type OcservSession = {
+  id: string;
+  username: string;
+  remoteAddress: string;
+  connectedAt?: string;
+};
+
+export type OcservUser = {
+  username: string;
+  group: string;
+  active: boolean;
+};
+
+export type OcservConfigIssueSeverity = 'error' | 'warning' | 'info';
+
+export type OcservConfigIssue = {
+  severity: OcservConfigIssueSeverity;
+  key: string;
+  message: string;
+  suggestion: string;
+};
+
+export type OcservStatus = {
+  status: string;
+  configured: boolean;
+  message: string;
+};
+
+export function getOcservReadiness(): Promise<OcservReadiness> {
+  return apiFetch<OcservReadiness>('/api/ocserv/readiness');
+}
+
+export function getOcservServiceStatus(): Promise<OcservServiceStatus> {
+  return apiFetch<OcservServiceStatus>('/api/ocserv/service/status');
+}
+
+export function startOcservService(): Promise<void> {
+  return apiFetch<void>('/api/ocserv/service/start', { method: 'POST' });
+}
+
+export function stopOcservService(): Promise<void> {
+  return apiFetch<void>('/api/ocserv/service/stop', { method: 'POST' });
+}
+
+export function restartOcservService(): Promise<void> {
+  return apiFetch<void>('/api/ocserv/service/restart', { method: 'POST' });
+}
+
+export function getOcservSessions(): Promise<OcservSession[]> {
+  return apiFetch<OcservSession[]>('/api/ocserv/sessions');
+}
+
+export function disconnectOcservSession(sessionId: string): Promise<void> {
+  return apiFetch<void>('/api/ocserv/sessions/disconnect', {
+    method: 'POST',
+    body: { sessionId }
+  });
+}
+
+export function getOcservUsers(): Promise<OcservUser[]> {
+  return apiFetch<OcservUser[]>('/api/ocserv/users');
+}
+
+export function createOcservUser(username: string, password: string): Promise<void> {
+  return apiFetch<void>('/api/ocserv/users/create', {
+    method: 'POST',
+    body: { username, password }
+  });
+}
+
+export function deleteOcservUser(username: string): Promise<void> {
+  return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}`, {
+    method: 'DELETE'
+  });
+}
+
+export function updateOcservUserPassword(username: string, password: string): Promise<void> {
+  return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}/password`, {
+    method: 'PUT',
+    body: { password }
+  });
+}
+
+export function getOcservConfigIssues(): Promise<OcservConfigIssue[]> {
+  return apiFetch<OcservConfigIssue[]>('/api/ocserv/config/issues');
+}
+
+
   if (!auth) return null;
   const principal = auth.principal ?? auth.user;
   if (!principal) return null;

@@ -20,6 +20,7 @@ import (
 	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/db"
 	"ocserv_panel/backend/internal/metrics"
+	"ocserv_panel/backend/internal/ocserv"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
@@ -621,10 +622,27 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 			dashboardService,
 			monitoringService,
 			settingsService,
+			newTestOcservService(s, recorder),
 			rbac.NewDefaultAuthorizer(),
 			AppOptions{CookieSecure: cookieSecure},
 		),
 	}
+}
+
+func newTestOcservService(s *store.Store, recorder audit.SQLiteRecorder) *app.OcservService {
+	runner := ocserv.NewFakeCommandRunner()
+	fakeSvc := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
+	checker := ocserv.NewReadinessChecker(ocserv.ReadinessConfig{}, runner, fakeSvc)
+	validator := ocserv.NewConfigValidator("/nonexistent/ocserv.conf")
+	return app.NewOcservService(
+		checker,
+		ocserv.NewFakeManager(),
+		ocserv.NewFakePasswdManager(),
+		fakeSvc,
+		validator,
+		recorder,
+		rbac.NewDefaultAuthorizer(),
+	)
 }
 
 func (h *testHarness) createOwner(t *testing.T, username string, password string) {
