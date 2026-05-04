@@ -490,6 +490,19 @@ func TestProtectedEndpointsAuditUnauthenticatedAttempts(t *testing.T) {
 			path:   "/api/monitoring/series?metric=host_cpu_utilization",
 			action: "monitoring.series",
 		},
+		{
+			name:   "ocserv session detail",
+			method: http.MethodGet,
+			path:   "/api/ocserv/sessions/some-id",
+			action: "ocserv.sessions.detail",
+		},
+		{
+			name:   "ocserv session terminate",
+			method: http.MethodPost,
+			path:   "/api/ocserv/sessions/terminate",
+			body:   map[string]string{"sessionId": "some-id"},
+			action: "ocserv.sessions.terminate",
+		},
 	}
 
 	for _, tt := range tests {

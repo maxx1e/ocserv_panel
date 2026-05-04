@@ -419,7 +419,7 @@ func ocservReadinessToResponse(r *ocserv.OcservReadiness) ocservReadinessRespons
 func ocservSessionToResponse(s ocserv.Session) ocservSessionResponse {
 	connectedAt := ""
 	if !s.ConnectedAt.IsZero() {
-		connectedAt = s.ConnectedAt.UTC().Format("2006-01-02T15:04:05Z")
+		connectedAt = s.ConnectedAt.UTC().Format(time.RFC3339)
 	}
 	return ocservSessionResponse{
 		ID:             s.ID,
