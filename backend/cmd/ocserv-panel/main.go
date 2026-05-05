@@ -104,6 +104,7 @@ func main() {
 		configValidator,
 		configReloader,
 		networkInspector,
+		ocserv.NewRestartDetector(),
 		recorder,
 		rbac.NewDefaultAuthorizer(),
 	)

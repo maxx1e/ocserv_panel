@@ -39,6 +39,7 @@ func newTestConfigService(t *testing.T) (*ConfigManagementService, string) {
 		validator,
 		reloader,
 		inspector,
+		ocserv.NewRestartDetector(),
 		audit.NoopRecorder{},
 		rbac.NewDefaultAuthorizer(),
 	)
@@ -301,5 +302,38 @@ func TestConfigServiceInspectNetworkViewerAllowed(t *testing.T) {
 	}
 	if len(prereqs.Items) == 0 {
 		t.Error("expected at least one prerequisite check item")
+	}
+}
+
+// --- ValidateContent restart detection ---
+
+func TestConfigServiceValidateContentReportsRestart(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestConfigService(t)
+	// The test config file contains "tcp-port = 443" — change it to 8443.
+	result, err := svc.ValidateContent(context.Background(), ownerPrincipal(), "tcp-port = 8443\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.RequiresRestart {
+		t.Error("expected RequiresRestart=true for port change")
+	}
+	if len(result.RestartReasons) == 0 {
+		t.Error("expected at least one restart reason")
+	}
+}
+
+func TestConfigServiceValidateContentNoRestartForDNS(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestConfigService(t)
+	// DNS is not a restart-required directive; keep tcp-port unchanged.
+	result, err := svc.ValidateContent(context.Background(), ownerPrincipal(), "tcp-port = 443\ndns = 1.1.1.1\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RequiresRestart {
+		t.Error("expected RequiresRestart=false for DNS-only change")
 	}
 }

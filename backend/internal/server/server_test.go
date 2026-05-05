@@ -653,6 +653,7 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 		configValidator,
 		configReloader,
 		networkInspector,
+		ocserv.NewRestartDetector(),
 		recorder,
 		rbac.NewDefaultAuthorizer(),
 	)
@@ -1128,6 +1129,7 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 		configValidator2,
 		configReloader2,
 		networkInspector2,
+		ocserv.NewRestartDetector(),
 		recorder,
 		rbac.NewDefaultAuthorizer(),
 	)

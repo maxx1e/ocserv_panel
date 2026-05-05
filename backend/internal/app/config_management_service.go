@@ -27,9 +27,13 @@ type ConfigReadResult struct {
 }
 
 // ValidationResult carries whether content passed validation and any issues found.
+// When restart detection is wired, RequiresRestart indicates whether the proposed
+// changes would require a full service restart (vs a simple reload).
 type ValidationResult struct {
-	Valid  bool
-	Issues []ocserv.ConfigIssue
+	Valid           bool
+	Issues          []ocserv.ConfigIssue
+	RequiresRestart bool
+	RestartReasons  []string
 }
 
 // ApplyResult carries the outcome of a config write and live reload attempt.
@@ -52,12 +56,13 @@ type RollbackResult struct {
 // ConfigManagementService provides RBAC-guarded, audited operations for
 // reading, validating, writing, and rolling back the ocserv configuration file.
 type ConfigManagementService struct {
-	files      *ocserv.ConfigFileManager
-	validator  *ocserv.ConfigValidator
-	reloader   *ocserv.ConfigReloader
-	inspector  *ocserv.NetworkInspector
-	recorder   audit.Recorder
-	authorizer rbac.Authorizer
+	files           *ocserv.ConfigFileManager
+	validator       *ocserv.ConfigValidator
+	reloader        *ocserv.ConfigReloader
+	inspector       *ocserv.NetworkInspector
+	restartDetector *ocserv.RestartDetector
+	recorder        audit.Recorder
+	authorizer      rbac.Authorizer
 }
 
 // NewConfigManagementService returns a ConfigManagementService wired with the
@@ -67,6 +72,7 @@ func NewConfigManagementService(
 	validator *ocserv.ConfigValidator,
 	reloader *ocserv.ConfigReloader,
 	inspector *ocserv.NetworkInspector,
+	restartDetector *ocserv.RestartDetector,
 	recorder audit.Recorder,
 	authorizer rbac.Authorizer,
 ) *ConfigManagementService {
@@ -74,12 +80,13 @@ func NewConfigManagementService(
 		recorder = audit.NoopRecorder{}
 	}
 	return &ConfigManagementService{
-		files:      files,
-		validator:  validator,
-		reloader:   reloader,
-		inspector:  inspector,
-		recorder:   recorder,
-		authorizer: authorizer,
+		files:           files,
+		validator:       validator,
+		reloader:        reloader,
+		inspector:       inspector,
+		restartDetector: restartDetector,
+		recorder:        recorder,
+		authorizer:      authorizer,
 	}
 }
 
@@ -174,6 +181,7 @@ func (s *ConfigManagementService) DiffWithBackup(ctx context.Context, principal 
 // ValidateContent validates proposed config content without writing to disk.
 // Requires PermissionOcservConfigRead. Produces an audit record.
 // Returns ErrConfigValidationFailed when error-severity issues are present.
+// When a RestartDetector is wired, the result includes restart analysis.
 func (s *ConfigManagementService) ValidateContent(ctx context.Context, principal auth.Principal, content string) (ValidationResult, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.validate"); err != nil {
 		return ValidationResult{}, err
@@ -192,7 +200,17 @@ func (s *ConfigManagementService) ValidateContent(ctx context.Context, principal
 		_ = s.record(ctx, &actorID, "ocserv.config.validate", "ocserv_config", "", audit.OutcomeFailure, "config validation failed", nil)
 	}
 
-	return ValidationResult{Valid: valid, Issues: issues}, nil
+	result := ValidationResult{Valid: valid, Issues: issues}
+
+	// Run restart detection if the detector is wired and current config is readable.
+	currentContent, _, readErr := s.files.Read()
+	if readErr == nil && s.restartDetector != nil {
+		analysis := s.restartDetector.Detect(currentContent, content)
+		result.RequiresRestart = analysis.RequiresRestart
+		result.RestartReasons = analysis.Reasons
+	}
+
+	return result, nil
 }
 
 // ApplyConfig validates content, writes it to disk, then reloads ocserv.
