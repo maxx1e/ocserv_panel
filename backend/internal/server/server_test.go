@@ -593,10 +593,12 @@ func TestRepresentativeWrongMethodsReturn405(t *testing.T) {
 }
 
 type testHarness struct {
-	database    *sql.DB
-	store       *store.Store
-	router      http.Handler
-	ocservFake  *ocserv.FakeManager
+	database       *sql.DB
+	store          *store.Store
+	router         http.Handler
+	ocservFake     *ocserv.FakeManager
+	healthService  *app.HealthService
+	logTailService *app.LogTailService
 }
 
 func newTestHarness(t *testing.T) *testHarness {
@@ -630,16 +632,28 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	settingsService := app.NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
 
+	testCfg := config.Defaults()
+	testCfgFn := func() config.Config { return testCfg }
+	fakeRunner2 := ocserv.NewFakeCommandRunner()
+	fakeSvcMgr2 := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
+	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
+	healthSvc := app.NewHealthService(testChecker, s, testCfgFn, rbac.NewDefaultAuthorizer())
+	logTailSvc := app.NewLogTailService(testCfgFn, app.FakeLogFileReader{}, rbac.NewDefaultAuthorizer())
+
 	return &testHarness{
-		database:   database,
-		store:      s,
-		ocservFake: fakeManager,
+		database:       database,
+		store:          s,
+		ocservFake:     fakeManager,
+		healthService:  healthSvc,
+		logTailService: logTailSvc,
 		router: NewAppRouter(
 			authService,
 			dashboardService,
 			monitoringService,
 			settingsService,
 			ocservSvc,
+			healthSvc,
+			logTailSvc,
 			rbac.NewDefaultAuthorizer(),
 			AppOptions{CookieSecure: cookieSecure},
 		),
@@ -1076,16 +1090,27 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 	settingsService := app.NewSettingsService(&initialCfg, cfgPath, s, recorder, rbac.NewDefaultAuthorizer())
 	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
 
+	tempCfgFn := func() config.Config { return initialCfg }
+	fakeRunner2 := ocserv.NewFakeCommandRunner()
+	fakeSvcMgr2 := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
+	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
+	healthSvc := app.NewHealthService(testChecker, s, tempCfgFn, rbac.NewDefaultAuthorizer())
+	logTailSvc := app.NewLogTailService(tempCfgFn, app.FakeLogFileReader{}, rbac.NewDefaultAuthorizer())
+
 	h := &testHarness{
-		database:   database,
-		store:      s,
-		ocservFake: fakeManager,
+		database:       database,
+		store:          s,
+		ocservFake:     fakeManager,
+		healthService:  healthSvc,
+		logTailService: logTailSvc,
 		router: NewAppRouter(
 			authService,
 			dashboardService,
 			monitoringService,
 			settingsService,
 			ocservSvc,
+			healthSvc,
+			logTailSvc,
 			rbac.NewDefaultAuthorizer(),
 			AppOptions{CookieSecure: true},
 		),

@@ -41,6 +41,8 @@ type App struct {
 	monitoringService *app.MonitoringService
 	settingsService   *app.SettingsService
 	ocservService     *app.OcservService
+	healthService     *app.HealthService
+	logTailService    *app.LogTailService
 	authorizer        rbac.Authorizer
 	cookieSecure      bool
 	now               func() time.Time
@@ -168,6 +170,8 @@ func NewAppRouter(
 	monitoringService *app.MonitoringService,
 	settingsService *app.SettingsService,
 	ocservService *app.OcservService,
+	healthService *app.HealthService,
+	logTailService *app.LogTailService,
 	authorizer rbac.Authorizer,
 	opts AppOptions,
 ) http.Handler {
@@ -181,6 +185,8 @@ func NewAppRouter(
 		monitoringService: monitoringService,
 		settingsService:   settingsService,
 		ocservService:     ocservService,
+		healthService:     healthService,
+		logTailService:    logTailService,
 		authorizer:        authorizer,
 		cookieSecure:      opts.CookieSecure,
 		now:               now,
@@ -220,6 +226,9 @@ func NewAppRouter(
 	mux.HandleFunc("/api/ocserv/users/{username}/password", appHandler.handleOcservUserUpdatePassword)
 	mux.HandleFunc("/api/ocserv/users/{username}", appHandler.handleOcservUserDelete)
 	mux.HandleFunc("/api/ocserv/config/issues", appHandler.handleOcservConfigIssues)
+	// health and log endpoints
+	mux.HandleFunc("/api/health/system", appHandler.handleSystemHealth)
+	mux.HandleFunc("/api/logs/tail", appHandler.handleLogTail)
 
 	return securityHeaders(mux)
 }

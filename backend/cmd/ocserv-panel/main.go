@@ -86,6 +86,16 @@ func main() {
 	configValidator := ocserv.NewConfigValidator(cfg.Installation.OcservConfigPath)
 	ocservService := app.NewOcservService(readinessChecker, sessionManager, passwdManager, svcManager, configValidator, recorder, rbac.NewDefaultAuthorizer())
 
+	healthCfgFn := func() config.Config {
+		liveCfg, err := config.Load(configPath)
+		if err != nil {
+			return cfg
+		}
+		return liveCfg
+	}
+	healthService := app.NewHealthService(readinessChecker, persistence, healthCfgFn, rbac.NewDefaultAuthorizer())
+	logTailService := app.NewLogTailService(healthCfgFn, app.OSLogFileReader{}, rbac.NewDefaultAuthorizer())
+
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker)
 
 	// Create housekeeping scheduler
@@ -144,7 +154,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
+		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
