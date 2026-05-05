@@ -215,3 +215,78 @@ func TestParseConfigLine(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigValidatorValidateContentPortRange(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/nonexistent")
+	issues, err := v.ValidateContent(context.Background(), "tcp-port = 99999\n")
+	if err != nil {
+		t.Fatalf("ValidateContent: %v", err)
+	}
+	for _, issue := range issues {
+		if issue.Key == "tcp-port" && issue.Severity == IssueError {
+			return
+		}
+	}
+	t.Fatalf("expected error issue for out-of-range port, got %v", issues)
+}
+
+func TestConfigValidatorValidateContentInvalidCIDR(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/nonexistent")
+	issues, err := v.ValidateContent(context.Background(), "route = not-a-cidr\n")
+	if err != nil {
+		t.Fatalf("ValidateContent: %v", err)
+	}
+	for _, issue := range issues {
+		if issue.Key == "route" && issue.Severity == IssueError {
+			return
+		}
+	}
+	t.Fatalf("expected error issue for invalid CIDR, got %v", issues)
+}
+
+func TestConfigValidatorValidateContentInvalidDNS(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/nonexistent")
+	issues, err := v.ValidateContent(context.Background(), "dns = not.an.ip\n")
+	if err != nil {
+		t.Fatalf("ValidateContent: %v", err)
+	}
+	for _, issue := range issues {
+		if issue.Key == "dns" && issue.Severity == IssueWarning {
+			return
+		}
+	}
+	t.Fatalf("expected warning issue for invalid DNS IP, got %v", issues)
+}
+
+func TestConfigValidatorValidateContentValid(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/nonexistent")
+	content := "tcp-port = 443\nudp-port = 443\nroute = 10.0.0.0/8\ndns = 8.8.8.8\n"
+	issues, err := v.ValidateContent(context.Background(), content)
+	if err != nil {
+		t.Fatalf("ValidateContent: %v", err)
+	}
+	for _, issue := range issues {
+		if issue.Severity == IssueError {
+			t.Fatalf("unexpected error issue for valid content: %v", issue)
+		}
+	}
+}
+
+func TestConfigValidatorValidateContentMalformedLine(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/nonexistent")
+	issues, err := v.ValidateContent(context.Background(), "this-line-has-no-equals\n")
+	if err != nil {
+		t.Fatalf("ValidateContent: %v", err)
+	}
+	for _, issue := range issues {
+		if issue.Severity == IssueError {
+			return
+		}
+	}
+	t.Fatalf("expected error issue for malformed line, got %v", issues)
+}

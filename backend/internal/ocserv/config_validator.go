@@ -3,8 +3,10 @@ package ocserv
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -84,6 +86,84 @@ func (v *ConfigValidator) ValidateConfig(ctx context.Context) ([]ConfigIssue, er
 	}
 
 	return issues, nil
+}
+
+// ValidateContent validates ocserv config text without reading from disk.
+// It checks for syntax errors and common misconfiguration in the supplied content.
+// Returns a slice of ConfigIssue (may be empty). Never returns a non-nil error.
+func (v *ConfigValidator) ValidateContent(ctx context.Context, content string) ([]ConfigIssue, error) {
+	_ = ctx
+
+	var issues []ConfigIssue
+	for i, rawLine := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, ok := parseConfigLine(line)
+		if !ok {
+			issues = append(issues, ConfigIssue{
+				Severity:   IssueError,
+				Key:        fmt.Sprintf("line_%d", i+1),
+				Message:    fmt.Sprintf("malformed config line (missing '='): %s", line),
+				Suggestion: "Each setting must follow the format: key = value",
+			})
+			continue
+		}
+
+		switch key {
+		case "tcp-port", "udp-port":
+			issues = append(issues, v.checkPortValue(key, value)...)
+		case "route", "no-route":
+			issues = append(issues, v.checkCIDR(key, value)...)
+		case "dns":
+			issues = append(issues, v.checkDNS(key, value)...)
+		}
+	}
+
+	return issues, nil
+}
+
+// checkPortValue validates that value is an integer in the valid port range [1, 65535].
+func (v *ConfigValidator) checkPortValue(key, value string) []ConfigIssue {
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return []ConfigIssue{{
+			Severity:   IssueError,
+			Key:        key,
+			Message:    fmt.Sprintf("%s has invalid port value: %s (must be 1-65535)", key, value),
+			Suggestion: fmt.Sprintf("Set %s to an integer between 1 and 65535.", key),
+		}}
+	}
+	return nil
+}
+
+// checkCIDR validates that value is a valid CIDR notation address block.
+func (v *ConfigValidator) checkCIDR(key, value string) []ConfigIssue {
+	_, _, err := net.ParseCIDR(value)
+	if err != nil {
+		return []ConfigIssue{{
+			Severity:   IssueError,
+			Key:        key,
+			Message:    fmt.Sprintf("%s has invalid CIDR value: %s", key, value),
+			Suggestion: fmt.Sprintf("Use valid CIDR notation, for example: 10.0.0.0/8"),
+		}}
+	}
+	return nil
+}
+
+// checkDNS validates that value is a valid IP address for a DNS server.
+func (v *ConfigValidator) checkDNS(key, value string) []ConfigIssue {
+	if net.ParseIP(value) == nil {
+		return []ConfigIssue{{
+			Severity:   IssueWarning,
+			Key:        key,
+			Message:    fmt.Sprintf("%s has invalid IP address: %s", key, value),
+			Suggestion: "Set dns to a valid IPv4 or IPv6 address, for example: 8.8.8.8",
+		}}
+	}
+	return nil
 }
 
 func (v *ConfigValidator) checkCertPath(key, value, configDir string) []ConfigIssue {
