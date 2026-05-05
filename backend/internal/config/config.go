@@ -27,6 +27,8 @@ type InstallationConfig struct {
 	OcpasswdBinPath  string `toml:"ocpasswd_bin_path"`
 	OcpasswdFilePath string `toml:"ocpasswd_file_path"`
 	CertDir          string `toml:"cert_dir"`
+	OcservLogPath    string `toml:"ocserv_log_path"`
+	PanelLogPath     string `toml:"panel_log_path"`
 }
 
 // ServiceConfig holds service runtime settings.
@@ -72,6 +74,7 @@ type MonitoringConfig struct {
 	HealthEndpoint           bool `toml:"health_endpoint"`
 	MetricsEndpoint          bool `toml:"metrics_endpoint"`
 	DashboardRefreshInterval int  `toml:"dashboard_refresh_interval"`
+	LogFileReadEnabled       bool `toml:"log_file_read_enabled"`
 }
 
 // Config is the top-level TOML configuration structure.
@@ -103,6 +106,8 @@ func Defaults() Config {
 			OcpasswdBinPath:  "/usr/local/bin/ocpasswd",
 			OcpasswdFilePath: "/etc/ocserv/ocpasswd",
 			CertDir:          "/etc/ocserv/certs",
+			OcservLogPath:    "/var/log/ocserv/ocserv.log",
+			PanelLogPath:     "/var/log/ocserv-panel/panel.log",
 		},
 		Service: ServiceConfig{
 			Name:            "ocserv-panel",
@@ -131,6 +136,7 @@ func Defaults() Config {
 			HealthEndpoint:           true,
 			MetricsEndpoint:          false,
 			DashboardRefreshInterval: 15,
+			LogFileReadEnabled:       true,
 		},
 	}
 }
