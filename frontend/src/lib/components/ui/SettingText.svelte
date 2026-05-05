@@ -5,7 +5,7 @@
 
   type Props = {
     setting: SettingDef;
-    onUpdate: (key: string, value: string) => Promise<void>;
+    onUpdate: (key: string, value: string) => Promise<SettingDef>;
     savingKey: string | null;
   };
 
@@ -14,6 +14,7 @@
   let editValue = $state(setting.value);
   let editing = $state(false);
   let error = $state('');
+  let savedPending = $state(false);
   const isSaving = $derived(savingKey === setting.key);
 
   function startEdit() {
@@ -23,9 +24,13 @@
   }
 
   async function save() {
+    savedPending = false;
     error = '';
     try {
-      await onUpdate(setting.key, editValue);
+      const result = await onUpdate(setting.key, editValue);
+      if (result.requires_restart) {
+        savedPending = true;
+      }
       editing = false;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to save';
@@ -44,7 +49,7 @@
   }
 </script>
 
-<SettingRow label={setting.label} description={settingDescriptions[setting.key]} requiresRestart={setting.requires_restart} isSaving={isSaving}>
+<SettingRow label={setting.label} description={settingDescriptions[setting.key]} requiresRestart={setting.requires_restart} isSaving={isSaving} {savedPending}>
   {#if editing}
     <input
       type="text"

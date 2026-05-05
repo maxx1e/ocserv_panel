@@ -11,7 +11,7 @@
 
   type Props = {
     setting: SettingDef;
-    onUpdate: (key: string, value: string) => Promise<void>;
+    onUpdate: (key: string, value: string) => Promise<SettingDef>;
     savingKey: string | null;
   };
 

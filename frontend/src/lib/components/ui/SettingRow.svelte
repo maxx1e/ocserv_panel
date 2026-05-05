@@ -6,10 +6,11 @@
     description?: string;
     requiresRestart?: boolean;
     isSaving?: boolean;
+    savedPending?: boolean;
     children: import('svelte').Snippet;
   };
 
-  let { label, description, requiresRestart = false, isSaving = false, children }: Props = $props();
+  let { label, description, requiresRestart = false, isSaving = false, savedPending = false, children }: Props = $props();
 </script>
 
 <div class="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-1 md:gap-4 py-3 border-b border-slate-100 last:border-0 items-center">
@@ -26,7 +27,14 @@
       <span class="text-xs text-slate-400 ml-2">Saving…</span>
     {/if}
   </div>
-  <div class="flex items-center gap-2">
-    {@render children()}
+  <div class="flex flex-col gap-1">
+    <div class="flex items-center gap-2">
+      {@render children()}
+    </div>
+    {#if savedPending}
+      <span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700 border border-amber-200 w-fit">
+        restart pending
+      </span>
+    {/if}
   </div>
 </div>

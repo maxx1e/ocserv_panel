@@ -5,7 +5,7 @@
 
   type Props = {
     setting: SettingDef;
-    onUpdate: (key: string, value: string) => Promise<void>;
+    onUpdate: (key: string, value: string) => Promise<SettingDef>;
     savingKey: string | null;
   };
 
@@ -13,6 +13,7 @@
 
   let checkboxValues = $state<string[]>(setting.value ? setting.value.split(',') : []);
   let error = $state('');
+  let savedPending = $state(false);
   const isSaving = $derived(savingKey === setting.key);
   const checkboxChanged = $derived(checkboxValues.join(',') !== (setting.value || ''));
 
@@ -25,9 +26,13 @@
   }
 
   async function saveCheckboxes() {
+    savedPending = false;
     error = '';
     try {
-      await onUpdate(setting.key, checkboxValues.join(','));
+      const result = await onUpdate(setting.key, checkboxValues.join(','));
+      if (result.requires_restart) {
+        savedPending = true;
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to save';
     }
@@ -39,7 +44,7 @@
   }
 </script>
 
-<SettingRow label={setting.label} description={settingDescriptions[setting.key]} requiresRestart={setting.requires_restart} isSaving={isSaving}>
+<SettingRow label={setting.label} description={settingDescriptions[setting.key]} requiresRestart={setting.requires_restart} isSaving={isSaving} {savedPending}>
   <div class="flex flex-col gap-2">
     {#each (setting.options ?? []) as option}
       <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">

@@ -5,7 +5,8 @@
     updateSettingByKey,
     getRestartStatus,
     triggerRestart,
-    type SettingsSectionsResponse
+    type SettingsSectionsResponse,
+    type SettingDef
   } from '$lib/api';
   import SettingsNav from '$lib/components/ui/SettingsNav.svelte';
   import RestartBanner from '$lib/components/ui/RestartBanner.svelte';
@@ -86,12 +87,13 @@
     }
   }
 
-  async function handleUpdate(key: string, value: string) {
+  async function handleUpdate(key: string, value: string): Promise<SettingDef> {
     savingKey = key;
     try {
-      await updateSettingByKey(key, value);
+      const result = await updateSettingByKey(key, value);
       // Refresh settings to get updated state
       data = await getSettingsSections();
+      return result;
     } catch (e) {
       throw e;
     } finally {
