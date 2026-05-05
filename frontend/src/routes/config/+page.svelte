@@ -39,6 +39,7 @@
   let showApplyConfirm = $state(false);
   let requiresRestart = $state(false);
   let restartReasons = $state<string[]>([]);
+  let lastValidatedContent = $state('');
   let successBanner = $state('');
   let errorBanner = $state('');
   const hasChanges = $derived(editContent !== configContent);
@@ -118,6 +119,7 @@
       issues = result.issues;
       requiresRestart = result.requiresRestart ?? false;
       restartReasons = result.restartReasons ?? [];
+      lastValidatedContent = editContent;
       if (result.valid) {
         showSuccess('Configuration is valid.');
       } else {
@@ -143,7 +145,20 @@
     }
   }
 
-  function requestApply() {
+  async function requestApply() {
+    // Auto-validate if content changed since last validation
+    if (editContent !== lastValidatedContent) {
+      await handleValidate();
+      // If validation found errors, block apply
+      if (issues.some(i => i.severity === 'error')) {
+        showError('Fix validation errors before applying.');
+        return;
+      }
+    } else if (issues.some(i => i.severity === 'error')) {
+      // Content hasn't changed but there are known errors
+      showError('Fix validation errors before applying.');
+      return;
+    }
     showApplyConfirm = true;
   }
 
@@ -475,7 +490,7 @@
             </button>
             <button
               type="button"
-              onclick={requestApply}
+              onclick={() => void requestApply()}
               disabled={!hasChanges || applying}
               class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
@@ -484,7 +499,7 @@
             {#if hasChanges}
               <button
                 type="button"
-                onclick={() => { editContent = configContent; issues = []; requiresRestart = false; restartReasons = []; }}
+                onclick={() => { editContent = configContent; issues = []; requiresRestart = false; restartReasons = []; lastValidatedContent = ''; }}
                 class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors"
               >
                 <RotateCcw class="w-4 h-4" />
@@ -749,7 +764,7 @@
         {#if isOwner}
           <button
             type="button"
-            onclick={() => { showDiffModal = false; requestApply(); }}
+            onclick={() => { showDiffModal = false; void requestApply(); }}
             class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
           >
             Apply Changes
