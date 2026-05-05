@@ -210,3 +210,96 @@ func TestConfigApplyValidationFailureReturns422(t *testing.T) {
 	rec := serveAPI(t, h.router, http.MethodPost, "/api/config/apply", map[string]string{"content": "tcp-port = 99999\n"}, cookie)
 	assertStatus(t, rec, http.StatusUnprocessableEntity)
 }
+
+// --- Validate handler response field tests ---
+
+func TestConfigValidateHandler_ReturnsLineNumbers(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.createOwner(t, "admin", "password123")
+	cookie := h.login(t, "admin", "password123")
+
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/config/validate",
+		map[string]string{"content": "# comment\ntcp-port = 99999\n"}, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+
+	issues, ok := body["issues"].([]any)
+	if !ok || len(issues) < 1 {
+		t.Fatalf("expected issues array with at least 1 element, got %v", body["issues"])
+	}
+
+	first, ok := issues[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first issue to be an object, got %T", issues[0])
+	}
+
+	if first["line"] != float64(2) {
+		t.Fatalf("expected line = 2, got %v", first["line"])
+	}
+	if first["severity"] != "error" {
+		t.Fatalf("expected severity = \"error\", got %v", first["severity"])
+	}
+	if first["key"] != "tcp-port" {
+		t.Fatalf("expected key = \"tcp-port\", got %v", first["key"])
+	}
+}
+
+func TestConfigValidateHandler_ReturnsCIDRFixedValue(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.createOwner(t, "admin", "password123")
+	cookie := h.login(t, "admin", "password123")
+
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/config/validate",
+		map[string]string{"content": "route = 10.10.10.0/255.255.255.0\n"}, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+
+	issues, ok := body["issues"].([]any)
+	if !ok || len(issues) < 1 {
+		t.Fatalf("expected issues array with at least 1 element, got %v", body["issues"])
+	}
+
+	first, ok := issues[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first issue to be an object, got %T", issues[0])
+	}
+
+	if first["fixedValue"] != "route = 10.10.10.0/24" {
+		t.Fatalf("expected fixedValue = \"route = 10.10.10.0/24\", got %v", first["fixedValue"])
+	}
+	if first["severity"] != "warning" {
+		t.Fatalf("expected severity = \"warning\", got %v", first["severity"])
+	}
+	if first["line"] != float64(1) {
+		t.Fatalf("expected line = 1, got %v", first["line"])
+	}
+}
+
+func TestConfigValidateHandler_ReturnsRestartRequired(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.createOwner(t, "admin", "password123")
+	cookie := h.login(t, "admin", "password123")
+
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/config/validate",
+		map[string]string{"content": "tcp-port = 8443\n"}, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+
+	if body["requiresRestart"] != true {
+		t.Fatalf("expected requiresRestart = true, got %v", body["requiresRestart"])
+	}
+
+	reasons, ok := body["restartReasons"].([]any)
+	if !ok || len(reasons) == 0 {
+		t.Fatalf("expected restartReasons to be a non-empty array, got %v", body["restartReasons"])
+	}
+}
