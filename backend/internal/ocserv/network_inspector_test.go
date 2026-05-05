@@ -1,0 +1,135 @@
+package ocserv
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestNetworkInspectorIPv4ForwardEnabled(t *testing.T) {
+	t.Parallel()
+	procDir := t.TempDir()
+	paramDir := filepath.Join(procDir, "net", "ipv4")
+	if err := os.MkdirAll(paramDir, 0755); err != nil {
+		t.Fatalf("create proc dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(paramDir, "ip_forward"), []byte("1\n"), 0644); err != nil {
+		t.Fatalf("write ip_forward: %v", err)
+	}
+
+	runner := NewFakeCommandRunner()
+	inspector := NewNetworkInspectorWithProcDir(runner, procDir)
+	result, err := inspector.Inspect(context.Background())
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+
+	for _, item := range result.Items {
+		if item.Name == "IPv4 Forwarding" {
+			if item.Status != "configured" {
+				t.Errorf("IPv4 Forwarding status = %q, want %q", item.Status, "configured")
+			}
+			return
+		}
+	}
+	t.Fatal("IPv4 Forwarding check not found in results")
+}
+
+func TestNetworkInspectorIPv6ForwardMissing(t *testing.T) {
+	t.Parallel()
+	procDir := t.TempDir()
+	paramDir := filepath.Join(procDir, "net", "ipv6", "conf", "all")
+	if err := os.MkdirAll(paramDir, 0755); err != nil {
+		t.Fatalf("create proc dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(paramDir, "forwarding"), []byte("0\n"), 0644); err != nil {
+		t.Fatalf("write forwarding: %v", err)
+	}
+
+	runner := NewFakeCommandRunner()
+	inspector := NewNetworkInspectorWithProcDir(runner, procDir)
+	result, err := inspector.Inspect(context.Background())
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+
+	for _, item := range result.Items {
+		if item.Name == "IPv6 Forwarding" {
+			if item.Status != "missing" {
+				t.Errorf("IPv6 Forwarding status = %q, want %q", item.Status, "missing")
+			}
+			return
+		}
+	}
+	t.Fatal("IPv6 Forwarding check not found in results")
+}
+
+func TestNetworkInspectorProcNotReadable(t *testing.T) {
+	t.Parallel()
+	// Use a nonexistent proc dir — all kernel param reads fail.
+	runner := NewFakeCommandRunner()
+	inspector := NewNetworkInspectorWithProcDir(runner, "/nonexistent/proc/sys")
+	result, err := inspector.Inspect(context.Background())
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+
+	kernelChecks := 0
+	for _, item := range result.Items {
+		if item.Category == "kernel" {
+			kernelChecks++
+			if item.Status != "unknown" {
+				t.Errorf("kernel check %q status = %q, want %q", item.Name, item.Status, "unknown")
+			}
+		}
+	}
+	if kernelChecks == 0 {
+		t.Fatal("expected at least one kernel check, got none")
+	}
+}
+
+func TestNetworkInspectorFirewallIptables(t *testing.T) {
+	t.Parallel()
+	procDir := t.TempDir()
+	runner := NewFakeCommandRunner()
+	// Simulate iptables -t nat -S output containing a MASQUERADE rule.
+	runner.Results["iptables -t nat -S"] = CommandResult{
+		Stdout:   "-A POSTROUTING -o eth0 -j MASQUERADE\n",
+		ExitCode: 0,
+	}
+	// Simulate iptables -S FORWARD output containing vpns+.
+	runner.Results["iptables -S FORWARD"] = CommandResult{
+		Stdout:   "-A FORWARD -i vpns+ -j ACCEPT\n",
+		ExitCode: 0,
+	}
+
+	inspector := NewNetworkInspectorWithProcDir(runner, procDir)
+	result, err := inspector.Inspect(context.Background())
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+
+	masqFound := false
+	vpnsFound := false
+	for _, item := range result.Items {
+		switch item.Name {
+		case "NAT Masquerade":
+			masqFound = true
+			if item.Status != "configured" {
+				t.Errorf("NAT Masquerade status = %q, want configured", item.Status)
+			}
+		case "VPN Interface Forward":
+			vpnsFound = true
+			if item.Status != "configured" {
+				t.Errorf("VPN Interface Forward status = %q, want configured", item.Status)
+			}
+		}
+	}
+	if !masqFound {
+		t.Error("NAT Masquerade check not found in results")
+	}
+	if !vpnsFound {
+		t.Error("VPN Interface Forward check not found in results")
+	}
+}
