@@ -37,6 +37,8 @@
   let diffText = $state('');
   let showDiffModal = $state(false);
   let showApplyConfirm = $state(false);
+  let requiresRestart = $state(false);
+  let restartReasons = $state<string[]>([]);
   let successBanner = $state('');
   let errorBanner = $state('');
   const hasChanges = $derived(editContent !== configContent);
@@ -114,6 +116,8 @@
     try {
       const result = await validateConfig(editContent);
       issues = result.issues;
+      requiresRestart = result.requiresRestart ?? false;
+      restartReasons = result.restartReasons ?? [];
       if (result.valid) {
         showSuccess('Configuration is valid.');
       } else {
@@ -480,7 +484,7 @@
             {#if hasChanges}
               <button
                 type="button"
-                onclick={() => { editContent = configContent; issues = []; }}
+                onclick={() => { editContent = configContent; issues = []; requiresRestart = false; restartReasons = []; }}
                 class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors"
               >
                 <RotateCcw class="w-4 h-4" />
@@ -773,6 +777,19 @@
         This will overwrite the live ocserv configuration. A backup of the current config will be created before applying.
         The ocserv service will be reloaded to pick up the changes.
       </p>
+      {#if requiresRestart}
+        <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-md">
+          <p class="text-sm font-medium text-amber-800">Warning: This change requires a full service restart.</p>
+          <p class="text-xs text-amber-700 mt-1">Active VPN sessions will be disconnected.</p>
+          {#if restartReasons.length > 0}
+            <ul class="mt-2 text-xs text-amber-700 list-disc list-inside space-y-0.5">
+              {#each restartReasons as reason}
+                <li>{reason}</li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
       <div class="flex items-center justify-end gap-3 mt-6">
         <button
           type="button"
@@ -787,7 +804,7 @@
           disabled={applying}
           class="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {applying ? 'Applying...' : 'Confirm Apply'}
+          {applying ? 'Applying...' : requiresRestart ? 'Restart & Apply' : 'Confirm Apply'}
         </button>
       </div>
     </div>
