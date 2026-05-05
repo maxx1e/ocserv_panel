@@ -118,3 +118,27 @@ func TestAuthorizerAllowsOnlyOwnerToTerminateSessions(t *testing.T) {
 		t.Fatal("expected viewer role to be denied session termination")
 	}
 }
+
+func TestAuthorizerOwnerHasConfigEditAndRollback(t *testing.T) {
+	t.Parallel()
+	authorizer := NewDefaultAuthorizer()
+
+	if !authorizer.Allowed([]Role{RoleOwner}, PermissionOcservConfigEdit) {
+		t.Fatal("expected owner to have ocserv:config:edit")
+	}
+	if !authorizer.Allowed([]Role{RoleOwner}, PermissionOcservConfigRollback) {
+		t.Fatal("expected owner to have ocserv:config:rollback")
+	}
+}
+
+func TestAuthorizerViewerDeniedConfigEditAndRollback(t *testing.T) {
+	t.Parallel()
+	authorizer := NewDefaultAuthorizer()
+
+	if authorizer.Allowed([]Role{RoleViewer}, PermissionOcservConfigEdit) {
+		t.Fatal("expected viewer to be denied ocserv:config:edit")
+	}
+	if authorizer.Allowed([]Role{RoleViewer}, PermissionOcservConfigRollback) {
+		t.Fatal("expected viewer to be denied ocserv:config:rollback")
+	}
+}

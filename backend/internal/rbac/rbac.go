@@ -36,6 +36,8 @@ const (
 	PermissionOcservUsersDelete       Permission = "ocserv:users:delete"
 	PermissionOcservUsersUpdate       Permission = "ocserv:users:update"
 	PermissionOcservConfigRead        Permission = "ocserv:config:read"
+	PermissionOcservConfigEdit        Permission = "ocserv:config:edit"
+	PermissionOcservConfigRollback    Permission = "ocserv:config:rollback"
 )
 
 // Authorizer evaluates role grants.
@@ -69,6 +71,8 @@ func NewDefaultAuthorizer() Authorizer {
 				PermissionOcservUsersDelete:        {},
 				PermissionOcservUsersUpdate:        {},
 				PermissionOcservConfigRead:         {},
+				PermissionOcservConfigEdit:         {},
+				PermissionOcservConfigRollback:     {},
 			},
 			RoleViewer: {
 				PermissionReadDashboard:       {},
