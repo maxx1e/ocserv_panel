@@ -41,6 +41,7 @@
 
   // Overall card severity: highest status wins
   const overallStatus = $derived<HealthStatus>(
+    items.length === 0 ? 'unknown' :
     items.some(i => i.status === 'critical') ? 'critical' :
     items.some(i => i.status === 'warning')  ? 'warning'  :
     items.every(i => i.status === 'healthy') ? 'healthy'  :

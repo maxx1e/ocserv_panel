@@ -247,6 +247,7 @@
       healthCheckedAt = new Date();
     } catch (caught) {
       healthError = caught instanceof Error ? caught.message : 'Unable to load system health.';
+      healthCheckedAt = null;
     } finally {
       healthLoading = false;
     }
@@ -556,6 +557,10 @@
             <pre class="text-xs font-mono text-slate-700 p-4 overflow-x-auto max-h-64 overflow-y-auto">{ocservLog.lines.join('\n')}</pre>
           </div>
         {/if}
+      {:else if logError}
+        <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+          {logError}
+        </div>
       {/if}
     {/if}
 
@@ -595,6 +600,10 @@
             <pre class="text-xs font-mono text-slate-700 p-4 overflow-x-auto max-h-64 overflow-y-auto">{panelLog.lines.join('\n')}</pre>
           </div>
         {/if}
+      {:else if logError}
+        <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+          {logError}
+        </div>
       {/if}
     {/if}
   </section>
