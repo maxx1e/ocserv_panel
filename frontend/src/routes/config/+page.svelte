@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { FileText, History, Network, Check, AlertTriangle, X, Copy, RotateCcw, Eye, FileDiff, RefreshCw, Info } from 'lucide-svelte';
+  import ConfigEditor from '$lib/components/ui/ConfigEditor.svelte';
   import {
     getConfig, validateConfig, diffConfig, applyConfig,
     getConfigBackups, getConfigBackup, diffConfigBackup,
@@ -14,6 +15,9 @@
   // ─── Auth & RBAC ─────────────────────────────────────────────
   let principal = $state<Principal | null>(null);
   const isOwner = $derived(hasOwnerRole(principal));
+
+  // ─── Editor ref ──────────────────────────────────────────────
+  let editorRef = $state<ConfigEditor | undefined>(undefined);
 
   // ─── Tabs ────────────────────────────────────────────────────
   let activeTab = $state<'editor' | 'backups' | 'network'>('editor');
@@ -483,16 +487,14 @@
           </div>
         {/if}
 
-        <!-- Textarea -->
-        <div class="bg-white rounded-lg shadow-sm border border-slate-200">
-          <textarea
-            class="w-full min-h-[400px] p-4 font-mono text-sm text-slate-800 bg-transparent border-0 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset rounded-lg"
-            bind:value={editContent}
-            disabled={!isOwner}
-            spellcheck="false"
-            placeholder="Configuration content..."
-          ></textarea>
-        </div>
+        <!-- Config Editor -->
+        <ConfigEditor
+          bind:this={editorRef}
+          bind:content={editContent}
+          readonly={!isOwner}
+          {issues}
+          class="min-h-[400px]"
+        />
 
         <!-- Issues list -->
         {#if issues.length > 0}
