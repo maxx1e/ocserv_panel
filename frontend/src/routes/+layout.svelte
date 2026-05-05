@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { ModeWatcher } from 'mode-watcher';
   import '../app.css';
   import { logout } from '$lib/api';
   import { createAuthState, refreshAuthState } from '$lib/auth';
@@ -40,6 +41,8 @@
   }
 </script>
 
+<ModeWatcher />
+
 <svelte:head>
   <title>ocserv Panel</title>
   <meta name="description" content="Local-first web administration panel for a single ocserv server" />
@@ -47,11 +50,11 @@
 
 {#if auth.setupRequired || !auth.principal}
   <!-- No sidebar for login/setup pages -->
-  <div class="min-h-screen bg-slate-50">
+  <div class="min-h-screen bg-background text-foreground">
     {@render children()}
   </div>
 {:else}
-  <div class="min-h-screen bg-slate-50">
+  <div class="min-h-screen bg-background text-foreground">
     <Sidebar
       navItems={visibleNavItems}
       username={auth.principal?.username ?? ''}
