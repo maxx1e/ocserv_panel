@@ -1,84 +1,85 @@
 <script lang="ts">
-  import { Area, Axis, Chart, Highlight, LinearGradient, Svg, Tooltip } from 'layerchart';
-  import { formatMetricValue, formatXAxisTime, getChartClasses, getChartConfig, getXTickCount } from '$lib/monitoring';
+  import { Area, Axis, Chart, Highlight, LinearGradient, Svg } from 'layerchart';
+  import { Container as ChartContainer, Tooltip as ChartTooltip } from '$lib/components/ui/chart/index';
+  import {
+    formatMetricValue,
+    formatXAxisTime,
+    getChartClasses,
+    getChartConfig,
+    getChartColorVar,
+    getXTickCount,
+  } from '$lib/monitoring';
+  import type { ChartConfig } from '$lib/components/ui/chart/chart-utils';
 
   type TimeData = { timestamp: Date; value: number };
 
   type Props = {
-    /** Sorted array of time-value pairs. Empty array → placeholder shown. */
+    /** Sorted array of time-value pairs. Empty array -> placeholder shown. */
     data: TimeData[];
     /** Backend metric name used to derive colours, domain, and axis formatting. */
     metric: string;
-    /** Pixel height of the chart container. Defaults to 200. */
+    /** Pixel height of the chart container. Defaults to 160. */
     height?: number;
   };
 
-  let { data, metric, height = 200 }: Props = $props();
+  let { data, metric, height = 160 }: Props = $props();
 
   const config = $derived(getChartConfig(metric));
   const classes = $derived(getChartClasses(metric));
   const xTickCount = $derived(getXTickCount(data.length));
+  const chartColor = $derived(getChartColorVar(metric));
 
-  function tooltipTime(d: Date): string {
-    return d.toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+  const chartConfig: ChartConfig = $derived({
+    value: { label: metric, color: chartColor },
+  });
+
+  function tooltipFormatter(value: number): string {
+    return formatMetricValue(metric, value);
   }
 </script>
 
-<div style="height: {height}px">
+<div style="height: {height}px" class="w-full">
   {#if data.length > 0}
-    <Chart
-      {data}
-      x="timestamp"
-      y="value"
-      yDomain={config.yDomain}
-      yNice={config.yNice}
-      padding={{ left: 52, bottom: 32, top: 12, right: 12 }}
-      tooltip={{ mode: 'bisect-x' }}
-    >
-      <Svg>
-        <!-- Y-axis: left side with grid lines -->
-        <Axis
-          placement="left"
-          grid
-          rule
-          format={config.yAxisFormat}
+    <ChartContainer config={chartConfig} class="h-full w-full">
+      <Chart
+        {data}
+        x="timestamp"
+        y="value"
+        yDomain={config.yDomain}
+        yNice={config.yNice}
+        padding={{ left: 44, bottom: 24, top: 8, right: 8 }}
+        tooltip={{ mode: 'bisect-x' }}
+      >
+        <Svg>
+          <Axis
+            placement="left"
+            grid
+            format={config.yAxisFormat}
+          />
+          <Axis
+            placement="bottom"
+            format={(d: Date | number) => formatXAxisTime(d)}
+            ticks={xTickCount}
+          />
+          <LinearGradient
+            stops={[classes.gradientTop, classes.gradientBottom]}
+            vertical
+          >
+            {#snippet children({ gradient }: { gradient: string })}
+              <Area fill={gradient} line={{ class: classes.stroke }} />
+            {/snippet}
+          </LinearGradient>
+          <Highlight points lines />
+        </Svg>
+        <ChartTooltip
+          label={metric.replace(/_/g, ' ')}
+          valueFormatter={tooltipFormatter}
         />
-        <!-- X-axis: bottom side with time formatting -->
-        <Axis
-          placement="bottom"
-          grid
-          rule
-          format={(d: Date | number) => formatXAxisTime(d)}
-          ticks={xTickCount}
-        />
-        <!-- Coloured gradient under the line -->
-        <LinearGradient
-          stops={[classes.gradientTop, classes.gradientBottom]}
-          vertical
-        >
-          {#snippet children({ gradient }: { gradient: string })}
-            <Area fill={gradient} line={{ class: classes.stroke }} />
-          {/snippet}
-        </LinearGradient>
-        <Highlight points lines />
-      </Svg>
-      <Tooltip.Root>
-        {#snippet children({ data }: { data: TimeData })}
-          <Tooltip.Header>{tooltipTime(data.timestamp)}</Tooltip.Header>
-          <Tooltip.List>
-            <Tooltip.Item label="Value" value={formatMetricValue(metric, data.value)} />
-          </Tooltip.List>
-        {/snippet}
-      </Tooltip.Root>
-    </Chart>
+      </Chart>
+    </ChartContainer>
   {:else}
-    <div class="h-full flex items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50">
-      <p class="text-sm text-slate-400">No data available</p>
+    <div class="h-full flex items-center justify-center rounded-lg border border-dashed border-border bg-muted/30">
+      <p class="text-sm text-muted-foreground">No data available</p>
     </div>
   {/if}
 </div>
