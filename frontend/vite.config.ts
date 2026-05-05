@@ -13,6 +13,9 @@ export default defineConfig({
       }
     }
   },
+  ssr: {
+    noExternal: ['layerchart', 'svelte-ux']
+  },
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'jsdom',

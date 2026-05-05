@@ -33,7 +33,10 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
+    "clsx": "^2.1.1",
     "layerchart": "^1.0.13",
-    "lucide-svelte": "^1.0.1"
+    "lucide-svelte": "^1.0.1",
+    "mode-watcher": "^1.1.0",
+    "tailwind-merge": "^3.5.0"
   }
 }
