@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -277,4 +278,73 @@ func TestNetworkInspector_ListenerPortMissing(t *testing.T) {
 	}
 	require.NotNil(t, portCheck, "expected TCP port 8443 check")
 	assert.Equal(t, "missing", portCheck.Status)
+}
+
+func TestNetworkInspector_DNSCheckValid(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("dns = 8.8.8.8\ndns = 1.1.1.1\n"), 0644))
+
+	procDir := filepath.Join(dir, "proc")
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv4"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv4/ip_forward"), []byte("1\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv6/conf/all"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv6/conf/all/forwarding"), []byte("1\n"), 0644))
+
+	runner := NewFakeCommandRunner()
+	runner.Results["iptables -t nat -S"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["iptables -S FORWARD"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["iptables -S INPUT"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["ip route show"] = CommandResult{Stdout: "", ExitCode: 0}
+
+	insp := NewNetworkInspectorWithConfig(runner, procDir, cfgPath)
+	result, err := insp.Inspect(context.Background())
+	require.NoError(t, err)
+
+	var dnsChecks []PrerequisiteCheck
+	for _, item := range result.Items {
+		if strings.HasPrefix(item.Name, "DNS Server") {
+			dnsChecks = append(dnsChecks, item)
+		}
+	}
+	require.Len(t, dnsChecks, 2)
+	assert.Equal(t, "configured", dnsChecks[0].Status)
+	assert.Equal(t, "configured", dnsChecks[1].Status)
+}
+
+func TestNetworkInspector_DNSCheckInvalid(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("dns = 8.8.8.8\ndns = notanip\n"), 0644))
+
+	procDir := filepath.Join(dir, "proc")
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv4"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv4/ip_forward"), []byte("1\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv6/conf/all"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv6/conf/all/forwarding"), []byte("1\n"), 0644))
+
+	runner := NewFakeCommandRunner()
+	runner.Results["iptables -t nat -S"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["iptables -S FORWARD"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["iptables -S INPUT"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["ip route show"] = CommandResult{Stdout: "", ExitCode: 0}
+
+	insp := NewNetworkInspectorWithConfig(runner, procDir, cfgPath)
+	result, err := insp.Inspect(context.Background())
+	require.NoError(t, err)
+
+	var dnsChecks []PrerequisiteCheck
+	for _, item := range result.Items {
+		if strings.HasPrefix(item.Name, "DNS Server") {
+			dnsChecks = append(dnsChecks, item)
+		}
+	}
+	require.Len(t, dnsChecks, 2)
+	assert.Equal(t, "configured", dnsChecks[0].Status)
+	assert.Equal(t, "missing", dnsChecks[1].Status)
+	assert.Contains(t, dnsChecks[1].Actual, "invalid")
 }

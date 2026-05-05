@@ -71,6 +71,7 @@ func (i *NetworkInspector) Inspect(ctx context.Context) (NetworkPrerequisites, e
 	items = append(items, i.checkFirewall(ctx)...)
 	items = append(items, i.checkListenerPorts(ctx)...)
 	items = append(items, i.checkSubnetOverlap(ctx)...)
+	items = append(items, i.checkConfigDNS()...)
 	return NetworkPrerequisites{Items: items}, nil
 }
 
@@ -323,4 +324,43 @@ func (i *NetworkInspector) checkSubnetOverlap(ctx context.Context) []Prerequisit
 		check.Actual = "no overlap detected"
 	}
 	return []PrerequisiteCheck{check}
+}
+
+// checkConfigDNS validates DNS server entries from the ocserv config.
+// Returns one PrerequisiteCheck per dns directive found.
+func (i *NetworkInspector) checkConfigDNS() []PrerequisiteCheck {
+	if i.configPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(i.configPath)
+	if err != nil {
+		return nil
+	}
+
+	var checks []PrerequisiteCheck
+	for _, rawLine := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := parseConfigLine(line)
+		if !ok || key != "dns" {
+			continue
+		}
+		check := PrerequisiteCheck{
+			Category: "routing",
+			Name:     fmt.Sprintf("DNS Server: %s", value),
+			Expected: "valid IP address",
+		}
+		if net.ParseIP(value) != nil {
+			check.Status = "configured"
+			check.Actual = value
+		} else {
+			check.Status = "missing"
+			check.Actual = fmt.Sprintf("invalid IP: %s", value)
+			check.Suggestion = "Set dns to a valid IPv4 or IPv6 address, e.g.: dns = 8.8.8.8"
+		}
+		checks = append(checks, check)
+	}
+	return checks
 }
