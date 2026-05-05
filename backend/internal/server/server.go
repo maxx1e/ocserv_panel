@@ -43,6 +43,7 @@ type App struct {
 	ocservService     *app.OcservService
 	healthService     *app.HealthService
 	logTailService    *app.LogTailService
+	configService     *app.ConfigManagementService
 	authorizer        rbac.Authorizer
 	cookieSecure      bool
 	now               func() time.Time
@@ -172,6 +173,7 @@ func NewAppRouter(
 	ocservService *app.OcservService,
 	healthService *app.HealthService,
 	logTailService *app.LogTailService,
+	configService *app.ConfigManagementService,
 	authorizer rbac.Authorizer,
 	opts AppOptions,
 ) http.Handler {
@@ -187,6 +189,7 @@ func NewAppRouter(
 		ocservService:     ocservService,
 		healthService:     healthService,
 		logTailService:    logTailService,
+		configService:     configService,
 		authorizer:        authorizer,
 		cookieSecure:      opts.CookieSecure,
 		now:               now,
@@ -229,6 +232,16 @@ func NewAppRouter(
 	// health and log endpoints
 	mux.HandleFunc("/api/health/system", appHandler.handleSystemHealth)
 	mux.HandleFunc("/api/logs/tail", appHandler.handleLogTail)
+	// config management API
+	mux.HandleFunc("GET /api/config", appHandler.handleConfigRead)
+	mux.HandleFunc("POST /api/config/validate", appHandler.handleConfigValidate)
+	mux.HandleFunc("POST /api/config/diff", appHandler.handleConfigDiff)
+	mux.HandleFunc("POST /api/config/apply", appHandler.handleConfigApply)
+	mux.HandleFunc("GET /api/config/backups", appHandler.handleConfigBackups)
+	mux.HandleFunc("GET /api/config/backups/{n}", appHandler.handleConfigBackupGet)
+	mux.HandleFunc("GET /api/config/backups/{n}/diff", appHandler.handleConfigBackupDiff)
+	mux.HandleFunc("POST /api/config/rollback/{n}", appHandler.handleConfigRollback)
+	mux.HandleFunc("GET /api/config/network", appHandler.handleConfigNetwork)
 
 	return securityHeaders(mux)
 }

@@ -637,8 +637,25 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	fakeRunner2 := ocserv.NewFakeCommandRunner()
 	fakeSvcMgr2 := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
 	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
-	healthSvc := app.NewHealthService(testChecker, s, testCfgFn, rbac.NewDefaultAuthorizer())
+	healthSvc := app.NewHealthService(testChecker, s, testCfgFn, rbac.NewDefaultAuthorizer(), "")
 	logTailSvc := app.NewLogTailService(testCfgFn, app.FakeLogFileReader{}, rbac.NewDefaultAuthorizer())
+
+	// Config management service for tests
+	confDir := t.TempDir()
+	confPath := filepath.Join(confDir, "ocserv.conf")
+	os.WriteFile(confPath, []byte("tcp-port = 443\n"), 0640)
+	configFiles := ocserv.NewConfigFileManager(confPath, 10)
+	configValidator := ocserv.NewConfigValidator(confPath)
+	configReloader := ocserv.NewConfigReloader(fakeRunner2, "occtl")
+	networkInspector := ocserv.NewNetworkInspectorWithProcDir(fakeRunner2, confDir)
+	configMgmtSvc := app.NewConfigManagementService(
+		configFiles,
+		configValidator,
+		configReloader,
+		networkInspector,
+		recorder,
+		rbac.NewDefaultAuthorizer(),
+	)
 
 	return &testHarness{
 		database:       database,
@@ -654,6 +671,7 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 			ocservSvc,
 			healthSvc,
 			logTailSvc,
+			configMgmtSvc,
 			rbac.NewDefaultAuthorizer(),
 			AppOptions{CookieSecure: cookieSecure},
 		),
@@ -1094,8 +1112,25 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 	fakeRunner2 := ocserv.NewFakeCommandRunner()
 	fakeSvcMgr2 := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
 	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
-	healthSvc := app.NewHealthService(testChecker, s, tempCfgFn, rbac.NewDefaultAuthorizer())
+	healthSvc := app.NewHealthService(testChecker, s, tempCfgFn, rbac.NewDefaultAuthorizer(), "")
 	logTailSvc := app.NewLogTailService(tempCfgFn, app.FakeLogFileReader{}, rbac.NewDefaultAuthorizer())
+
+	// Config management service for temp-config harness
+	confDir2 := t.TempDir()
+	confPath2 := filepath.Join(confDir2, "ocserv.conf")
+	os.WriteFile(confPath2, []byte("tcp-port = 443\n"), 0640)
+	configFiles2 := ocserv.NewConfigFileManager(confPath2, 10)
+	configValidator2 := ocserv.NewConfigValidator(confPath2)
+	configReloader2 := ocserv.NewConfigReloader(fakeRunner2, "occtl")
+	networkInspector2 := ocserv.NewNetworkInspectorWithProcDir(fakeRunner2, confDir2)
+	configMgmtSvc2 := app.NewConfigManagementService(
+		configFiles2,
+		configValidator2,
+		configReloader2,
+		networkInspector2,
+		recorder,
+		rbac.NewDefaultAuthorizer(),
+	)
 
 	h := &testHarness{
 		database:       database,
@@ -1111,6 +1146,7 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 			ocservSvc,
 			healthSvc,
 			logTailSvc,
+			configMgmtSvc2,
 			rbac.NewDefaultAuthorizer(),
 			AppOptions{CookieSecure: true},
 		),

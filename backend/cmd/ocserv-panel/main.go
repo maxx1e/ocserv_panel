@@ -93,8 +93,20 @@ func main() {
 		}
 		return liveCfg
 	}
-	healthService := app.NewHealthService(readinessChecker, persistence, healthCfgFn, rbac.NewDefaultAuthorizer())
+	healthService := app.NewHealthService(readinessChecker, persistence, healthCfgFn, rbac.NewDefaultAuthorizer(), tsdbPathFromEnv())
 	logTailService := app.NewLogTailService(healthCfgFn, app.OSLogFileReader{}, rbac.NewDefaultAuthorizer())
+
+	configFiles := ocserv.NewConfigFileManager(cfg.Installation.OcservConfigPath, 10)
+	configReloader := ocserv.NewConfigReloader(runner, cfg.Installation.OcctlBinPath)
+	networkInspector := ocserv.NewNetworkInspector(runner)
+	configMgmtService := app.NewConfigManagementService(
+		configFiles,
+		configValidator,
+		configReloader,
+		networkInspector,
+		recorder,
+		rbac.NewDefaultAuthorizer(),
+	)
 
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker)
 
@@ -154,7 +166,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
+		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, configMgmtService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
