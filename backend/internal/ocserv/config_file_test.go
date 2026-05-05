@@ -267,3 +267,83 @@ func TestConfigFileManagerRollbackNotFound(t *testing.T) {
 		t.Errorf("expected ErrBackupNotFound, got %v", err)
 	}
 }
+
+func TestConfigFileManagerDiffWithContent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	original := "line-one\nline-two\nline-three\n"
+	if err := os.WriteFile(cfgPath, []byte(original), 0640); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+
+	mgr := NewConfigFileManager(cfgPath, 5)
+	proposed := "line-one\nline-two-modified\nline-three\n"
+	diff, err := mgr.DiffWithContent(proposed)
+	if err != nil {
+		t.Fatalf("DiffWithContent: %v", err)
+	}
+	if diff == "" {
+		t.Fatal("expected non-empty diff for changed content")
+	}
+	if !strings.Contains(diff, "-line-two") {
+		t.Errorf("diff missing removed line, got:\n%s", diff)
+	}
+	if !strings.Contains(diff, "+line-two-modified") {
+		t.Errorf("diff missing added line, got:\n%s", diff)
+	}
+}
+
+func TestConfigFileManagerDiffWithContentNoDiff(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	content := "# identical content\nkey = value\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0640); err != nil {
+		t.Fatalf("write content: %v", err)
+	}
+
+	mgr := NewConfigFileManager(cfgPath, 5)
+	diff, err := mgr.DiffWithContent(content)
+	if err != nil {
+		t.Fatalf("DiffWithContent: %v", err)
+	}
+	if diff != "" {
+		t.Errorf("expected empty diff for identical content, got:\n%s", diff)
+	}
+}
+
+func TestConfigFileManagerDiffWithBackup(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	original := "# original line\nkey = old-value\n"
+	if err := os.WriteFile(cfgPath, []byte(original), 0640); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+
+	mgr := NewConfigFileManager(cfgPath, 5)
+	// Write new content; original becomes backup .1.
+	newContent := "# original line\nkey = new-value\n"
+	if err := mgr.Write(newContent); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// Diff backup 1 (old) vs current (new).
+	diff, err := mgr.DiffWithBackup(1)
+	if err != nil {
+		t.Fatalf("DiffWithBackup(1): %v", err)
+	}
+	if diff == "" {
+		t.Fatal("expected non-empty diff between backup and current")
+	}
+	if !strings.Contains(diff, "-key = old-value") {
+		t.Errorf("diff missing old value, got:\n%s", diff)
+	}
+	if !strings.Contains(diff, "+key = new-value") {
+		t.Errorf("diff missing new value, got:\n%s", diff)
+	}
+}

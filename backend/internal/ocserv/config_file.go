@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -187,6 +188,121 @@ func (m *ConfigFileManager) Rollback(n int) error {
 	}
 
 	return m.atomicWrite(string(data))
+}
+
+// DiffWithContent reads the current config file and returns a unified diff
+// between the current content (as "old") and the proposed content (as "new").
+// Returns an empty string when the two are identical.
+// Returns an error when the current file cannot be read.
+func (m *ConfigFileManager) DiffWithContent(proposed string) (string, error) {
+	current, _, err := m.Read()
+	if err != nil {
+		return "", fmt.Errorf("read current config for diff: %w", err)
+	}
+	return unifiedDiff(
+		strings.Split(current, "\n"),
+		strings.Split(proposed, "\n"),
+		m.path,
+		m.path+" (proposed)",
+	), nil
+}
+
+// DiffWithBackup reads backup number n and the current live config, then
+// returns a unified diff with the backup as "old" and the current file as
+// "new". Returns ErrBackupNotFound when that backup does not exist.
+func (m *ConfigFileManager) DiffWithBackup(n int) (string, error) {
+	backup, err := m.GetBackup(n)
+	if err != nil {
+		return "", err
+	}
+	current, _, err := m.Read()
+	if err != nil {
+		return "", fmt.Errorf("read current config for diff: %w", err)
+	}
+	return unifiedDiff(
+		strings.Split(backup, "\n"),
+		strings.Split(current, "\n"),
+		fmt.Sprintf("%s.%d", m.path, n),
+		m.path,
+	), nil
+}
+
+// unifiedDiff produces a simple unified-style diff between lines a (old) and
+// b (new). It uses an LCS to identify unchanged lines, emitting "-" prefixed
+// lines for removals and "+" prefixed lines for additions.
+//
+// Returns an empty string when a and b are identical.
+func unifiedDiff(a, b []string, nameA, nameB string) string {
+	// Build the LCS table.
+	la, lb := len(a), len(b)
+	dp := make([][]int, la+1)
+	for i := range dp {
+		dp[i] = make([]int, lb+1)
+	}
+	for i := 1; i <= la; i++ {
+		for j := 1; j <= lb; j++ {
+			if a[i-1] == b[j-1] {
+				dp[i][j] = dp[i-1][j-1] + 1
+			} else if dp[i-1][j] >= dp[i][j-1] {
+				dp[i][j] = dp[i-1][j]
+			} else {
+				dp[i][j] = dp[i][j-1]
+			}
+		}
+	}
+
+	// Backtrack to build the diff hunks.
+	type op struct {
+		kind byte // ' ', '-', '+'
+		line string
+	}
+	var ops []op
+	i, j := la, lb
+	for i > 0 || j > 0 {
+		switch {
+		case i > 0 && j > 0 && a[i-1] == b[j-1]:
+			ops = append(ops, op{' ', a[i-1]})
+			i--
+			j--
+		case j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]):
+			ops = append(ops, op{'+', b[j-1]})
+			j--
+		default:
+			ops = append(ops, op{'-', a[i-1]})
+			i--
+		}
+	}
+
+	// Reverse (backtracking produced ops in reverse order).
+	for l, r := 0, len(ops)-1; l < r; l, r = l+1, r-1 {
+		ops[l], ops[r] = ops[r], ops[l]
+	}
+
+	// Check whether anything actually changed.
+	hasDiff := false
+	for _, o := range ops {
+		if o.kind != ' ' {
+			hasDiff = true
+			break
+		}
+	}
+	if !hasDiff {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("--- ")
+	sb.WriteString(nameA)
+	sb.WriteByte('\n')
+	sb.WriteString("+++ ")
+	sb.WriteString(nameB)
+	sb.WriteByte('\n')
+	for _, o := range ops {
+		sb.WriteByte(o.kind)
+		sb.WriteString(o.line)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
 }
 
 // --- internal helpers ---
