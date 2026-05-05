@@ -427,6 +427,50 @@ export type OcservStatus = {
   message: string;
 };
 
+export type VPNServerHealth = {
+  systemdStatus: string;
+  processRunning: boolean;
+  socketPresent: boolean;
+  configPresent: boolean;
+  configValid: boolean;
+  configErrors?: string;
+  binaryPresent: boolean;
+  binaryVersion?: string;
+};
+
+export type PanelHealth = {
+  backendStatus: string;
+  dbReachable: boolean;
+  dbPath: string;
+  configPresent: boolean;
+  configPath: string;
+  webuiUserCount: number;
+};
+
+export type LogsHealth = {
+  ocservLogEnabled: boolean;
+  ocservLogPresent: boolean;
+  ocservLogPath: string;
+  panelLogEnabled: boolean;
+  panelLogPresent: boolean;
+  panelLogPath: string;
+};
+
+export type SystemHealth = {
+  vpnServer: VPNServerHealth;
+  panel: PanelHealth;
+  logs: LogsHealth;
+};
+
+export type LogTailResult = {
+  source: string;
+  enabled: boolean;
+  present: boolean;
+  path: string;
+  lines: string[];
+  error?: string;
+};
+
 export function getOcservReadiness(): Promise<OcservReadiness> {
   return apiFetch<OcservReadiness>('/api/ocserv/readiness');
 }
@@ -495,6 +539,14 @@ export function updateOcservUserPassword(username: string, password: string): Pr
 
 export function getOcservConfigIssues(): Promise<OcservConfigIssue[]> {
   return apiFetch<OcservConfigIssue[]>('/api/ocserv/config/issues');
+}
+
+export function getSystemHealth(): Promise<SystemHealth> {
+  return apiFetch<SystemHealth>('/api/health/system');
+}
+
+export function getLogTail(source: 'ocserv' | 'panel', lines = 25): Promise<LogTailResult> {
+  return apiFetch<LogTailResult>(`/api/logs/tail?source=${source}&lines=${lines}`);
 }
 
 export function principalFromAuth(auth: AuthSummary | null): Principal | null {
