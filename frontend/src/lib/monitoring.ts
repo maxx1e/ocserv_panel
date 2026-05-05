@@ -218,30 +218,46 @@ export function getChartConfig(metric: string): {
 
 /**
  * Formats a Date for display on the chart X-axis.
- * Shows short time labels that adapt to the data span:
- * - Same day → "HH:MM"
- * - Up to 30 days → "Mon DD"
- * - Over 30 days → "Mon DD"
+ * Short format "HH:MM" for compact 160px charts.
  */
 export function formatXAxisTime(d: Date | number): string {
   const date = d instanceof Date ? d : new Date(d);
   const hours = date.getHours().toString().padStart(2, '0');
   const minutes = date.getMinutes().toString().padStart(2, '0');
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[date.getMonth()]} ${date.getDate()} ${hours}:${minutes}`;
+  return `${hours}:${minutes}`;
 }
 
 /**
- * Returns the number of ticks for the X (time) axis based on the chart width
- * and available data range.  Keeps labels from overlapping.
+ * Returns the number of ticks for the X (time) axis.
+ * Capped at 4-5 to prevent overlap in compact 160px-height charts.
  */
 export function getXTickCount(dataLength: number): number {
-  if (dataLength <= 60) return Math.min(dataLength, 5);
-  if (dataLength <= 120) return 6;
-  return 7;
+  if (dataLength <= 30) return Math.min(dataLength, 3);
+  if (dataLength <= 60) return 4;
+  return 5;
 }
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+}
+
+/**
+ * Returns the CSS variable color string for a metric, suitable for
+ * use in ChartConfig color fields.
+ */
+export function getChartColorVar(metric: string): string {
+  const map: Record<string, string> = {
+    host_cpu_utilization: 'var(--chart-1)',
+    host_memory_utilization: 'var(--chart-1)',
+    net_interface_rx_bytes: 'var(--chart-2)',
+    net_interface_tx_bytes: 'var(--chart-3)',
+    vpn_interface_rx_bytes: 'var(--chart-2)',
+    vpn_interface_tx_bytes: 'var(--chart-3)',
+    user_rx_bytes: 'var(--chart-2)',
+    user_tx_bytes: 'var(--chart-3)',
+    active_sessions: 'var(--chart-4)',
+    concurrent_sessions: 'var(--chart-4)',
+    connection_rate: 'var(--chart-5)',
+  };
+  return map[metric] ?? 'var(--chart-1)';
 }
