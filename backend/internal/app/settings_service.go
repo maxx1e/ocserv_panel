@@ -441,5 +441,10 @@ func (s *SettingsService) RestartStatus(ctx context.Context, principal auth.Prin
 	}
 
 	pending := computePendingChanges(s.startupCfg, liveCfg)
-	return len(pending) > 0, pending, nil
+	restartRequired = len(pending) > 0
+	_ = s.record(ctx, &actorID, "settings.restart_status", "setting", "", audit.OutcomeSuccess, "restart status checked", map[string]string{
+		"restart_required": strconv.FormatBool(restartRequired),
+		"pending_count":    strconv.Itoa(len(pending)),
+	})
+	return restartRequired, pending, nil
 }
