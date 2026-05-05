@@ -97,6 +97,7 @@
   const pagedAudit = $derived(paginate(recentAudit, auditPage, 10));
 
   const vpnServerItems = $derived<HealthItem[]>(
+    healthError ? [{ label: 'Health check unavailable', status: 'unknown' as HealthItem['status'], detail: healthError }] :
     !health ? [] : (() => {
       const v = health.vpnServer;
       const svcStatus: HealthItem['status'] = v.systemdStatus === 'active' ? 'healthy'
@@ -116,6 +117,7 @@
   );
 
   const panelItems = $derived<HealthItem[]>(
+    healthError ? [{ label: 'Health check unavailable', status: 'unknown' as HealthItem['status'], detail: healthError }] :
     !health ? [] : [
       { label: 'Backend', status: 'healthy' as HealthItem['status'] },
       { label: 'Database', status: (health.panel.dbReachable ? 'healthy' : 'critical') as HealthItem['status'] },
@@ -266,8 +268,8 @@
 
   function handleLogTabChange(tab: 'audit' | 'ocserv' | 'panel') {
     activeLogTab = tab;
-    if (tab === 'ocserv' && !ocservLog) void loadLogTab('ocserv');
-    if (tab === 'panel' && !panelLog) void loadLogTab('panel');
+    if (tab === 'ocserv') void loadLogTab('ocserv');
+    if (tab === 'panel') void loadLogTab('panel');
   }
 </script>
 
@@ -308,24 +310,18 @@
 
   <!-- Health cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-    {#if healthError}
-      <div class="col-span-2 bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-700">
-        Health check unavailable: {healthError}
-      </div>
-    {:else}
-      <HealthCard
-        title="VPN Server"
-        items={vpnServerItems}
-        lastChecked={healthCheckedAt}
-        loading={healthLoading && !health}
-      />
-      <HealthCard
-        title="WebUI Panel"
-        items={panelItems}
-        lastChecked={healthCheckedAt}
-        loading={healthLoading && !health}
-      />
-    {/if}
+    <HealthCard
+      title="VPN Server"
+      items={vpnServerItems}
+      lastChecked={healthCheckedAt}
+      loading={healthLoading && !health}
+    />
+    <HealthCard
+      title="WebUI Panel"
+      items={panelItems}
+      lastChecked={healthCheckedAt}
+      loading={healthLoading && !health}
+    />
   </div>
 
   <!-- Secondary stat cards (sessions + sample data) -->
@@ -526,7 +522,7 @@
 
     <!-- ocserv Logs tab -->
     {#if activeLogTab === 'ocserv'}
-      {#if logLoading && !ocservLog}
+      {#if logLoading}
         <div class="flex items-center gap-2 py-8 text-slate-500 text-sm">
           <div class="w-4 h-4 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin"></div>
           Loading ocserv log…
@@ -540,7 +536,7 @@
         {:else if !ocservLog.present}
           <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-700">
             Log file not found at <code class="font-mono">{ocservLog.path}</code>.
-            <a href="/settings#installation" class="underline text-amber-800 ml-1">Update the path in Settings &rarr; Installation.</a>
+            <a href="/settings#installation" class="underline text-amber-800 ml-1">You can update the path in Settings &rarr; Installation.</a>
           </div>
         {:else if ocservLog.error}
           <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
@@ -565,7 +561,7 @@
 
     <!-- Panel Logs tab -->
     {#if activeLogTab === 'panel'}
-      {#if logLoading && !panelLog}
+      {#if logLoading}
         <div class="flex items-center gap-2 py-8 text-slate-500 text-sm">
           <div class="w-4 h-4 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin"></div>
           Loading panel log…
@@ -579,7 +575,7 @@
         {:else if !panelLog.present}
           <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-700">
             Log file not found at <code class="font-mono">{panelLog.path}</code>.
-            <a href="/settings#installation" class="underline text-amber-800 ml-1">Update the path in Settings &rarr; Installation.</a>
+            <a href="/settings#installation" class="underline text-amber-800 ml-1">You can update the path in Settings &rarr; Installation.</a>
           </div>
         {:else if panelLog.error}
           <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
