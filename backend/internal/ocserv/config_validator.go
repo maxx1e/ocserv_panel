@@ -131,7 +131,7 @@ func (v *ConfigValidator) ValidateContent(ctx context.Context, content string) (
 		case "tcp-port", "udp-port":
 			issues = append(issues, v.checkPortValue(key, value, i+1)...)
 		case "route", "no-route":
-			issues = append(issues, v.checkCIDR(key, value, i+1)...)
+			issues = append(issues, v.checkCIDR(key, value, i+1, line)...)
 		case "dns":
 			issues = append(issues, v.checkDNS(key, value, i+1)...)
 		}
@@ -156,7 +156,35 @@ func (v *ConfigValidator) checkPortValue(key, value string, lineNum int) []Confi
 }
 
 // checkCIDR validates that value is a valid CIDR notation address block.
-func (v *ConfigValidator) checkCIDR(key, value string, lineNum int) []ConfigIssue {
+// It detects netmask notation (e.g., 10.0.0.0/255.255.255.0) and suggests CIDR replacement.
+// rawLine is the full trimmed config line, used to construct FixedValue for auto-fix.
+func (v *ConfigValidator) checkCIDR(key, value string, lineNum int, rawLine string) []ConfigIssue {
+	_ = rawLine // used for documentation; FixedValue is constructed from key + cidr
+
+	// Check for netmask notation first (e.g., 10.0.0.0/255.255.255.0)
+	if ip, mask, ok := isNetmaskNotation(value); ok {
+		cidr, valid := netmaskToCIDR(ip, mask)
+		if valid {
+			return []ConfigIssue{{
+				Line:       lineNum,
+				Severity:   IssueWarning,
+				Key:        key,
+				Message:    fmt.Sprintf("%s uses netmask notation: %s", key, value),
+				Suggestion: fmt.Sprintf("Use CIDR notation: %s", cidr),
+				FixedValue: fmt.Sprintf("%s = %s", key, cidr),
+			}}
+		}
+		// Non-contiguous mask — error, no fix available
+		return []ConfigIssue{{
+			Line:       lineNum,
+			Severity:   IssueError,
+			Key:        key,
+			Message:    fmt.Sprintf("%s has non-contiguous subnet mask: %s", key, value),
+			Suggestion: "Use a valid contiguous mask or CIDR prefix notation.",
+		}}
+	}
+
+	// Standard CIDR validation
 	_, _, err := net.ParseCIDR(value)
 	if err != nil {
 		return []ConfigIssue{{
@@ -164,7 +192,7 @@ func (v *ConfigValidator) checkCIDR(key, value string, lineNum int) []ConfigIssu
 			Severity:   IssueError,
 			Key:        key,
 			Message:    fmt.Sprintf("%s has invalid CIDR value: %s", key, value),
-			Suggestion: fmt.Sprintf("Use valid CIDR notation, for example: 10.0.0.0/8"),
+			Suggestion: "Use valid CIDR notation, for example: 10.0.0.0/8",
 		}}
 	}
 	return nil

@@ -316,6 +316,40 @@ func TestValidateConfigFileReportsLineNumbers(t *testing.T) {
 	assert.Equal(t, 1, certIssue.Line)
 }
 
+func TestValidateContentCIDRAutoFix(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/dev/null")
+	content := "route = 10.10.10.0/255.255.255.0\n"
+	issues, err := v.ValidateContent(context.Background(), content)
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, IssueWarning, issues[0].Severity)
+	assert.Equal(t, "route = 10.10.10.0/24", issues[0].FixedValue)
+	assert.Equal(t, 1, issues[0].Line)
+	assert.Contains(t, issues[0].Message, "netmask notation")
+}
+
+func TestValidateContentNonContiguousMaskNoFix(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/dev/null")
+	content := "route = 10.0.0.0/255.255.100.0\n"
+	issues, err := v.ValidateContent(context.Background(), content)
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, IssueError, issues[0].Severity)
+	assert.Empty(t, issues[0].FixedValue)
+	assert.Contains(t, issues[0].Message, "non-contiguous")
+}
+
+func TestValidateContentValidCIDRNoProblem(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/dev/null")
+	content := "route = 10.0.0.0/24\n"
+	issues, err := v.ValidateContent(context.Background(), content)
+	require.NoError(t, err)
+	assert.Empty(t, issues)
+}
+
 func TestValidateContentReportsLineNumbers(t *testing.T) {
 	t.Parallel()
 	v := NewConfigValidator("/dev/null")
