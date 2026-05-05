@@ -65,6 +65,8 @@ func AllSettingDefs() []SettingDef {
 		{Key: "installation.ocpasswd_bin_path", Label: "ocpasswd Binary Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/usr/local/bin/ocpasswd", SortOrder: 8},
 		{Key: "installation.ocpasswd_file_path", Label: "ocpasswd Password File", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/etc/ocserv/ocpasswd", SortOrder: 9},
 		{Key: "installation.cert_dir", Label: "Certificate Directory", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/etc/ocserv/certs", SortOrder: 10},
+		{Key: "installation.ocserv_log_path", Label: "ocserv Log Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: false, Default: "/var/log/ocserv/ocserv.log", SortOrder: 11},
+		{Key: "installation.panel_log_path", Label: "Panel Log Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: false, Default: "/var/log/ocserv-panel/panel.log", SortOrder: 12},
 
 		// Service
 		{Key: "service.name", Label: "Service Name", Section: "service", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "ocserv-panel", SortOrder: 1},
@@ -122,6 +124,7 @@ func AllSettingDefs() []SettingDef {
 		{Key: "monitoring.health_endpoint", Label: "Health Check Endpoint", Section: "monitoring", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "true", SortOrder: 1},
 		{Key: "monitoring.metrics_endpoint", Label: "Metrics Endpoint", Section: "monitoring", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "false", SortOrder: 2},
 		{Key: "monitoring.dashboard_refresh_interval", Label: "Dashboard Refresh Interval (s)", Section: "monitoring", Type: SettingTypeNumber, Source: SettingSourceConfig, RequiresRestart: true, Default: "15", Validation: "min:5", SortOrder: 3},
+		{Key: "monitoring.log_file_read_enabled", Label: "Enable Log File Reading", Section: "monitoring", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: false, Default: "true", SortOrder: 4},
 
 		// Backup & Restore
 		{Key: "backup.schedule", Label: "Auto-Backup Schedule", Section: "backup", Type: SettingTypeSelect, Source: SettingSourceDatabase, RequiresRestart: false, Default: "disabled", Options: []string{"disabled", "daily", "weekly", "monthly"}, SortOrder: 1},

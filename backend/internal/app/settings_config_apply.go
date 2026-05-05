@@ -41,6 +41,10 @@ func applySettingToConfig(cfg *config.Config, key, value string) error {
 		cfg.Installation.OcpasswdFilePath = value
 	case "installation.cert_dir":
 		cfg.Installation.CertDir = value
+	case "installation.ocserv_log_path":
+		cfg.Installation.OcservLogPath = value
+	case "installation.panel_log_path":
+		cfg.Installation.PanelLogPath = value
 
 	// Service
 	case "service.name":
@@ -153,6 +157,12 @@ func applySettingToConfig(cfg *config.Config, key, value string) error {
 			return fmt.Errorf("%w: monitoring.dashboard_refresh_interval must be an integer", ErrInvalidInput)
 		}
 		cfg.Monitoring.DashboardRefreshInterval = n
+	case "monitoring.log_file_read_enabled":
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Errorf("%w: monitoring.log_file_read_enabled must be true or false", ErrInvalidInput)
+		}
+		cfg.Monitoring.LogFileReadEnabled = b
 
 	default:
 		return fmt.Errorf("%w: %s is not a config-source setting", ErrInvalidInput, key)
@@ -188,6 +198,10 @@ func configValueForKey(cfg config.Config, key string) string {
 		return cfg.Installation.OcpasswdFilePath
 	case "installation.cert_dir":
 		return cfg.Installation.CertDir
+	case "installation.ocserv_log_path":
+		return cfg.Installation.OcservLogPath
+	case "installation.panel_log_path":
+		return cfg.Installation.PanelLogPath
 	case "service.name":
 		return cfg.Service.Name
 	case "service.user":
@@ -238,6 +252,8 @@ func configValueForKey(cfg config.Config, key string) string {
 		return strconv.FormatBool(cfg.Monitoring.MetricsEndpoint)
 	case "monitoring.dashboard_refresh_interval":
 		return strconv.Itoa(cfg.Monitoring.DashboardRefreshInterval)
+	case "monitoring.log_file_read_enabled":
+		return strconv.FormatBool(cfg.Monitoring.LogFileReadEnabled)
 	default:
 		return ""
 	}
