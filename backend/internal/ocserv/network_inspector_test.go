@@ -170,6 +170,82 @@ func TestNetworkInspector_ListenerPortConfigured(t *testing.T) {
 	assert.Equal(t, "configured", portCheck.Status)
 }
 
+func TestNetworkInspector_SubnetOverlapDetected(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("ipv4-network = 10.10.10.0/24\n"), 0644))
+
+	procDir := filepath.Join(dir, "proc")
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv4"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv4/ip_forward"), []byte("1\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv6/conf/all"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv6/conf/all/forwarding"), []byte("1\n"), 0644))
+
+	runner := NewFakeCommandRunner()
+	runner.Results["iptables -t nat -S"] = CommandResult{Stdout: "-A POSTROUTING -j MASQUERADE\n", ExitCode: 0}
+	runner.Results["iptables -S FORWARD"] = CommandResult{Stdout: "-A FORWARD -i vpns+ -j ACCEPT\n", ExitCode: 0}
+	runner.Results["iptables -S INPUT"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["ip route show"] = CommandResult{
+		Stdout:   "10.0.0.0/8 dev eth0 proto kernel scope link src 10.0.0.1\n192.168.1.0/24 dev wlan0\n",
+		ExitCode: 0,
+	}
+
+	insp := NewNetworkInspectorWithConfig(runner, procDir, cfgPath)
+	result, err := insp.Inspect(context.Background())
+	require.NoError(t, err)
+
+	var overlapCheck *PrerequisiteCheck
+	for i := range result.Items {
+		if result.Items[i].Name == "VPN Subnet Overlap" {
+			overlapCheck = &result.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, overlapCheck, "expected VPN Subnet Overlap check")
+	assert.Equal(t, "missing", overlapCheck.Status)
+	assert.Contains(t, overlapCheck.Actual, "10.0.0.0/8")
+}
+
+func TestNetworkInspector_SubnetNoOverlap(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("ipv4-network = 172.16.100.0/24\n"), 0644))
+
+	procDir := filepath.Join(dir, "proc")
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv4"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv4/ip_forward"), []byte("1\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv6/conf/all"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv6/conf/all/forwarding"), []byte("1\n"), 0644))
+
+	runner := NewFakeCommandRunner()
+	runner.Results["iptables -t nat -S"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["iptables -S FORWARD"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["iptables -S INPUT"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["ip route show"] = CommandResult{
+		Stdout:   "10.0.0.0/8 dev eth0\n192.168.1.0/24 dev wlan0\n",
+		ExitCode: 0,
+	}
+
+	insp := NewNetworkInspectorWithConfig(runner, procDir, cfgPath)
+	result, err := insp.Inspect(context.Background())
+	require.NoError(t, err)
+
+	var overlapCheck *PrerequisiteCheck
+	for i := range result.Items {
+		if result.Items[i].Name == "VPN Subnet Overlap" {
+			overlapCheck = &result.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, overlapCheck, "expected VPN Subnet Overlap check")
+	assert.Equal(t, "configured", overlapCheck.Status)
+	assert.Contains(t, overlapCheck.Actual, "no overlap")
+}
+
 func TestNetworkInspector_ListenerPortMissing(t *testing.T) {
 	t.Parallel()
 

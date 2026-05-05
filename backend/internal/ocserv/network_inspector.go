@@ -3,6 +3,7 @@ package ocserv
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,7 @@ func (i *NetworkInspector) Inspect(ctx context.Context) (NetworkPrerequisites, e
 	))
 	items = append(items, i.checkFirewall(ctx)...)
 	items = append(items, i.checkListenerPorts(ctx)...)
+	items = append(items, i.checkSubnetOverlap(ctx)...)
 	return NetworkPrerequisites{Items: items}, nil
 }
 
@@ -242,4 +244,83 @@ func (i *NetworkInspector) checkListenerPorts(ctx context.Context) []Prerequisit
 		checks = append(checks, check)
 	}
 	return checks
+}
+
+// checkSubnetOverlap detects if the VPN subnet (ipv4-network) overlaps with
+// existing host routes. Returns nil if no config or no ipv4-network directive.
+func (i *NetworkInspector) checkSubnetOverlap(ctx context.Context) []PrerequisiteCheck {
+	if i.configPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(i.configPath)
+	if err != nil {
+		return nil
+	}
+
+	var vpnNetwork string
+	for _, rawLine := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := parseConfigLine(line)
+		if !ok {
+			continue
+		}
+		if key == "ipv4-network" {
+			vpnNetwork = value
+			break
+		}
+	}
+	if vpnNetwork == "" {
+		return nil
+	}
+
+	_, vpnNet, err := net.ParseCIDR(vpnNetwork)
+	if err != nil {
+		return nil
+	}
+
+	routeResult, routeErr := i.runner.Run(ctx, "ip", []string{"route", "show"}, nil)
+	if routeErr != nil {
+		return []PrerequisiteCheck{{
+			Category:   "routing",
+			Name:       "VPN Subnet Overlap",
+			Status:     "unknown",
+			Expected:   fmt.Sprintf("VPN subnet %s does not overlap host routes", vpnNetwork),
+			Actual:     routeErr.Error(),
+			Suggestion: "Verify that your VPN subnet does not conflict with existing network routes.",
+		}}
+	}
+
+	var overlapping []string
+	for _, line := range strings.Split(routeResult.Stdout, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 1 {
+			continue
+		}
+		_, hostNet, err := net.ParseCIDR(fields[0])
+		if err != nil {
+			continue
+		}
+		// Check bidirectional containment
+		if vpnNet.Contains(hostNet.IP) || hostNet.Contains(vpnNet.IP) {
+			overlapping = append(overlapping, fields[0])
+		}
+	}
+
+	check := PrerequisiteCheck{
+		Category:   "routing",
+		Name:       "VPN Subnet Overlap",
+		Expected:   fmt.Sprintf("VPN subnet %s does not overlap host routes", vpnNetwork),
+		Suggestion: "Choose a VPN subnet that does not overlap with existing host networks (e.g., 192.168.100.0/24).",
+	}
+	if len(overlapping) > 0 {
+		check.Status = "missing"
+		check.Actual = fmt.Sprintf("overlaps with: %s", strings.Join(overlapping, ", "))
+	} else {
+		check.Status = "configured"
+		check.Actual = "no overlap detected"
+	}
+	return []PrerequisiteCheck{check}
 }
