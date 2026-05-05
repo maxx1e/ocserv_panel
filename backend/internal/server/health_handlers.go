@@ -40,9 +40,12 @@ func (a *App) handleLogTail(w http.ResponseWriter, r *http.Request) {
 
 	lines := 25
 	if raw := r.URL.Query().Get("lines"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			lines = n
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "lines must be a positive integer")
+			return
 		}
+		lines = n
 	}
 
 	result, err := a.logTailService.TailLog(r.Context(), principal, source, lines)
