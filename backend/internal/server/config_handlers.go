@@ -26,10 +26,12 @@ type configMetadataJSON struct {
 }
 
 type configIssueJSON struct {
+	Line       int    `json:"line,omitempty"`
 	Severity   string `json:"severity"`
 	Key        string `json:"key"`
 	Message    string `json:"message"`
 	Suggestion string `json:"suggestion,omitempty"`
+	FixedValue string `json:"fixedValue,omitempty"`
 }
 
 type configValidateRequest struct {
@@ -37,8 +39,10 @@ type configValidateRequest struct {
 }
 
 type configValidateResponse struct {
-	Valid  bool              `json:"valid"`
-	Issues []configIssueJSON `json:"issues"`
+	Valid           bool              `json:"valid"`
+	Issues          []configIssueJSON `json:"issues"`
+	RequiresRestart bool              `json:"requiresRestart,omitempty"`
+	RestartReasons  []string          `json:"restartReasons,omitempty"`
 }
 
 type configDiffRequest struct {
@@ -123,8 +127,10 @@ func (a *App) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, configValidateResponse{
-		Valid:  result.Valid,
-		Issues: toConfigIssuesJSON(result.Issues),
+		Valid:           result.Valid,
+		Issues:          toConfigIssuesJSON(result.Issues),
+		RequiresRestart: result.RequiresRestart,
+		RestartReasons:  result.RestartReasons,
 	})
 }
 
@@ -358,10 +364,12 @@ func toConfigIssuesJSON(issues []ocserv.ConfigIssue) []configIssueJSON {
 	result := make([]configIssueJSON, 0, len(issues))
 	for _, issue := range issues {
 		result = append(result, configIssueJSON{
+			Line:       issue.Line,
 			Severity:   string(issue.Severity),
 			Key:        issue.Key,
 			Message:    issue.Message,
 			Suggestion: issue.Suggestion,
+			FixedValue: issue.FixedValue,
 		})
 	}
 	return result
