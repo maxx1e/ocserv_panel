@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNetworkInspectorIPv4ForwardEnabled(t *testing.T) {
@@ -132,4 +135,70 @@ func TestNetworkInspectorFirewallIptables(t *testing.T) {
 	if !vpnsFound {
 		t.Error("VPN Interface Forward check not found in results")
 	}
+}
+
+func TestNetworkInspector_ListenerPortConfigured(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("tcp-port = 443\nudp-port = 443\n"), 0644))
+
+	procDir := filepath.Join(dir, "proc")
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv4"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv4/ip_forward"), []byte("1\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv6/conf/all"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv6/conf/all/forwarding"), []byte("1\n"), 0644))
+
+	runner := NewFakeCommandRunner()
+	runner.Results["iptables -t nat -S"] = CommandResult{Stdout: "-A POSTROUTING -j MASQUERADE\n", ExitCode: 0}
+	runner.Results["iptables -S FORWARD"] = CommandResult{Stdout: "-A FORWARD -i vpns+ -j ACCEPT\n", ExitCode: 0}
+	runner.Results["iptables -S INPUT"] = CommandResult{Stdout: "-A INPUT -p tcp --dport 443 -j ACCEPT\n", ExitCode: 0}
+
+	insp := NewNetworkInspectorWithConfig(runner, procDir, cfgPath)
+	result, err := insp.Inspect(context.Background())
+	require.NoError(t, err)
+
+	var portCheck *PrerequisiteCheck
+	for i := range result.Items {
+		if result.Items[i].Name == "TCP Port 443 Allowed" {
+			portCheck = &result.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, portCheck, "expected TCP port check")
+	assert.Equal(t, "configured", portCheck.Status)
+}
+
+func TestNetworkInspector_ListenerPortMissing(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("tcp-port = 8443\n"), 0644))
+
+	procDir := filepath.Join(dir, "proc")
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv4"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv4/ip_forward"), []byte("1\n"), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "net/ipv6/conf/all"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "net/ipv6/conf/all/forwarding"), []byte("1\n"), 0644))
+
+	runner := NewFakeCommandRunner()
+	runner.Results["iptables -t nat -S"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["iptables -S FORWARD"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner.Results["iptables -S INPUT"] = CommandResult{Stdout: "-A INPUT -p tcp --dport 443 -j ACCEPT\n", ExitCode: 0}
+
+	insp := NewNetworkInspectorWithConfig(runner, procDir, cfgPath)
+	result, err := insp.Inspect(context.Background())
+	require.NoError(t, err)
+
+	var portCheck *PrerequisiteCheck
+	for i := range result.Items {
+		if result.Items[i].Name == "TCP Port 8443 Allowed" {
+			portCheck = &result.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, portCheck, "expected TCP port 8443 check")
+	assert.Equal(t, "missing", portCheck.Status)
 }

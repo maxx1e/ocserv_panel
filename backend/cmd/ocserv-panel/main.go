@@ -98,7 +98,7 @@ func main() {
 
 	configFiles := ocserv.NewConfigFileManager(cfg.Installation.OcservConfigPath, 10)
 	configReloader := ocserv.NewConfigReloader(runner, cfg.Installation.OcctlBinPath)
-	networkInspector := ocserv.NewNetworkInspector(runner)
+	networkInspector := ocserv.NewNetworkInspectorWithConfig(runner, "/proc/sys", cfg.Installation.OcservConfigPath)
 	configMgmtService := app.NewConfigManagementService(
 		configFiles,
 		configValidator,
