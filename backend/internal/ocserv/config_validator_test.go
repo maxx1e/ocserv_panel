@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConfigValidatorMissingFile(t *testing.T) {
@@ -289,4 +292,15 @@ func TestConfigValidatorValidateContentMalformedLine(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected error issue for malformed line, got %v", issues)
+}
+
+func TestValidateContentReportsLineNumbers(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/dev/null")
+	content := "# comment\ntcp-port = 99999\nroute = invalid\n"
+	issues, err := v.ValidateContent(context.Background(), content)
+	require.NoError(t, err)
+	require.Len(t, issues, 2)
+	assert.Equal(t, 2, issues[0].Line) // tcp-port on line 2
+	assert.Equal(t, 3, issues[1].Line) // route on line 3
 }

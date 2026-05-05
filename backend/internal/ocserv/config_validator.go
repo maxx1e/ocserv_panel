@@ -21,10 +21,12 @@ const (
 
 // ConfigIssue describes a single ocserv configuration problem.
 type ConfigIssue struct {
+	Line       int                 `json:"line,omitempty"`
 	Severity   ConfigIssueSeverity `json:"severity"`
 	Key        string              `json:"key"`
 	Message    string              `json:"message"`
 	Suggestion string              `json:"suggestion,omitempty"`
+	FixedValue string              `json:"fixedValue,omitempty"`
 }
 
 // ConfigValidator checks ocserv configuration for common production issues.
@@ -104,6 +106,7 @@ func (v *ConfigValidator) ValidateContent(ctx context.Context, content string) (
 		key, value, ok := parseConfigLine(line)
 		if !ok {
 			issues = append(issues, ConfigIssue{
+				Line:       i + 1,
 				Severity:   IssueError,
 				Key:        fmt.Sprintf("line_%d", i+1),
 				Message:    fmt.Sprintf("malformed config line (missing '='): %s", line),
@@ -114,11 +117,11 @@ func (v *ConfigValidator) ValidateContent(ctx context.Context, content string) (
 
 		switch key {
 		case "tcp-port", "udp-port":
-			issues = append(issues, v.checkPortValue(key, value)...)
+			issues = append(issues, v.checkPortValue(key, value, i+1)...)
 		case "route", "no-route":
-			issues = append(issues, v.checkCIDR(key, value)...)
+			issues = append(issues, v.checkCIDR(key, value, i+1)...)
 		case "dns":
-			issues = append(issues, v.checkDNS(key, value)...)
+			issues = append(issues, v.checkDNS(key, value, i+1)...)
 		}
 	}
 
@@ -126,10 +129,11 @@ func (v *ConfigValidator) ValidateContent(ctx context.Context, content string) (
 }
 
 // checkPortValue validates that value is an integer in the valid port range [1, 65535].
-func (v *ConfigValidator) checkPortValue(key, value string) []ConfigIssue {
+func (v *ConfigValidator) checkPortValue(key, value string, lineNum int) []ConfigIssue {
 	port, err := strconv.Atoi(value)
 	if err != nil || port < 1 || port > 65535 {
 		return []ConfigIssue{{
+			Line:       lineNum,
 			Severity:   IssueError,
 			Key:        key,
 			Message:    fmt.Sprintf("%s has invalid port value: %s (must be 1-65535)", key, value),
@@ -140,10 +144,11 @@ func (v *ConfigValidator) checkPortValue(key, value string) []ConfigIssue {
 }
 
 // checkCIDR validates that value is a valid CIDR notation address block.
-func (v *ConfigValidator) checkCIDR(key, value string) []ConfigIssue {
+func (v *ConfigValidator) checkCIDR(key, value string, lineNum int) []ConfigIssue {
 	_, _, err := net.ParseCIDR(value)
 	if err != nil {
 		return []ConfigIssue{{
+			Line:       lineNum,
 			Severity:   IssueError,
 			Key:        key,
 			Message:    fmt.Sprintf("%s has invalid CIDR value: %s", key, value),
@@ -154,9 +159,10 @@ func (v *ConfigValidator) checkCIDR(key, value string) []ConfigIssue {
 }
 
 // checkDNS validates that value is a valid IP address for a DNS server.
-func (v *ConfigValidator) checkDNS(key, value string) []ConfigIssue {
+func (v *ConfigValidator) checkDNS(key, value string, lineNum int) []ConfigIssue {
 	if net.ParseIP(value) == nil {
 		return []ConfigIssue{{
+			Line:       lineNum,
 			Severity:   IssueWarning,
 			Key:        key,
 			Message:    fmt.Sprintf("%s has invalid IP address: %s", key, value),
