@@ -569,6 +569,8 @@ export type ConfigIssue = {
   key: string;
   message: string;
   suggestion?: string;
+  line?: number;
+  fixedValue?: string;
 };
 
 export type ConfigMetadata = {
@@ -586,6 +588,8 @@ export type ConfigReadResult = {
 export type ConfigValidateResult = {
   valid: boolean;
   issues: ConfigIssue[];
+  requiresRestart?: boolean;
+  restartReasons?: string[];
 };
 
 export type ConfigDiffResult = {
@@ -597,6 +601,8 @@ export type ConfigApplyResult = {
   reloadSuccess: boolean;
   reloadError?: string;
   issues: ConfigIssue[];
+  requiresRestart?: boolean;
+  restartReasons?: string[];
 };
 
 export type ConfigBackupInfo = {
