@@ -294,6 +294,28 @@ func TestConfigValidatorValidateContentMalformedLine(t *testing.T) {
 	t.Fatalf("expected error issue for malformed line, got %v", issues)
 }
 
+func TestValidateConfigFileReportsLineNumbers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	content := "server-cert = ../certs/server-cert.pem\ndevice = vpns\n"
+	require.NoError(t, os.WriteFile(cfgPath, []byte(content), 0644))
+
+	v := NewConfigValidator(cfgPath)
+	issues, err := v.ValidateConfig(context.Background())
+	require.NoError(t, err)
+	// server-cert relative path warning should report line 1
+	var certIssue *ConfigIssue
+	for i := range issues {
+		if issues[i].Key == "server-cert" {
+			certIssue = &issues[i]
+			break
+		}
+	}
+	require.NotNil(t, certIssue)
+	assert.Equal(t, 1, certIssue.Line)
+}
+
 func TestValidateContentReportsLineNumbers(t *testing.T) {
 	t.Parallel()
 	v := NewConfigValidator("/dev/null")

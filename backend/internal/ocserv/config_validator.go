@@ -64,7 +64,7 @@ func (v *ConfigValidator) ValidateConfig(ctx context.Context) ([]ConfigIssue, er
 	var issues []ConfigIssue
 	configDir := filepath.Dir(v.configPath)
 
-	for _, rawLine := range strings.Split(string(data), "\n") {
+	for i, rawLine := range strings.Split(string(data), "\n") {
 		line := strings.TrimSpace(rawLine)
 		if strings.HasPrefix(line, "#") || line == "" {
 			continue
@@ -77,13 +77,25 @@ func (v *ConfigValidator) ValidateConfig(ctx context.Context) ([]ConfigIssue, er
 
 		switch key {
 		case "server-cert", "server-key", "ca-cert":
-			issues = append(issues, v.checkCertPath(key, value, configDir)...)
+			for _, issue := range v.checkCertPath(key, value, configDir) {
+				issue.Line = i + 1
+				issues = append(issues, issue)
+			}
 		case "auth":
-			issues = append(issues, v.checkAuthDirective(key, value, configDir)...)
+			for _, issue := range v.checkAuthDirective(key, value, configDir) {
+				issue.Line = i + 1
+				issues = append(issues, issue)
+			}
 		case "socket-file":
-			issues = append(issues, v.checkSocketPath(key, value)...)
+			for _, issue := range v.checkSocketPath(key, value) {
+				issue.Line = i + 1
+				issues = append(issues, issue)
+			}
 		case "device":
-			issues = append(issues, v.checkDevice(key, value)...)
+			for _, issue := range v.checkDevice(key, value) {
+				issue.Line = i + 1
+				issues = append(issues, issue)
+			}
 		}
 	}
 
