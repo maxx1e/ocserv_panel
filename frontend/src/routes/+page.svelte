@@ -483,11 +483,25 @@
 
     <!-- Chart grid -->
     {#if monitoringLoading && !monitoring}
-      <div class="flex items-center justify-center py-12">
-        <div class="text-center">
-          <div class="w-6 h-6 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin mx-auto mb-2"></div>
-          <p class="text-slate-500 text-sm">Loading monitoring overview…</p>
-        </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {#each Array(4) as _}
+          <Card.Root>
+            <Card.Header>
+              <div>
+                <div class="h-4 w-24 rounded bg-muted animate-pulse"></div>
+                <div class="h-3 w-16 rounded bg-muted animate-pulse mt-1.5"></div>
+              </div>
+              <div class="h-5 w-12 rounded bg-muted animate-pulse"></div>
+            </Card.Header>
+            <Card.Content>
+              <div class="h-[160px] w-full rounded-lg bg-muted/30 animate-pulse flex items-end gap-1 px-4 pb-4">
+                {#each [40, 55, 35, 70, 50, 65, 45, 60, 75, 50, 80, 55] as h}
+                  <div class="flex-1 rounded-sm bg-muted" style="height: {h}%"></div>
+                {/each}
+              </div>
+            </Card.Content>
+          </Card.Root>
+        {/each}
       </div>
     {:else}
       {#key mode.current}
