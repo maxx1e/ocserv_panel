@@ -159,6 +159,13 @@
       showError('Fix validation errors before applying.');
       return;
     }
+    // Fetch diff for display in confirmation
+    try {
+      const result = await diffConfig(editContent);
+      diffText = result.diff;
+    } catch {
+      diffText = '';
+    }
     showApplyConfirm = true;
   }
 
@@ -792,6 +799,16 @@
         This will overwrite the live ocserv configuration. A backup of the current config will be created before applying.
         The ocserv service will be reloaded to pick up the changes.
       </p>
+      {#if diffText}
+        <div class="mt-3 max-h-[200px] overflow-auto border border-slate-200 rounded-md">
+          <div class="font-mono text-xs leading-relaxed p-2">
+            {#each diffText.split('\n') as line}
+              {@const dl = renderDiffLine(line)}
+              <div class="px-1 {dl.cls}">{dl.text}</div>
+            {/each}
+          </div>
+        </div>
+      {/if}
       {#if requiresRestart}
         <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-md">
           <p class="text-sm font-medium text-amber-800">Warning: This change requires a full service restart.</p>
