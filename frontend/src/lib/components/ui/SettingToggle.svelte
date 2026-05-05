@@ -12,16 +12,18 @@
   let { setting, onUpdate, savingKey }: Props = $props();
   const isSaving = $derived(savingKey === setting.key);
   let savedPending = $state(false);
+  let error = $state('');
 
   async function toggleChange(newValue: boolean) {
     savedPending = false;
+    error = '';
     try {
       const result = await onUpdate(setting.key, String(newValue));
       if (result.requires_restart) {
         savedPending = true;
       }
-    } catch {
-      // Error handled by parent
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to save';
     }
   }
 </script>
@@ -40,5 +42,8 @@
       <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {setting.value === 'true' ? 'translate-x-6' : 'translate-x-1'}"></span>
     </button>
     <span class="text-sm text-slate-500">{setting.value === 'true' ? 'Enabled' : 'Disabled'}</span>
+    {#if error}
+      <span class="text-sm text-red-600">{error}</span>
+    {/if}
   </div>
 </SettingRow>

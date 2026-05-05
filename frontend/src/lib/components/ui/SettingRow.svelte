@@ -27,7 +27,7 @@
       <span class="text-xs text-slate-400 ml-2">Saving…</span>
     {/if}
   </div>
-  <div class="flex flex-col gap-1">
+  <div class="flex flex-col gap-1" aria-live="polite">
     <div class="flex items-center gap-2">
       {@render children()}
     </div>
