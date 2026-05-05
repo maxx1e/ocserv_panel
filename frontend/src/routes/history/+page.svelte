@@ -4,7 +4,8 @@
   import { ArrowDown, ArrowUp, Server, Users } from 'lucide-svelte';
 
   import CardStats from '$lib/components/ui/CardStats.svelte';
-  import CardChart from '$lib/components/ui/CardChart.svelte';
+  import * as Card from '$lib/components/ui/card/index';
+  import { mode } from 'mode-watcher';
   import CardTable from '$lib/components/ui/CardTable.svelte';
   import CardSettings from '$lib/components/ui/CardSettings.svelte';
   import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
@@ -367,15 +368,25 @@
         </div>
       </div>
     {:else}
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {#each chartDefinitions as chart}
-          {#if shouldShowChart(chart.metric)}
-            <CardChart title={chart.title} chartHeight={200}>
-              <MetricChart data={chartData(chart.metric)} metric={chart.metric} height={200} />
-            </CardChart>
-          {/if}
-        {/each}
-      </div>
+      {#key mode.current}
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {#each chartDefinitions as chart}
+            {#if shouldShowChart(chart.metric)}
+              <Card.Root>
+                <Card.Header>
+                  <div>
+                    <Card.Title>{chart.title}</Card.Title>
+                    <Card.Description>Last {monitoringWindow}</Card.Description>
+                  </div>
+                </Card.Header>
+                <Card.Content>
+                  <MetricChart data={chartData(chart.metric)} metric={chart.metric} height={160} />
+                </Card.Content>
+              </Card.Root>
+            {/if}
+          {/each}
+        </div>
+      {/key}
       <UnavailableChips chips={unavailableChips} />
     {/if}
   </section>

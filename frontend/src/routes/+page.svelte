@@ -4,12 +4,14 @@
   import { ArrowDown, ArrowUp, Cpu, Database, MemoryStick, Server, Users } from 'lucide-svelte';
 
   import CardStats from '$lib/components/ui/CardStats.svelte';
-  import CardChart from '$lib/components/ui/CardChart.svelte';
+  import * as Card from '$lib/components/ui/card/index';
+  import { mode } from 'mode-watcher';
   import CardTable from '$lib/components/ui/CardTable.svelte';
   import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
   import UnavailableChips from '$lib/components/ui/UnavailableChips.svelte';
   import PaginatedTable from '$lib/components/ui/PaginatedTable.svelte';
   import HealthCard from '$lib/components/ui/HealthCard.svelte';
+  import HealthSummaryStrip from '$lib/components/ui/HealthSummaryStrip.svelte';
   import type { Chip } from '$lib/components/ui/UnavailableChips.svelte';
   import type { HealthItem } from '$lib/components/ui/HealthCard.svelte';
   import { formatRelativeTime } from '$lib/utils/format';
@@ -59,6 +61,37 @@
     { metric: CONCURRENT_SESSIONS, title: 'Concurrent sessions' }
   ];
 
+  const HEALTH_TOOLTIPS: Record<string, Record<string, { title: string; description: string; action: string }>> = {
+    systemd: {
+      warning: { title: 'Systemd Service', description: 'ocserv service is inactive or not running.', action: 'Start the service via systemctl or the panel controls.' },
+      critical: { title: 'Systemd Service', description: 'ocserv systemd unit is in failed state.', action: 'Check journalctl logs and restart the service.' },
+    },
+    socket: {
+      warning: { title: 'Socket / Process', description: 'ocserv socket not present. Process may not be fully started.', action: 'Check systemd unit status and socket permissions.' },
+    },
+    config: {
+      warning: { title: 'Config File', description: 'ocserv configuration file not found at expected path.', action: 'Verify config path in Settings > Installation.' },
+      critical: { title: 'Config File', description: 'Configuration present but failed validation.', action: 'Fix config errors and run validation again.' },
+    },
+    database: {
+      critical: { title: 'Database', description: 'SQLite DB unavailable, locked, or not writable.', action: 'Check file permissions, disk space, and run migrations.' },
+    },
+    panelConfig: {
+      warning: { title: 'Panel Config', description: 'Panel configuration file not found.', action: 'Verify config path or create default configuration.' },
+    },
+  };
+
+  const STORAGE_TOOLTIPS: Record<string, Record<string, { title: string; description: string; action: string }>> = {
+    sqlite: {
+      warning: { title: 'SQLite Database', description: 'Database size approaching threshold.', action: 'Consider cleanup or VACUUM.' },
+      critical: { title: 'SQLite Database', description: 'Database exceeded safe limits or disk nearly full.', action: 'Immediate action required: free disk space or purge old data.' },
+    },
+    tsdb: {
+      warning: { title: 'TSDB Metrics', description: 'TSDB growth high or nearing retention limits.', action: 'Review retention policy or reduce collection frequency.' },
+      critical: { title: 'TSDB Metrics', description: 'TSDB exceeded limits or ingestion backlog detected.', action: 'Urgent: check disk space and TSDB compaction.' },
+    },
+  };
+
   let loading = $state(true);
   let error = $state('');
   let setupRequired = $state(false);
@@ -85,7 +118,6 @@
   let logLoading = $state(false);
   let logError = $state('');
 
-  const sampleDataMessage = $derived(sampleDataText(summary?.sampleData));
   const recentAudit = $derived(summary?.recentAudit ?? []);
 
   const unavailableChips = $derived<Chip[]>(
@@ -104,13 +136,26 @@
         : v.systemdStatus === 'failed' ? 'critical'
         : v.systemdStatus === 'inactive' ? 'warning'
         : 'unknown';
+      const socketStatus: HealthItem['status'] = v.socketPresent ? 'healthy' : 'warning';
+      const cfgStatus: HealthItem['status'] = v.configPresent && v.configValid ? 'healthy'
+        : v.configPresent && !v.configValid ? 'critical' : 'warning';
       return [
-        { label: 'Systemd service', status: svcStatus, detail: svcStatus !== 'healthy' ? `Status: ${v.systemdStatus}` : undefined },
-        { label: 'Socket / process', status: v.socketPresent ? 'healthy' : 'warning' } as HealthItem,
+        {
+          label: 'Systemd service',
+          status: svcStatus,
+          detail: svcStatus !== 'healthy' ? `Status: ${v.systemdStatus}` : undefined,
+          tooltip: svcStatus !== 'healthy' ? HEALTH_TOOLTIPS.systemd[svcStatus] ?? null : null,
+        },
+        {
+          label: 'Socket / process',
+          status: socketStatus,
+          tooltip: socketStatus !== 'healthy' ? HEALTH_TOOLTIPS.socket[socketStatus] ?? null : null,
+        },
         {
           label: 'Config file',
-          status: (v.configPresent && v.configValid ? 'healthy' : v.configPresent && !v.configValid ? 'critical' : 'warning') as HealthItem['status'],
-          detail: v.configErrors || undefined
+          status: cfgStatus,
+          detail: v.configErrors || undefined,
+          tooltip: cfgStatus !== 'healthy' ? HEALTH_TOOLTIPS.config[cfgStatus] ?? null : null,
         },
       ];
     })()
@@ -120,11 +165,43 @@
     healthError ? [{ label: 'Health check unavailable', status: 'unknown' as HealthItem['status'], detail: healthError }] :
     !health ? [] : [
       { label: 'Backend', status: 'healthy' as HealthItem['status'] },
-      { label: 'Database', status: (health.panel.dbReachable ? 'healthy' : 'critical') as HealthItem['status'] },
-      { label: 'Config file', status: (health.panel.configPresent ? 'healthy' : 'warning') as HealthItem['status'] },
+      {
+        label: 'Database',
+        status: (health.panel.dbReachable ? 'healthy' : 'critical') as HealthItem['status'],
+        tooltip: !health.panel.dbReachable ? HEALTH_TOOLTIPS.database.critical : null,
+      },
+      {
+        label: 'Config file',
+        status: (health.panel.configPresent ? 'healthy' : 'warning') as HealthItem['status'],
+        tooltip: !health.panel.configPresent ? HEALTH_TOOLTIPS.panelConfig.warning : null,
+      },
       { label: 'WebUI users', status: 'healthy' as HealthItem['status'], detail: `${health.panel.webuiUserCount} user${health.panel.webuiUserCount === 1 ? '' : 's'}` },
     ]
   );
+
+  const storageItems = $derived<HealthItem[]>(
+    healthError ? [{ label: 'Storage check unavailable', status: 'unknown' as HealthItem['status'], detail: healthError }] :
+    !health?.storage ? [] : [
+      {
+        label: 'SQLite Database',
+        status: (health.storage.sqlite.status ?? 'unknown') as HealthItem['status'],
+        detail: formatBytes(health.storage.sqlite.sizeBytes),
+        tooltip: health.storage.sqlite.status !== 'healthy'
+          ? STORAGE_TOOLTIPS.sqlite[health.storage.sqlite.status] ?? null
+          : null,
+      },
+      {
+        label: 'TSDB (metrics)',
+        status: (health.storage.tsdb.status ?? 'unknown') as HealthItem['status'],
+        detail: formatBytes(health.storage.tsdb.sizeBytes),
+        tooltip: health.storage.tsdb.status !== 'healthy'
+          ? STORAGE_TOOLTIPS.tsdb[health.storage.tsdb.status] ?? null
+          : null,
+      },
+    ]
+  );
+
+  const allHealthItems = $derived<HealthItem[]>([...vpnServerItems, ...panelItems, ...storageItems]);
 
   onMount(() => {
     void loadDashboard();
@@ -224,12 +301,6 @@
     return chartData(metric).length > 0;
   }
 
-  function sampleDataText(value: DashboardSummary['sampleData']): string {
-    if (typeof value === 'boolean') return value ? 'Sample data is present for baseline visibility.' : 'No sample data reported.';
-    if (value?.enabled || value?.present) return value.message ?? 'Sample data is present for baseline visibility.';
-    return 'No sample data reported.';
-  }
-
   function chartData(metric: string): { timestamp: Date; value: number }[] {
     const series = metricSeries(metric);
     if (!series) return [];
@@ -309,6 +380,11 @@
     <p class="text-sm text-slate-500 mt-1">Local ocserv administration overview.</p>
   </div>
 
+  <!-- Health summary strip -->
+  {#if allHealthItems.length > 0}
+    <HealthSummaryStrip items={allHealthItems} />
+  {/if}
+
   <!-- Health cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
     <HealthCard
@@ -325,17 +401,18 @@
     />
   </div>
 
-  <!-- Secondary stat cards (sessions + sample data) -->
+  <!-- Active sessions + Storage metrics -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
     <CardStats
       title="Active sessions"
       value={String(summary.activeSessionCount ?? 0)}
       icon={Users}
     />
-    <CardStats
-      title="Sample data"
-      value={sampleDataMessage}
-      icon={Database}
+    <HealthCard
+      title="Storage Metrics"
+      items={storageItems}
+      lastChecked={healthCheckedAt}
+      loading={healthLoading && !health}
     />
   </div>
 
@@ -413,15 +490,28 @@
         </div>
       </div>
     {:else}
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {#each chartDefinitions as chart}
-          {#if shouldShowChart(chart.metric)}
-            <CardChart title={chart.title} latestValue={metricValue(chart.metric)} chartHeight={200}>
-              <MetricChart data={chartData(chart.metric)} metric={chart.metric} height={200} />
-            </CardChart>
-          {/if}
-        {/each}
-      </div>
+      {#key mode.current}
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {#each chartDefinitions as chart}
+            {#if shouldShowChart(chart.metric)}
+              <Card.Root>
+                <Card.Header>
+                  <div>
+                    <Card.Title>{chart.title}</Card.Title>
+                    <Card.Description>Last {monitoringWindow}</Card.Description>
+                  </div>
+                  <span class="text-sm font-semibold text-foreground tabular-nums">
+                    {metricValue(chart.metric)}
+                  </span>
+                </Card.Header>
+                <Card.Content>
+                  <MetricChart data={chartData(chart.metric)} metric={chart.metric} height={160} />
+                </Card.Content>
+              </Card.Root>
+            {/if}
+          {/each}
+        </div>
+      {/key}
       <UnavailableChips chips={unavailableChips} />
     {/if}
   </section>
