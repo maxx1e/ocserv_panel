@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { FileText, History, Network, Check, AlertTriangle, X, Copy, RotateCcw, Eye, FileDiff, RefreshCw, Info } from 'lucide-svelte';
+  import { FileText, History, Network, Check, AlertTriangle, X, Copy, RotateCcw, Eye, FileDiff, RefreshCw } from 'lucide-svelte';
   import ConfigEditor from '$lib/components/ui/ConfigEditor.svelte';
+  import ConfigIssueList from '$lib/components/ui/ConfigIssueList.svelte';
   import {
     getConfig, validateConfig, diffConfig, applyConfig,
     getConfigBackups, getConfigBackup, diffConfigBackup,
@@ -140,6 +141,17 @@
 
   function requestApply() {
     showApplyConfirm = true;
+  }
+
+  function handleAutoFix(issue: ConfigIssue) {
+    if (!issue.line || !issue.fixedValue) return;
+    const lines = editContent.split('\n');
+    const lineIdx = issue.line - 1;
+    if (lineIdx < 0 || lineIdx >= lines.length) return;
+    lines[lineIdx] = issue.fixedValue;
+    editContent = lines.join('\n');
+    // Re-validate after fix
+    void handleValidate();
   }
 
   async function handleApply() {
@@ -290,15 +302,6 @@
       case 'missing': return { icon: X, color: 'text-red-500' };
       case 'partial': return { icon: AlertTriangle, color: 'text-amber-500' };
       default: return { icon: AlertTriangle, color: 'text-slate-400' };
-    }
-  }
-
-  function severityIcon(severity: string): { icon: typeof Check; color: string } {
-    switch (severity) {
-      case 'error': return { icon: X, color: 'text-red-500' };
-      case 'warning': return { icon: AlertTriangle, color: 'text-amber-500' };
-      case 'info': return { icon: Info, color: 'text-blue-500' };
-      default: return { icon: Info, color: 'text-slate-400' };
     }
   }
 
@@ -496,27 +499,11 @@
           class="min-h-[400px]"
         />
 
-        <!-- Issues list -->
-        {#if issues.length > 0}
-          <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
-            <h3 class="text-sm font-semibold text-slate-700 mb-3">Issues ({issues.length})</h3>
-            <div class="space-y-2">
-              {#each issues as issue}
-                {@const sev = severityIcon(issue.severity)}
-                <div class="flex items-start gap-2 text-sm">
-                  <sev.icon class="w-4 h-4 mt-0.5 flex-shrink-0 {sev.color}" />
-                  <div class="min-w-0">
-                    <span class="font-medium text-slate-700">{issue.key}:</span>
-                    <span class="text-slate-600 ml-1">{issue.message}</span>
-                    {#if issue.suggestion}
-                      <p class="text-xs text-slate-500 mt-0.5">{issue.suggestion}</p>
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
+        <ConfigIssueList
+          {issues}
+          onjump={(line) => editorRef?.scrollToLine(line)}
+          onfix={handleAutoFix}
+        />
       </div>
 
     <!-- ═══════════════ Backups Tab ═══════════════ -->
