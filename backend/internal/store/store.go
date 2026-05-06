@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"ocserv_panel/backend/internal/rbac"
+	"ocserv_panel/backend/internal/sanitize"
 )
 
 // ErrFirstOwnerExists is returned when bootstrap owner creation is no longer allowed.
@@ -210,7 +210,7 @@ func (s *Store) RecentAuditEvents(ctx context.Context, limit int) ([]AuditEvent,
 
 // RecordAudit persists an audit event with JSON metadata.
 func (s *Store) RecordAudit(ctx context.Context, event AuditEvent) error {
-	metadata := sanitizeAuditMetadata(event.Metadata)
+	metadata := sanitize.Metadata(event.Metadata)
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		return fmt.Errorf("marshal audit metadata: %w", err)
@@ -402,49 +402,4 @@ func parseTime(value string) (time.Time, error) {
 		return parsed.UTC(), nil
 	}
 	return time.Time{}, fmt.Errorf("parse time %q", value)
-}
-
-func sanitizeAuditMetadata(metadata map[string]string) map[string]string {
-	if metadata == nil {
-		return map[string]string{}
-	}
-	sanitized := make(map[string]string, len(metadata))
-	for key, value := range metadata {
-		if isSensitiveMetadataKey(key) || isSensitiveMetadataValue(value) {
-			sanitized[key] = "[redacted]"
-			continue
-		}
-		sanitized[key] = value
-	}
-	return sanitized
-}
-
-func isSensitiveMetadataKey(key string) bool {
-	normalizedKey := normalizeMetadataKey(key)
-	for _, sensitive := range []string{
-		"password",
-		"passphrase",
-		"token",
-		"sessiontoken",
-		"secret",
-		"privatekey",
-		"credential",
-		"authorization",
-		"cookie",
-	} {
-		if strings.Contains(normalizedKey, sensitive) {
-			return true
-		}
-	}
-	return false
-}
-
-func isSensitiveMetadataValue(value string) bool {
-	upperValue := strings.ToUpper(value)
-	return strings.Contains(upperValue, "BEGIN") && strings.Contains(upperValue, "PRIVATE KEY")
-}
-
-func normalizeMetadataKey(key string) string {
-	replacer := strings.NewReplacer("_", "", "-", "", " ", "")
-	return replacer.Replace(strings.ToLower(key))
 }
