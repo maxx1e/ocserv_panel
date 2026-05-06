@@ -180,6 +180,12 @@ func (s *OcservService) CreateOcservUser(ctx context.Context, principal auth.Pri
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersCreate, "ocserv.users.create"); err != nil {
 		return err
 	}
+	if err := ocserv.ValidateUsername(username); err != nil {
+		return fmt.Errorf("invalid username: %w", err)
+	}
+	if err := ocserv.ValidatePassword(password); err != nil {
+		return fmt.Errorf("invalid password: %w", err)
+	}
 	actorID := principal.ID
 	if err := s.users.CreateUser(ctx, username, password); err != nil {
 		_ = s.record(ctx, &actorID, "ocserv.users.create", "ocserv_user", username, audit.OutcomeFailure, err.Error(), nil)
@@ -194,6 +200,9 @@ func (s *OcservService) DeleteOcservUser(ctx context.Context, principal auth.Pri
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersDelete, "ocserv.users.delete"); err != nil {
 		return err
 	}
+	if err := ocserv.ValidateUsername(username); err != nil {
+		return fmt.Errorf("invalid username: %w", err)
+	}
 	actorID := principal.ID
 	if err := s.users.DeleteUser(ctx, username); err != nil {
 		_ = s.record(ctx, &actorID, "ocserv.users.delete", "ocserv_user", username, audit.OutcomeFailure, err.Error(), nil)
@@ -207,6 +216,12 @@ func (s *OcservService) DeleteOcservUser(ctx context.Context, principal auth.Pri
 func (s *OcservService) UpdateOcservUserPassword(ctx context.Context, principal auth.Principal, username, newPassword string) error {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.update_password"); err != nil {
 		return err
+	}
+	if err := ocserv.ValidateUsername(username); err != nil {
+		return fmt.Errorf("invalid username: %w", err)
+	}
+	if err := ocserv.ValidatePassword(newPassword); err != nil {
+		return fmt.Errorf("invalid password: %w", err)
 	}
 	actorID := principal.ID
 	if err := s.users.UpdatePassword(ctx, username, newPassword); err != nil {
