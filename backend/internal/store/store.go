@@ -301,67 +301,18 @@ func (s *Store) SetSetting(ctx context.Context, key string, value string) error 
 	return nil
 }
 
-// PurgeHistoricalBefore deletes only historical sessions disconnected before cutoff.
+// PurgeHistoricalBefore deletes historical sessions disconnected before cutoff.
 func (s *Store) PurgeHistoricalBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	cutoffStr := cutoff.UTC().Format(time.RFC3339)
+	result, err := s.DB.ExecContext(ctx,
+		`DELETE FROM historical_sessions WHERE disconnected_at < ?`, cutoffStr)
 	if err != nil {
-		return 0, fmt.Errorf("begin purge historical sessions transaction: %w", err)
+		return 0, fmt.Errorf("purge historical sessions: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	rows, err := tx.QueryContext(ctx, `SELECT id, disconnected_at FROM historical_sessions`)
+	deleted, err := result.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("query historical sessions for purge: %w", err)
+		return 0, fmt.Errorf("read purged historical session count: %w", err)
 	}
-
-	cutoff = cutoff.UTC()
-	ids := make([]int64, 0)
-	for rows.Next() {
-		var id int64
-		var disconnectedAt string
-		if err := rows.Scan(&id, &disconnectedAt); err != nil {
-			_ = rows.Close()
-			return 0, fmt.Errorf("scan historical session for purge: %w", err)
-		}
-		parsedDisconnectedAt, err := parseTime(disconnectedAt)
-		if err != nil {
-			_ = rows.Close()
-			return 0, fmt.Errorf("parse purge disconnected_at: %w", err)
-		}
-		if parsedDisconnectedAt.UTC().Before(cutoff) {
-			ids = append(ids, id)
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return 0, fmt.Errorf("close historical sessions purge rows: %w", err)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate historical sessions for purge: %w", err)
-	}
-
-	var deleted int64
-	for _, id := range ids {
-		result, err := tx.ExecContext(ctx, `DELETE FROM historical_sessions WHERE id = ?`, id)
-		if err != nil {
-			return 0, fmt.Errorf("delete historical session: %w", err)
-		}
-		deletedForID, err := result.RowsAffected()
-		if err != nil {
-			return 0, fmt.Errorf("read purged historical session count: %w", err)
-		}
-		deleted += deletedForID
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit purge historical sessions transaction: %w", err)
-	}
-	committed = true
-
 	return deleted, nil
 }
 

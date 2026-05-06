@@ -299,20 +299,28 @@ func TestStoreRecordAuditRedactsSensitiveMetadata(t *testing.T) {
 	}
 }
 
-func TestStorePurgeHistoricalComparesParsedTimestamps(t *testing.T) {
+func TestStorePurgeHistoricalRespectsCutoffBoundary(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 
 	cutoff := time.Date(2025, 12, 31, 12, 0, 0, 0, time.UTC)
+	// exactly at cutoff — must NOT be deleted (WHERE disconnected_at < cutoff, not <=)
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO historical_sessions (username, connected_at, disconnected_at, bytes_in, bytes_out, duration_seconds, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		"mixed-format-newer", "2025-12-31 12:30:00", "2025-12-31 12:30:00", 1, 1, 60, "ingested", "2025-12-31T12:30:00Z")
+		"at-cutoff", "2025-12-31T12:00:00Z", "2025-12-31T12:00:00Z", 1, 1, 60, "ingested", "2025-12-31T12:00:00Z")
 	if err != nil {
-		t.Fatalf("insert newer mixed-format historical session: %v", err)
+		t.Fatalf("insert at-cutoff historical session: %v", err)
 	}
+	// one second before cutoff — must be deleted
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO historical_sessions (username, connected_at, disconnected_at, bytes_in, bytes_out, duration_seconds, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		"mixed-format-older", "2025-12-31 11:30:00", "2025-12-31 11:30:00", 1, 1, 60, "ingested", "2025-12-31T11:30:00Z")
+		"before-cutoff", "2025-12-31T11:59:59Z", "2025-12-31T11:59:59Z", 1, 1, 60, "ingested", "2025-12-31T11:59:59Z")
 	if err != nil {
-		t.Fatalf("insert older mixed-format historical session: %v", err)
+		t.Fatalf("insert before-cutoff historical session: %v", err)
+	}
+	// one second after cutoff — must NOT be deleted
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO historical_sessions (username, connected_at, disconnected_at, bytes_in, bytes_out, duration_seconds, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"after-cutoff", "2025-12-31T12:00:01Z", "2025-12-31T12:00:01Z", 1, 1, 60, "ingested", "2025-12-31T12:00:01Z")
+	if err != nil {
+		t.Fatalf("insert after-cutoff historical session: %v", err)
 	}
 
 	deleted, err := s.PurgeHistoricalBefore(ctx, cutoff)
@@ -323,15 +331,18 @@ func TestStorePurgeHistoricalComparesParsedTimestamps(t *testing.T) {
 		t.Fatalf("deleted = %d, want 1", deleted)
 	}
 
-	var newerCount, olderCount int64
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM historical_sessions WHERE username = ?`, "mixed-format-newer").Scan(&newerCount); err != nil {
-		t.Fatalf("count newer row: %v", err)
+	var atCount, beforeCount, afterCount int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM historical_sessions WHERE username = ?`, "at-cutoff").Scan(&atCount); err != nil {
+		t.Fatalf("count at-cutoff row: %v", err)
 	}
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM historical_sessions WHERE username = ?`, "mixed-format-older").Scan(&olderCount); err != nil {
-		t.Fatalf("count older row: %v", err)
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM historical_sessions WHERE username = ?`, "before-cutoff").Scan(&beforeCount); err != nil {
+		t.Fatalf("count before-cutoff row: %v", err)
 	}
-	if newerCount != 1 || olderCount != 0 {
-		t.Fatalf("newer count = %d, older count = %d, want 1 and 0", newerCount, olderCount)
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM historical_sessions WHERE username = ?`, "after-cutoff").Scan(&afterCount); err != nil {
+		t.Fatalf("count after-cutoff row: %v", err)
+	}
+	if atCount != 1 || beforeCount != 0 || afterCount != 1 {
+		t.Fatalf("at-cutoff=%d before-cutoff=%d after-cutoff=%d, want 1/0/1", atCount, beforeCount, afterCount)
 	}
 }
 
