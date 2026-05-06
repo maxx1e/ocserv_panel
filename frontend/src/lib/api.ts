@@ -122,7 +122,22 @@ export type MonitoringOverview = {
 
 export type MonitoringWindow = '15m' | '1h' | '6h' | '24h' | '7d' | '30d';
 
-export type MonitoringStep = '15s' | '60s' | '5m' | '1h';
+export type AdminUser = {
+  id: number;
+  username: string;
+  displayName: string;
+  email: string;
+  roles: string[];
+  disabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type VpnUser = {
+  username: string;
+  group: string;
+  active: boolean;
+};
 
 export class ApiError extends Error {
   status: number;
@@ -261,22 +276,9 @@ export function getHistoryAnalytics(): Promise<HistoryAnalytics> {
   return apiFetch<HistoryAnalytics>('/api/history/analytics');
 }
 
-export function getMonitoringCatalog(): Promise<MonitoringCatalog> {
-  return apiFetch<MonitoringCatalog>('/api/monitoring/catalog');
-}
-
 export function getMonitoringOverview(window: MonitoringWindow): Promise<MonitoringOverview> {
   const query = new URLSearchParams({ window });
   return apiFetch<MonitoringOverview>(`/api/monitoring/overview?${query.toString()}`);
-}
-
-export function getMonitoringSeries(
-  metric: string,
-  window: MonitoringWindow,
-  step: MonitoringStep
-): Promise<MonitoringSeries> {
-  const query = new URLSearchParams({ metric, window, step });
-  return apiFetch<MonitoringSeries>(`/api/monitoring/series?${query.toString()}`);
 }
 
 export function purgeHistory(retentionDays: 30 | 90 | 180 | 365, confirmation: 'PURGE'): Promise<void> {
@@ -329,10 +331,14 @@ export type SettingsSection = {
   settings: SettingDef[];
 };
 
+export type ConfigStatus = 'ok' | 'parse_error' | 'permission_error' | 'file_missing' | 'read_error';
+
 export type SettingsSectionsResponse = {
   sections: SettingsSection[];
   restart_required: boolean;
   pending_changes: string[];
+  config_status: ConfigStatus;
+  config_error?: string;
 };
 
 export type RestartStatus = {
@@ -358,22 +364,6 @@ export function getRestartStatus(): Promise<RestartStatus> {
 export function triggerRestart(): Promise<{ ok: boolean; message?: string }> {
   return apiFetch<{ ok: boolean; message?: string }>('/api/settings/restart', { method: 'POST' });
 }
-
-export type OcservReadiness = {
-  binaryPresent: boolean;
-  binaryVersion: string;
-  configPresent: boolean;
-  configValid: boolean;
-  serviceRunning: boolean;
-  socketPresent: boolean;
-  occtlPresent: boolean;
-  ocpasswdPresent: boolean;
-};
-
-export type OcservServiceStatus = {
-  status: 'active' | 'inactive' | 'failed' | 'not_found';
-  message: string;
-};
 
 export type OcservSession = {
   id: string;
@@ -404,21 +394,6 @@ export type OcservSessionDetail = {
   routes: string[];
   dns: string[];
   reconnectCount: number;
-};
-
-export type OcservUser = {
-  username: string;
-  group: string;
-  active: boolean;
-};
-
-export type OcservConfigIssueSeverity = 'error' | 'warning' | 'info';
-
-export type OcservConfigIssue = {
-  severity: OcservConfigIssueSeverity;
-  key: string;
-  message: string;
-  suggestion: string;
 };
 
 export type OcservStatus = {
@@ -484,26 +459,6 @@ export type LogTailResult = {
   error?: string;
 };
 
-export function getOcservReadiness(): Promise<OcservReadiness> {
-  return apiFetch<OcservReadiness>('/api/ocserv/readiness');
-}
-
-export function getOcservServiceStatus(): Promise<OcservServiceStatus> {
-  return apiFetch<OcservServiceStatus>('/api/ocserv/service/status');
-}
-
-export function startOcservService(): Promise<void> {
-  return apiFetch<void>('/api/ocserv/service/start', { method: 'POST' });
-}
-
-export function stopOcservService(): Promise<void> {
-  return apiFetch<void>('/api/ocserv/service/stop', { method: 'POST' });
-}
-
-export function restartOcservService(): Promise<void> {
-  return apiFetch<void>('/api/ocserv/service/restart', { method: 'POST' });
-}
-
 export function getOcservSessions(): Promise<OcservSession[]> {
   return apiFetch<OcservSession[]>('/api/ocserv/sessions');
 }
@@ -524,34 +479,6 @@ export function terminateOcservSession(sessionId: string): Promise<void> {
     method: 'POST',
     body: { sessionId }
   });
-}
-
-export function getOcservUsers(): Promise<OcservUser[]> {
-  return apiFetch<OcservUser[]>('/api/ocserv/users');
-}
-
-export function createOcservUser(username: string, password: string): Promise<void> {
-  return apiFetch<void>('/api/ocserv/users/create', {
-    method: 'POST',
-    body: { username, password }
-  });
-}
-
-export function deleteOcservUser(username: string): Promise<void> {
-  return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}`, {
-    method: 'DELETE'
-  });
-}
-
-export function updateOcservUserPassword(username: string, password: string): Promise<void> {
-  return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}/password`, {
-    method: 'PUT',
-    body: { password }
-  });
-}
-
-export function getOcservConfigIssues(): Promise<OcservConfigIssue[]> {
-  return apiFetch<OcservConfigIssue[]>('/api/ocserv/config/issues');
 }
 
 export function getSystemHealth(): Promise<SystemHealth> {
@@ -682,6 +609,64 @@ export function rollbackConfig(n: number): Promise<ConfigRollbackResult> {
 export function getNetworkPrerequisites(): Promise<NetworkPrerequisites> {
   return apiFetch<NetworkPrerequisites>('/api/config/network');
 }
+
+// ─── Admin User Management ─────────────────────────────────────────────────
+
+export function getAdminUsers(): Promise<{ users: AdminUser[] }> {
+  return apiFetch<{ users: AdminUser[] }>('/api/admin/users');
+}
+
+export function createAdminUser(body: { username: string; password: string; displayName?: string; email?: string; role?: string }): Promise<AdminUser> {
+  return apiFetch<AdminUser>('/api/admin/users', { method: 'POST', body });
+}
+
+export function updateAdminUser(id: number, body: { displayName?: string; email?: string; role?: string }): Promise<void> {
+  return apiFetch<void>(`/api/admin/users/${id}`, { method: 'PUT', body });
+}
+
+export function deleteAdminUser(id: number): Promise<void> {
+  return apiFetch<void>(`/api/admin/users/${id}`, { method: 'DELETE' });
+}
+
+export function disableAdminUser(id: number): Promise<void> {
+  return apiFetch<void>(`/api/admin/users/${id}/disable`, { method: 'POST' });
+}
+
+export function enableAdminUser(id: number): Promise<void> {
+  return apiFetch<void>(`/api/admin/users/${id}/enable`, { method: 'POST' });
+}
+
+export function resetAdminPassword(id: number, password: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/users/${id}/reset-password`, { method: 'POST', body: { password } });
+}
+
+// ─── VPN User Management ───────────────────────────────────────────────────
+
+export function getVpnUsers(): Promise<VpnUser[]> {
+  return apiFetch<VpnUser[]>('/api/ocserv/users');
+}
+
+export function createVpnUser(username: string, password: string): Promise<void> {
+  return apiFetch<void>('/api/ocserv/users/create', { method: 'POST', body: { username, password } });
+}
+
+export function deleteVpnUser(username: string): Promise<void> {
+  return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+}
+
+export function resetVpnPassword(username: string, password: string): Promise<void> {
+  return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}/password`, { method: 'PUT', body: { password } });
+}
+
+export function lockVpnUser(username: string): Promise<void> {
+  return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}/lock`, { method: 'POST' });
+}
+
+export function unlockVpnUser(username: string): Promise<void> {
+  return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}/unlock`, { method: 'POST' });
+}
+
+// ─── Utility Functions ─────────────────────────────────────────────────────
 
 export function principalFromAuth(auth: AuthSummary | null): Principal | null {
   if (!auth) return null;
