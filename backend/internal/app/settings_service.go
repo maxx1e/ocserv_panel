@@ -24,12 +24,6 @@ var (
 	ErrConfigFileMissing     = errors.New("config file missing")
 )
 
-// Setting represents a single application setting key-value pair.
-type Setting struct {
-	Key   string
-	Value string
-}
-
 // SettingsService manages application settings stored in app_settings.
 type SettingsService struct {
 	config        *config.Config
@@ -70,24 +64,6 @@ func NewSettingsService(
 	}
 }
 
-// GetRetentionDays returns the configured history retention in days, defaulting
-// to 365 when no setting is stored or the stored value cannot be parsed.
-// This method does not require authentication.
-func (s *SettingsService) GetRetentionDays(ctx context.Context) int {
-	value, err := s.settingsStore.GetSetting(ctx, "history.retention_days")
-	if err != nil || value == "" {
-		return 365
-	}
-	days, err := strconv.Atoi(value)
-	if err != nil {
-		return 365
-	}
-	if days <= 0 {
-		return 365
-	}
-	return days
-}
-
 // SetRetentionDays sets the history retention window with validation and audit.
 func (s *SettingsService) SetRetentionDays(ctx context.Context, principal auth.Principal, days int) error {
 	if !principal.Authenticated() {
@@ -113,52 +89,6 @@ func (s *SettingsService) SetRetentionDays(ctx context.Context, principal auth.P
 		return fmt.Errorf("audit retention setting: %w", err)
 	}
 	return nil
-}
-
-// knownSettingKeys enumerates application settings exposed via GetAll.
-var knownSettingKeys = []string{
-	"history.retention_days",
-}
-
-// GetAll returns all known application settings visible to the principal.
-func (s *SettingsService) GetAll(ctx context.Context, principal auth.Principal) ([]Setting, error) {
-	if !principal.Authenticated() {
-		_ = s.record(ctx, nil, "settings.get_all", "setting", "", audit.OutcomeDenied, "settings get_all authentication required", nil)
-		return nil, ErrUnauthenticated
-	}
-	actorID := principal.ID
-	if !s.authorizer.Allowed(principalRoles(principal), rbac.PermissionReadDashboard) {
-		_ = s.record(ctx, &actorID, "settings.get_all", "setting", "", audit.OutcomeDenied, "settings get_all permission denied", nil)
-		return nil, ErrPermissionDenied
-	}
-
-	settings := make([]Setting, 0, len(knownSettingKeys))
-	for _, key := range knownSettingKeys {
-		value, err := s.settingsStore.GetSetting(ctx, key)
-		if err != nil {
-			_ = s.record(ctx, &actorID, "settings.get_all", "setting", key, audit.OutcomeFailure, "settings get_all read failed", nil)
-			return nil, fmt.Errorf("get setting %q: %w", key, err)
-		}
-		if value == "" {
-			value = defaultForSetting(key)
-		}
-		settings = append(settings, Setting{Key: key, Value: value})
-	}
-
-	if err := s.record(ctx, &actorID, "settings.get_all", "setting", "", audit.OutcomeSuccess, "settings get_all loaded", nil); err != nil {
-		return nil, fmt.Errorf("audit settings get_all: %w", err)
-	}
-	return settings, nil
-}
-
-// defaultForSetting returns the default value for a known setting key.
-func defaultForSetting(key string) string {
-	switch key {
-	case "history.retention_days":
-		return "365"
-	default:
-		return ""
-	}
 }
 
 // SettingsSection represents a group of related settings.

@@ -12,29 +12,7 @@ import (
 	"ocserv_panel/backend/internal/rbac"
 )
 
-func TestSettingsServiceGetRetentionDaysDefault(t *testing.T) {
-	ctx := context.Background()
-	s, recorder := newTestServices(t)
-	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
-
-	days := service.GetRetentionDays(ctx)
-
-	if days != 365 {
-		t.Fatalf("GetRetentionDays = %d, want 365 as default", days)
-	}
-
-	// Empty store produces no setting, so default applies.
-	value, err := s.GetSetting(ctx, "history.retention_days")
-	if err != nil {
-		t.Fatalf("store GetSetting: %v", err)
-	}
-	if value != "" {
-		t.Fatalf("store setting = %q, want empty", value)
-	}
-}
-
-func TestSettingsServiceSetAndGetRetentionDays(t *testing.T) {
+func TestSettingsServiceSetRetentionDaysPersists(t *testing.T) {
 	ctx := context.Background()
 	s, recorder := newTestServices(t)
 	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
@@ -44,12 +22,6 @@ func TestSettingsServiceSetAndGetRetentionDays(t *testing.T) {
 	// Set to 180.
 	if err := service.SetRetentionDays(ctx, owner, 180); err != nil {
 		t.Fatalf("SetRetentionDays(180): %v", err)
-	}
-
-	// Read back via GetRetentionDays.
-	days := service.GetRetentionDays(ctx)
-	if days != 180 {
-		t.Fatalf("GetRetentionDays = %d, want 180", days)
 	}
 
 	// Verify the raw store value.
@@ -147,59 +119,3 @@ func TestSettingsServiceSetRetentionDaysRequiresOwner(t *testing.T) {
 	}
 }
 
-func TestSettingsServiceGetAllSettings(t *testing.T) {
-	ctx := context.Background()
-	s, recorder := newTestServices(t)
-	owner := createAdminWithRole(t, ctx, s, "owner", rbac.RoleOwner)
-	cfg := config.Defaults()
-	service := NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
-
-	// Initially empty.
-	settings, err := service.GetAll(ctx, owner)
-	if err != nil {
-		t.Fatalf("GetAll: %v", err)
-	}
-	// "history.retention_days" should be present (with default value parsed).
-	if len(settings) == 0 {
-		t.Fatal("GetAll returned empty settings, want at least history.retention_days")
-	}
-	found := false
-	for _, setting := range settings {
-		if setting.Key == "history.retention_days" {
-			found = true
-			if setting.Value != "365" {
-				t.Fatalf("history.retention_days = %q, want %q", setting.Value, "365")
-			}
-		}
-	}
-	if !found {
-		t.Fatal("GetAll missing history.retention_days setting")
-	}
-
-	// After setting a value, GetAll should reflect it.
-	if err := service.SetRetentionDays(ctx, owner, 180); err != nil {
-		t.Fatalf("SetRetentionDays(180): %v", err)
-	}
-
-	settings, err = service.GetAll(ctx, owner)
-	if err != nil {
-		t.Fatalf("GetAll after set: %v", err)
-	}
-	found = false
-	for _, setting := range settings {
-		if setting.Key == "history.retention_days" {
-			found = true
-			if setting.Value != "180" {
-				t.Fatalf("history.retention_days = %q, want %q", setting.Value, "180")
-			}
-		}
-	}
-	if !found {
-		t.Fatal("GetAll missing history.retention_days after set")
-	}
-
-	// Verify audit for GetAll.
-	events := mustRecentAuditEvents(t, s, 3) // 2 get_all + 1 set_retention
-	assertAuditOutcome(t, events, "settings.set_retention", string(audit.OutcomeSuccess))
-	assertAuditOutcome(t, events, "settings.get_all", string(audit.OutcomeSuccess))
-}
