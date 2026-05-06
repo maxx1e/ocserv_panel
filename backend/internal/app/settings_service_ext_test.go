@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -240,7 +241,7 @@ func TestSettingsServiceUpdateSettingConfigSourceWritesToTOML(t *testing.T) {
 	svc := newSettingsSvcWithPath(t, cfgPath)
 	principal := ownerPrincipal()
 
-	_, err := svc.UpdateSetting(context.Background(), principal, "installation.ocserv_bin_path", "/custom/ocserv")
+	_, err := svc.UpdateSetting(context.Background(), principal, "installation.ocserv_bin_path", "/usr/sbin/ocserv")
 	if err != nil {
 		t.Fatalf("UpdateSetting: %v", err)
 	}
@@ -250,8 +251,8 @@ func TestSettingsServiceUpdateSettingConfigSourceWritesToTOML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Installation.OcservBinPath != "/custom/ocserv" {
-		t.Errorf("TOML OcservBinPath = %q, want /custom/ocserv", updated.Installation.OcservBinPath)
+	if updated.Installation.OcservBinPath != "/usr/sbin/ocserv" {
+		t.Errorf("TOML OcservBinPath = %q, want /usr/sbin/ocserv", updated.Installation.OcservBinPath)
 	}
 }
 
@@ -352,7 +353,7 @@ func TestSettingsServiceGetAllSectionsRestartRequired(t *testing.T) {
 	}
 
 	// Update a config-source setting.
-	if _, err := svc.UpdateSetting(context.Background(), principal, "installation.ocserv_bin_path", "/new/ocserv"); err != nil {
+	if _, err := svc.UpdateSetting(context.Background(), principal, "installation.ocserv_bin_path", "/usr/sbin/ocserv"); err != nil {
 		t.Fatalf("UpdateSetting: %v", err)
 	}
 
@@ -429,5 +430,208 @@ func TestSettingsServiceRestartStatusMethod(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected web.port in pending, got %v", pending)
+	}
+}
+
+func TestSettingsServiceGetAllSectionsConfigStatusOK(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	defaults := config.Defaults()
+	if err := config.Save(defaults, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	resp, err := svc.GetAllSections(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("GetAllSections: %v", err)
+	}
+	if resp.ConfigStatus != "ok" {
+		t.Errorf("config_status = %q, want %q", resp.ConfigStatus, "ok")
+	}
+	if resp.ConfigError != "" {
+		t.Errorf("config_error = %q, want empty", resp.ConfigError)
+	}
+}
+
+func TestSettingsServiceGetAllSectionsConfigStatusFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "nonexistent.toml")
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	resp, err := svc.GetAllSections(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("GetAllSections: %v", err)
+	}
+	// config.Load returns defaults for missing files, so status stays ok.
+	// Only LoadStrict errors on missing files.
+	if resp.ConfigStatus != "ok" {
+		t.Errorf("config_status = %q, want %q (Load returns defaults for missing files)", resp.ConfigStatus, "ok")
+	}
+}
+
+func TestSettingsServiceGetAllSectionsConfigStatusParseError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bad.toml")
+	if err := os.WriteFile(cfgPath, []byte("this is not valid {{{{ TOML"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	resp, err := svc.GetAllSections(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("GetAllSections should not return error on parse failure, got: %v", err)
+	}
+	if resp.ConfigStatus != "parse_error" {
+		t.Errorf("config_status = %q, want %q", resp.ConfigStatus, "parse_error")
+	}
+	if resp.ConfigError == "" {
+		t.Error("config_error should be populated for parse errors")
+	}
+	// Should still return sections (from startup snapshot).
+	if len(resp.Sections) == 0 {
+		t.Error("expected sections from startup snapshot even with parse error")
+	}
+}
+
+func TestSettingsServiceGetAllSectionsConfigStatusPermissionError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test when running as root")
+	}
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "noperm.toml")
+	defaults := config.Defaults()
+	if err := config.Save(defaults, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	// Remove read permission.
+	if err := os.Chmod(cfgPath, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(cfgPath, 0644) })
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	resp, err := svc.GetAllSections(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("GetAllSections should not return error on permission failure, got: %v", err)
+	}
+	if resp.ConfigStatus != "permission_error" {
+		t.Errorf("config_status = %q, want %q", resp.ConfigStatus, "permission_error")
+	}
+	if resp.ConfigError == "" {
+		t.Error("config_error should be populated for permission errors")
+	}
+}
+
+func TestSettingsServiceUpdateSettingConfigFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "nonexistent.toml")
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	_, err := svc.UpdateSetting(context.Background(), principal, "installation.ocserv_bin_path", "/usr/sbin/ocserv")
+	if err == nil {
+		t.Fatal("expected error for UpdateSetting with missing config file")
+	}
+	if !errors.Is(err, ErrConfigFileMissing) {
+		t.Errorf("err = %v, want ErrConfigFileMissing in chain", err)
+	}
+}
+
+func TestSettingsServiceUpdateSettingConfigParseError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bad.toml")
+	if err := os.WriteFile(cfgPath, []byte("this is not valid {{{{ TOML"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	_, err := svc.UpdateSetting(context.Background(), principal, "installation.ocserv_bin_path", "/usr/sbin/ocserv")
+	if err == nil {
+		t.Fatal("expected error for UpdateSetting with unparseable config file")
+	}
+	if !errors.Is(err, ErrConfigFileParseFailed) {
+		t.Errorf("err = %v, want ErrConfigFileParseFailed in chain", err)
+	}
+}
+
+func TestSettingsServiceUpdateSettingConfigPermissionError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test when running as root")
+	}
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "noperm.toml")
+	defaults := config.Defaults()
+	if err := config.Save(defaults, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	// Remove read permission.
+	if err := os.Chmod(cfgPath, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(cfgPath, 0644) })
+
+	svc := newSettingsSvcWithPath(t, cfgPath)
+	principal := ownerPrincipal()
+
+	_, err := svc.UpdateSetting(context.Background(), principal, "installation.ocserv_bin_path", "/usr/sbin/ocserv")
+	if err == nil {
+		t.Fatal("expected error for UpdateSetting with unreadable config file")
+	}
+	if !errors.Is(err, ErrConfigFileUnreadable) {
+		t.Errorf("err = %v, want ErrConfigFileUnreadable in chain", err)
+	}
+}
+
+func TestClassifyConfigError(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		expect string
+	}{
+		{"not exist", os.ErrNotExist, "file_missing"},
+		{"permission", os.ErrPermission, "permission_error"},
+		{"parse error", errors.New("parse config file /etc/foo.toml: unexpected character"), "parse_error"},
+		{"generic read error", errors.New("read config file: i/o timeout"), "read_error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyConfigError(tt.err)
+			if got != tt.expect {
+				t.Errorf("classifyConfigError(%v) = %q, want %q", tt.err, got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestWrapConfigLoadError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		sentinel error
+	}{
+		{"not exist", os.ErrNotExist, ErrConfigFileMissing},
+		{"permission", os.ErrPermission, ErrConfigFileUnreadable},
+		{"parse error", errors.New("parse config file: bad token"), ErrConfigFileParseFailed},
+		{"other error", errors.New("read config file: i/o timeout"), ErrConfigFileUnreadable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wrapped := wrapConfigLoadError(tt.err)
+			if !errors.Is(wrapped, tt.sentinel) {
+				t.Errorf("wrapConfigLoadError(%v) does not wrap %v", tt.err, tt.sentinel)
+			}
+		})
 	}
 }

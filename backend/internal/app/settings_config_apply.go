@@ -2,8 +2,11 @@ package app
 
 import (
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"ocserv_panel/backend/internal/config"
 )
@@ -287,4 +290,73 @@ func parseBool(s string) (bool, error) {
 	default:
 		return false, fmt.Errorf("must be true or false, got %q", s)
 	}
+}
+
+// allowedBinDirs restricts binary path settings to system directories.
+var allowedBinDirs = []string{
+	"/usr/bin",
+	"/usr/local/bin",
+	"/usr/sbin",
+	"/usr/local/sbin",
+}
+
+// allowedLogDirs restricts log path settings to safe directories.
+var allowedLogDirs = []string{
+	"/var/log",
+	"/opt/ocserv_panel",
+}
+
+// systemdUnitPattern only allows unit names starting with "ocserv".
+var systemdUnitPattern = regexp.MustCompile(`^ocserv[a-zA-Z0-9._-]*$`)
+
+// validateSettingValueSecurity performs security validation for sensitive settings.
+// It enforces allow-lists for binary paths, systemd unit names, and log paths
+// to prevent arbitrary code execution and arbitrary file reads.
+func validateSettingValueSecurity(key, value string) error {
+	switch key {
+	case "installation.ocserv_bin_path", "installation.occtl_bin_path", "installation.ocpasswd_bin_path":
+		return validateBinaryPath(value)
+	case "service.systemd_unit_name":
+		return validateSystemdUnitName(value)
+	case "installation.ocserv_log_path", "installation.panel_log_path":
+		return validateLogPath(value)
+	}
+	return nil
+}
+
+func validateBinaryPath(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("%w: binary path must be absolute", ErrInvalidInput)
+	}
+	cleaned := filepath.Clean(path)
+	dir := filepath.Dir(cleaned)
+	for _, allowed := range allowedBinDirs {
+		if dir == allowed {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: binary path must be in /usr/bin, /usr/local/bin, /usr/sbin, or /usr/local/sbin", ErrInvalidInput)
+}
+
+func validateSystemdUnitName(name string) error {
+	if name == "" {
+		return fmt.Errorf("%w: systemd unit name must not be empty", ErrInvalidInput)
+	}
+	if !systemdUnitPattern.MatchString(name) {
+		return fmt.Errorf("%w: systemd unit name must start with 'ocserv' and contain only [a-zA-Z0-9._-]", ErrInvalidInput)
+	}
+	return nil
+}
+
+func validateLogPath(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("%w: log path must be absolute", ErrInvalidInput)
+	}
+	cleaned := filepath.Clean(path)
+	for _, allowed := range allowedLogDirs {
+		if strings.HasPrefix(cleaned, allowed+"/") || cleaned == allowed {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: log path must be within /var/log or /opt/ocserv_panel", ErrInvalidInput)
 }

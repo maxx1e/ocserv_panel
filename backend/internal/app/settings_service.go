@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +15,13 @@ import (
 	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
+)
+
+// Config file error sentinels for use in HTTP error mapping.
+var (
+	ErrConfigFileUnreadable  = errors.New("config file unreadable")
+	ErrConfigFileParseFailed = errors.New("config file has syntax errors")
+	ErrConfigFileMissing     = errors.New("config file missing")
 )
 
 // Setting represents a single application setting key-value pair.
@@ -168,6 +177,8 @@ type SettingsSectionsResponse struct {
 	Sections        []SettingsSection `json:"sections"`
 	RestartRequired bool              `json:"restart_required"`
 	PendingChanges  []string          `json:"pending_changes"`
+	ConfigStatus    string            `json:"config_status"`
+	ConfigError     string            `json:"config_error,omitempty"`
 }
 
 // GetAllSections returns all settings grouped by section with current values.
@@ -184,11 +195,15 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 
 	// Load live TOML config; fall back to startup snapshot on error.
 	liveCfg := s.startupCfg
+	configStatus := "ok"
+	var configError string
 	if s.configPath != "" {
 		if loaded, err := config.Load(s.configPath); err == nil {
 			liveCfg = loaded
 		} else {
 			slog.Warn("settings: failed to load TOML config for GetAllSections, using startup snapshot", "path", s.configPath, "error", err)
+			configStatus = classifyConfigError(err)
+			configError = err.Error()
 		}
 	}
 
@@ -269,6 +284,8 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 		Sections:        sections,
 		RestartRequired: len(pendingKeys) > 0,
 		PendingChanges:  pendingKeys,
+		ConfigStatus:    configStatus,
+		ConfigError:     configError,
 	}, nil
 }
 
@@ -296,6 +313,12 @@ func (s *SettingsService) UpdateSetting(ctx context.Context, principal auth.Prin
 		return SettingDef{}, err
 	}
 
+	// Security validation: enforce allow-lists for sensitive keys.
+	if err := validateSettingValueSecurity(key, value); err != nil {
+		_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeDenied, "settings update security validation failed", map[string]string{"value": auditValue(def, value), "error": err.Error()})
+		return SettingDef{}, err
+	}
+
 	oldValue, _ := s.settingsStore.GetSetting(ctx, key)
 	if oldValue == "" {
 		oldValue = def.Default
@@ -308,10 +331,10 @@ func (s *SettingsService) UpdateSetting(ctx context.Context, principal auth.Prin
 			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update config path not set", map[string]string{"value": auditValue(def, value)})
 			return SettingDef{}, fmt.Errorf("update setting %q: config path is not configured", key)
 		}
-		current, err := config.Load(s.configPath)
+		current, err := config.LoadStrict(s.configPath)
 		if err != nil {
 			_ = s.record(ctx, &actorID, "settings.update", "setting", key, audit.OutcomeFailure, "settings update load config failed", map[string]string{"value": auditValue(def, value)})
-			return SettingDef{}, fmt.Errorf("update setting %q: load config: %w", key, err)
+			return SettingDef{}, fmt.Errorf("update setting %q: %w", key, wrapConfigLoadError(err))
 		}
 		// For config-source settings, get the real prior value from the TOML, not SQLite.
 		oldValue = configValueForKey(current, key)
@@ -447,4 +470,34 @@ func (s *SettingsService) RestartStatus(ctx context.Context, principal auth.Prin
 		"pending_count":    strconv.Itoa(len(pending)),
 	})
 	return restartRequired, pending, nil
+}
+
+// classifyConfigError inspects a config loading error and returns a status
+// string suitable for the config_status response field.
+func classifyConfigError(err error) string {
+	if errors.Is(err, os.ErrNotExist) {
+		return "file_missing"
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return "permission_error"
+	}
+	if strings.Contains(err.Error(), "parse") {
+		return "parse_error"
+	}
+	return "read_error"
+}
+
+// wrapConfigLoadError wraps a raw config load error with the appropriate
+// sentinel so HTTP handlers can map it to a specific status code.
+func wrapConfigLoadError(err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: %s", ErrConfigFileMissing, err.Error())
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("%w: %s", ErrConfigFileUnreadable, err.Error())
+	}
+	if strings.Contains(err.Error(), "parse") {
+		return fmt.Errorf("%w: %s", ErrConfigFileParseFailed, err.Error())
+	}
+	return fmt.Errorf("%w: %s", ErrConfigFileUnreadable, err.Error())
 }

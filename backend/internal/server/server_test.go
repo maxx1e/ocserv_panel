@@ -1058,7 +1058,7 @@ func TestHandleRestartStatusAfterConfigUpdate(t *testing.T) {
 		h.router,
 		http.MethodPut,
 		"/api/settings/installation.ocserv_bin_path",
-		map[string]string{"value": "/new/ocserv"},
+		map[string]string{"value": "/usr/sbin/ocserv"},
 		token,
 	)
 	assertStatus(t, updateRec, http.StatusOK)

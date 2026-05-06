@@ -208,3 +208,76 @@ func TestApplySettingToConfigEmptyStringField(t *testing.T) {
 		t.Errorf("expected empty app name, got %q", cfg.General.AppName)
 	}
 }
+
+func TestValidateSettingValueSecurity_BinaryPathAllowList(t *testing.T) {
+	binPathKeys := []string{
+		"installation.ocserv_bin_path",
+		"installation.occtl_bin_path",
+		"installation.ocpasswd_bin_path",
+	}
+	allowedPaths := []string{
+		"/usr/bin/ocserv",
+		"/usr/local/bin/occtl",
+		"/usr/sbin/ocserv",
+		"/usr/local/sbin/ocserv",
+	}
+	blockedPaths := []string{
+		"/tmp/evil",
+		"../relative",
+		"ocserv",
+		"/home/user/bin/ocserv",
+		"/var/tmp/hack",
+	}
+	for _, key := range binPathKeys {
+		for _, path := range allowedPaths {
+			if err := validateSettingValueSecurity(key, path); err != nil {
+				t.Errorf("validateSettingValueSecurity(%q, %q) = %v, want nil", key, path, err)
+			}
+		}
+		for _, path := range blockedPaths {
+			if err := validateSettingValueSecurity(key, path); err == nil {
+				t.Errorf("validateSettingValueSecurity(%q, %q) = nil, want error", key, path)
+			}
+		}
+	}
+}
+
+func TestValidateSettingValueSecurity_SystemdUnitName(t *testing.T) {
+	allowed := []string{"ocserv", "ocserv.service", "ocserv-vpn", "ocserv_custom"}
+	for _, name := range allowed {
+		if err := validateSettingValueSecurity("service.systemd_unit_name", name); err != nil {
+			t.Errorf("validateSettingValueSecurity(unit, %q) = %v, want nil", name, err)
+		}
+	}
+	blocked := []string{"sshd", "nginx", "ssh.service", "", "ocserv; rm -rf /"}
+	for _, name := range blocked {
+		if err := validateSettingValueSecurity("service.systemd_unit_name", name); err == nil {
+			t.Errorf("validateSettingValueSecurity(unit, %q) = nil, want error", name)
+		}
+	}
+}
+
+func TestValidateSettingValueSecurity_LogPath(t *testing.T) {
+	allowed := []string{"/var/log/ocserv.log", "/var/log/ocserv-panel/app.log", "/opt/ocserv_panel/panel.log"}
+	for _, p := range allowed {
+		if err := validateSettingValueSecurity("installation.ocserv_log_path", p); err != nil {
+			t.Errorf("validateSettingValueSecurity(log, %q) = %v, want nil", p, err)
+		}
+	}
+	blocked := []string{"/etc/shadow", "/etc/passwd", "../../../etc/shadow", "relative.log"}
+	for _, p := range blocked {
+		if err := validateSettingValueSecurity("installation.ocserv_log_path", p); err == nil {
+			t.Errorf("validateSettingValueSecurity(log, %q) = nil, want error", p)
+		}
+	}
+}
+
+func TestValidateSettingValueSecurity_NonSensitiveKeysPassThrough(t *testing.T) {
+	// Non-sensitive keys should always return nil
+	if err := validateSettingValueSecurity("general.app_name", "anything"); err != nil {
+		t.Errorf("non-sensitive key should pass, got %v", err)
+	}
+	if err := validateSettingValueSecurity("web.port", "8080"); err != nil {
+		t.Errorf("non-sensitive key should pass, got %v", err)
+	}
+}
