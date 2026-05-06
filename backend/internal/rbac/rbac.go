@@ -33,6 +33,12 @@ const (
 	PermissionOcservConfigRead        Permission = "ocserv:config:read"
 	PermissionOcservConfigEdit        Permission = "ocserv:config:edit"
 	PermissionOcservConfigRollback    Permission = "ocserv:config:rollback"
+
+	// Admin user management permissions
+	PermissionAdminUsersRead   Permission = "admin:users:read"
+	PermissionAdminUsersCreate Permission = "admin:users:create"
+	PermissionAdminUsersUpdate Permission = "admin:users:update"
+	PermissionAdminUsersDelete Permission = "admin:users:delete"
 )
 
 // Authorizer evaluates role grants.
@@ -63,6 +69,10 @@ func NewDefaultAuthorizer() Authorizer {
 				PermissionOcservConfigRead:         {},
 				PermissionOcservConfigEdit:         {},
 				PermissionOcservConfigRollback:     {},
+				PermissionAdminUsersRead:           {},
+				PermissionAdminUsersCreate:         {},
+				PermissionAdminUsersUpdate:         {},
+				PermissionAdminUsersDelete:         {},
 			},
 			RoleViewer: {
 				PermissionReadDashboard:       {},
@@ -72,6 +82,7 @@ func NewDefaultAuthorizer() Authorizer {
 				PermissionOcservSessionsRead:  {},
 				PermissionOcservUsersRead:     {},
 				PermissionOcservConfigRead:    {},
+				PermissionAdminUsersRead:      {},
 			},
 		},
 	}
