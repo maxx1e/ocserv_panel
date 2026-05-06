@@ -311,6 +311,57 @@ func TestOcctlAdapterGetSessionDetailsExpandedFields(t *testing.T) {
 	}
 }
 
+func TestOcctlAdapterDisconnectSessionInvalidID(t *testing.T) {
+	t.Parallel()
+	runner := NewFakeCommandRunner()
+	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
+
+	badIDs := []string{
+		"",
+		"--socket-file=/evil",
+		"id with spaces",
+		"id\nnewline",
+		string(make([]byte, 129)),
+	}
+	for _, id := range badIDs {
+		err := adapter.DisconnectSession(context.Background(), id)
+		if err == nil {
+			t.Errorf("DisconnectSession(%q) = nil, want error", id)
+		}
+	}
+	if len(runner.Calls) > 0 {
+		t.Errorf("expected no commands executed for invalid IDs, got %d", len(runner.Calls))
+	}
+}
+
+func TestOcctlAdapterTerminateSessionInvalidID(t *testing.T) {
+	t.Parallel()
+	runner := NewFakeCommandRunner()
+	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
+
+	err := adapter.TerminateSession(context.Background(), "--malicious")
+	if err == nil {
+		t.Fatal("TerminateSession with flag-like ID should fail")
+	}
+	if len(runner.Calls) > 0 {
+		t.Error("no command should be executed for invalid session ID")
+	}
+}
+
+func TestOcctlAdapterGetSessionDetailsInvalidID(t *testing.T) {
+	t.Parallel()
+	runner := NewFakeCommandRunner()
+	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
+
+	_, err := adapter.GetSessionDetails(context.Background(), "../etc/shadow")
+	if err == nil {
+		t.Fatal("GetSessionDetails with path traversal ID should fail")
+	}
+	if len(runner.Calls) > 0 {
+		t.Error("no command should be executed for invalid session ID")
+	}
+}
+
 // containsSubstr is a helper that avoids importing strings in this test file
 // (strings is already used in the production code, not the test file).
 func containsSubstr(s, sub string) bool {

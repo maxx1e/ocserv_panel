@@ -3,10 +3,31 @@ package ocserv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// sessionIDPattern matches valid ocserv session IDs (alphanumeric, hyphens, dots, underscores).
+var sessionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+func validateSessionID(id string) error {
+	if id == "" {
+		return errors.New("session ID must not be empty")
+	}
+	if len(id) > 128 {
+		return errors.New("session ID too long")
+	}
+	if id[0] == '-' {
+		return fmt.Errorf("session ID must not start with a dash: %q", id)
+	}
+	if !sessionIDPattern.MatchString(id) {
+		return fmt.Errorf("session ID contains invalid characters: %q", id)
+	}
+	return nil
+}
 
 // OcctlAdapter implements Manager using the occtl command-line tool.
 type OcctlAdapter struct {
@@ -60,6 +81,10 @@ func (a *OcctlAdapter) ListSessions(ctx context.Context) ([]Session, error) {
 // DisconnectSession calls `occtl disconnect id <sessionID>`.
 // Timeout: 15 seconds.
 func (a *OcctlAdapter) DisconnectSession(ctx context.Context, sessionID string) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return fmt.Errorf("disconnect session: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -99,6 +124,10 @@ type occtlSessionDetail struct {
 // GetSessionDetails calls `occtl show session <id> --output-type json`.
 // Timeout: 10 seconds.
 func (a *OcctlAdapter) GetSessionDetails(ctx context.Context, id string) (*SessionDetail, error) {
+	if err := validateSessionID(id); err != nil {
+		return nil, fmt.Errorf("get session details: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -141,6 +170,10 @@ func (a *OcctlAdapter) GetSessionDetails(ctx context.Context, id string) (*Sessi
 // TerminateSession calls `occtl terminate id <sessionID>`.
 // Timeout: 15 seconds.
 func (a *OcctlAdapter) TerminateSession(ctx context.Context, sessionID string) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return fmt.Errorf("terminate session: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
