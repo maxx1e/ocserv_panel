@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"ocserv_panel/backend/internal/app"
@@ -45,6 +47,7 @@ type App struct {
 	logTailService    *app.LogTailService
 	configService     *app.ConfigManagementService
 	authorizer        rbac.Authorizer
+	loginLimiter      *auth.RateLimiter
 	cookieSecure      bool
 	now               func() time.Time
 }
@@ -52,6 +55,7 @@ type App struct {
 // AppOptions configures NewAppRouter.
 type AppOptions struct {
 	CookieSecure bool
+	LoginLimiter *auth.RateLimiter
 	Now          func() time.Time
 }
 
@@ -191,6 +195,7 @@ func NewAppRouter(
 		logTailService:    logTailService,
 		configService:     configService,
 		authorizer:        authorizer,
+		loginLimiter:      opts.LoginLimiter,
 		cookieSecure:      opts.CookieSecure,
 		now:               now,
 	}
@@ -318,6 +323,13 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodPost) {
 		return
 	}
+	if a.loginLimiter != nil {
+		ip := extractIP(r)
+		if !a.loginLimiter.Allow(ip) {
+			writeError(w, http.StatusTooManyRequests, "too many login attempts, try again later")
+			return
+		}
+	}
 	var req credentialsRequest
 	if !decodeRequestJSON(w, r, &req) {
 		return
@@ -325,6 +337,9 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	login, err := a.authService.Login(r.Context(), req.Username, req.Password, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
 		if errors.Is(err, app.ErrInvalidCredentials) {
+			if a.loginLimiter != nil {
+				a.loginLimiter.RecordFailure(extractIP(r))
+			}
 			writeError(w, http.StatusUnauthorized, "invalid username or password")
 			return
 		}
@@ -507,6 +522,12 @@ func (a *App) writeAppError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "invalid confirmation")
 	case errors.Is(err, app.ErrInvalidRetention):
 		writeError(w, http.StatusBadRequest, "invalid retention")
+	case errors.Is(err, app.ErrConfigFileMissing):
+		writeError(w, http.StatusServiceUnavailable, "config file does not exist at the configured path")
+	case errors.Is(err, app.ErrConfigFileParseFailed):
+		writeError(w, http.StatusUnprocessableEntity, "config file has syntax errors — fix the file manually or restore from backup")
+	case errors.Is(err, app.ErrConfigFileUnreadable):
+		writeError(w, http.StatusServiceUnavailable, "config file is not readable — check file permissions")
 	case errors.Is(err, ocserv.ErrNotConfigured):
 		writeError(w, http.StatusServiceUnavailable, "ocserv is not available")
 	case errors.Is(err, ocserv.ErrSessionNotFound):
@@ -617,6 +638,18 @@ func sessionTokenFromCookie(r *http.Request) string {
 		return ""
 	}
 	return cookie.Value
+}
+
+func extractIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.SplitN(xff, ",", 2)
+		return strings.TrimSpace(parts[0])
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func sessionFromLogin(login app.LoginResult) sessionResponse {

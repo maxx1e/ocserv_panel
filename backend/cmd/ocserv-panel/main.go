@@ -14,6 +14,7 @@ import (
 
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/audit"
+	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/db"
 	"ocserv_panel/backend/internal/metrics"
@@ -29,11 +30,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	database, err := db.OpenSQLite(ctx, envOrDefault("OCSERV_PANEL_DB_DSN", "file:ocserv_panel.db"))
+	dbDSN := envOrDefault("OCSERV_PANEL_DB_DSN", "file:ocserv_panel.db")
+	database, err := db.OpenSQLite(ctx, dbDSN)
 	if err != nil {
 		slog.Error("open sqlite database failed", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("sqlite database ready", "dsn", dbDSN)
 	defer func() {
 		if err := database.Close(); err != nil {
 			slog.Error("close sqlite database failed", "error", err)
@@ -44,6 +47,7 @@ func main() {
 		slog.Error("apply sqlite migrations failed", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("migrations applied successfully")
 
 	persistence := store.New(database)
 	recorder := audit.NewSQLiteRecorder(persistence)
@@ -57,6 +61,12 @@ func main() {
 		slog.Info("config loaded", "path", configPath)
 	}
 	config.MergeEnv(&cfg, os.Getenv)
+
+	slog.Info("ocserv integration configured",
+		"config_path", cfg.Installation.OcservConfigPath,
+		"socket_path", cfg.Installation.OcservSocketPath,
+		"unit", cfg.Service.SystemdUnitName,
+	)
 
 	settingsService := app.NewSettingsService(&cfg, configPath, persistence, recorder, rbac.NewDefaultAuthorizer())
 
@@ -165,9 +175,11 @@ func main() {
 	)
 	go collectorService.Run(ctx)
 
+	loginLimiter := auth.NewRateLimiter(5, time.Minute)
+
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, configMgmtService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv()}),
+		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, configMgmtService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -182,7 +194,13 @@ func main() {
 		}
 	}()
 
-	slog.Info("starting ocserv panel backend", "addr", addr)
+	slog.Info("starting ocserv panel backend",
+		"addr", addr,
+		"config", configPath,
+		"dsn", dbDSN,
+		"metrics_path", tsdbPathFromEnv(),
+		"ocserv_config", cfg.Installation.OcservConfigPath,
+	)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("backend server failed", "error", err)
 		os.Exit(1)
@@ -202,8 +220,11 @@ func tsdbPathFromEnv() string {
 }
 
 func openMetricStore() metrics.Store {
-	metricStore, err := metrics.OpenTSDBStore(tsdbPathFromEnv(), 30*24*time.Hour)
+	tsdbPath := tsdbPathFromEnv()
+	retention := 30 * 24 * time.Hour
+	metricStore, err := metrics.OpenTSDBStore(tsdbPath, retention)
 	if err == nil {
+		slog.Info("metrics store ready", "type", "tsdb", "path", tsdbPath, "retention", "30d")
 		return metricStore
 	}
 
