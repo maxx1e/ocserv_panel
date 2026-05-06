@@ -36,7 +36,7 @@ func main() {
 		slog.Error("open sqlite database failed", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("sqlite database ready", "dsn", dbDSN)
+	slog.Info("sqlite database ready", "dsn_set", dbDSN != "")
 	defer func() {
 		if err := database.Close(); err != nil {
 			slog.Error("close sqlite database failed", "error", err)
@@ -181,6 +181,8 @@ func main() {
 		Addr:              addr,
 		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, configMgmtService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter}),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
 	}
 
 	go func() {
@@ -197,7 +199,7 @@ func main() {
 	slog.Info("starting ocserv panel backend",
 		"addr", addr,
 		"config", configPath,
-		"dsn", dbDSN,
+		"dsn_set", dbDSN != "",
 		"metrics_path", tsdbPathFromEnv(),
 		"ocserv_config", cfg.Installation.OcservConfigPath,
 	)
