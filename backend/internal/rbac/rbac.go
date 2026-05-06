@@ -13,16 +13,11 @@ const (
 type Permission string
 
 const (
-	PermissionReadDashboard  Permission = "dashboard:read"
-	PermissionManageUsers    Permission = "users:manage"
-	PermissionManageConfig   Permission = "config:manage"
-	PermissionManageService  Permission = "service:manage"
+	PermissionReadDashboard   Permission = "dashboard:read"
 	PermissionHistoryPurge    Permission = "history:purge"
 	PermissionSettingsManage  Permission = "settings:manage"
 	PermissionSettingsRead    Permission = "settings:read"
 	PermissionSettingsRestart Permission = "settings:restart"
-	PermissionSettingsExport  Permission = "settings:export"
-	PermissionSettingsBackup  Permission = "settings:backup"
 
 	// ocserv integration permissions
 	PermissionOcservRead              Permission = "ocserv:read"
@@ -51,15 +46,10 @@ func NewDefaultAuthorizer() Authorizer {
 		grants: map[Role]map[Permission]struct{}{
 			RoleOwner: {
 				PermissionReadDashboard:            {},
-				PermissionManageUsers:              {},
-				PermissionManageConfig:             {},
-				PermissionManageService:            {},
 				PermissionHistoryPurge:             {},
 				PermissionSettingsManage:           {},
 				PermissionSettingsRead:             {},
 				PermissionSettingsRestart:          {},
-				PermissionSettingsExport:           {},
-				PermissionSettingsBackup:           {},
 				PermissionOcservRead:               {},
 				PermissionOcservServiceRead:        {},
 				PermissionOcservServiceManage:      {},

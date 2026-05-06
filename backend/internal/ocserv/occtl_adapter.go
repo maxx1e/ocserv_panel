@@ -76,35 +76,6 @@ func (a *OcctlAdapter) DisconnectSession(ctx context.Context, sessionID string) 
 	return nil
 }
 
-// ListUsers calls `occtl show users --output-type json` and returns parsed results.
-// Timeout: 10 seconds.
-func (a *OcctlAdapter) ListUsers(ctx context.Context) ([]User, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	result, err := a.runner.Run(ctx, a.occtlPath, a.withSocket([]string{"show", "users", "--output-type", "json"}), nil)
-	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
-	}
-	if result.ExitCode != 0 {
-		if a.isNotConfiguredErr(result.Stderr) {
-			return nil, ErrNotConfigured
-		}
-		return nil, fmt.Errorf("list users: %s", strings.TrimSpace(result.Stderr))
-	}
-
-	out := strings.TrimSpace(result.Stdout)
-	if out == "" || strings.Contains(out, "No users") {
-		return []User{}, nil
-	}
-
-	var users []User
-	if err := json.Unmarshal([]byte(out), &users); err != nil {
-		return nil, fmt.Errorf("parse users output: %w", err)
-	}
-	return users, nil
-}
-
 // occtlSessionDetail is an intermediate struct that captures the JSON field names
 // that occtl uses in its `show session <id> --output-type json` output.
 // Fields are mapped to SessionDetail after parsing.

@@ -17,8 +17,8 @@ func TestAuthorizerDeniesMissingPermission(t *testing.T) {
 
 	authorizer := NewDefaultAuthorizer()
 
-	if authorizer.Allowed([]Role{RoleViewer}, PermissionManageConfig) {
-		t.Fatal("expected viewer role to be denied config management")
+	if authorizer.Allowed([]Role{RoleViewer}, PermissionOcservServiceManage) {
+		t.Fatal("expected viewer role to be denied ocserv service management")
 	}
 }
 

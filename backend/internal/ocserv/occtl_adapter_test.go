@@ -110,54 +110,6 @@ func TestOcctlAdapterDisconnectSessionNotConfigured(t *testing.T) {
 	}
 }
 
-func TestOcctlAdapterListUsersEmpty(t *testing.T) {
-	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["/usr/local/bin/occtl"] = CommandResult{ExitCode: 0, Stdout: "[]"}
-	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
-
-	users, err := adapter.ListUsers(context.Background())
-	if err != nil {
-		t.Fatalf("list users: %v", err)
-	}
-	if len(users) != 0 {
-		t.Fatalf("expected 0 users, got %d", len(users))
-	}
-}
-
-func TestOcctlAdapterListUsersWithData(t *testing.T) {
-	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["/usr/local/bin/occtl"] = CommandResult{
-		ExitCode: 0,
-		Stdout:   `[{"username":"alice","group":"default","active":true}]`,
-	}
-	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
-
-	users, err := adapter.ListUsers(context.Background())
-	if err != nil {
-		t.Fatalf("list users: %v", err)
-	}
-	if len(users) != 1 || users[0].Username != "alice" {
-		t.Fatalf("expected alice, got %v", users)
-	}
-}
-
-func TestOcctlAdapterListUsersNotConfigured(t *testing.T) {
-	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["/usr/local/bin/occtl"] = CommandResult{
-		ExitCode: 1,
-		Stderr:   "connection refused",
-	}
-	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/ocserv-socket", runner)
-
-	_, err := adapter.ListUsers(context.Background())
-	if !errors.Is(err, ErrNotConfigured) {
-		t.Fatalf("expected ErrNotConfigured, got %v", err)
-	}
-}
-
 func TestOcctlAdapterGetSessionDetails(t *testing.T) {
 	t.Parallel()
 	runner := NewFakeCommandRunner()

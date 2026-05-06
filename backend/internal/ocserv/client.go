@@ -27,13 +27,6 @@ type Session struct {
 	ReconnectCount int       `json:"ReconnectCount"`
 }
 
-// User represents an ocserv user as reported by occtl.
-type User struct {
-	Username string `json:"username"`
-	Group    string `json:"group"`
-	Active   bool   `json:"active"`
-}
-
 // SessionDetail represents full information about a single active session.
 type SessionDetail struct {
 	ID             string        `json:"id"`
@@ -59,7 +52,6 @@ type Manager interface {
 	DisconnectSession(ctx context.Context, sessionID string) error
 	TerminateSession(ctx context.Context, sessionID string) error
 	GetSessionDetails(ctx context.Context, id string) (*SessionDetail, error)
-	ListUsers(ctx context.Context) ([]User, error)
 }
 
 // Compile-time interface satisfaction check.
@@ -71,10 +63,8 @@ type FakeManager struct {
 	Sessions              []Session
 	SessionDetails        map[string]*SessionDetail
 	SessionDetailNotFound map[string]bool
-	Users                 []User
 	DisconnectErr         error
 	TerminateErr          error
-	ListUsersErr          error
 }
 
 // NewFakeManager returns a FakeManager with empty default data.
@@ -106,12 +96,6 @@ func (f *FakeManager) TerminateSession(ctx context.Context, sessionID string) er
 	_ = ctx
 	_ = sessionID
 	return f.TerminateErr
-}
-
-// ListUsers returns the configured users or ListUsersErr.
-func (f *FakeManager) ListUsers(ctx context.Context) ([]User, error) {
-	_ = ctx
-	return f.Users, f.ListUsersErr
 }
 
 // GetSessionDetails returns the detail for the given id, ErrSessionNotFound when

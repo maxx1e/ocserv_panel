@@ -41,19 +41,6 @@ func TestFakeManagerDisconnectReturnsConfiguredError(t *testing.T) {
 	}
 }
 
-func TestFakeManagerListsNoUsers(t *testing.T) {
-	t.Parallel()
-
-	manager := NewFakeManager()
-	users, err := manager.ListUsers(context.Background())
-	if err != nil {
-		t.Fatalf("list users: %v", err)
-	}
-	if len(users) != 0 {
-		t.Fatalf("expected no users, got %d", len(users))
-	}
-}
-
 func TestFakeManagerReturnsConfiguredSessions(t *testing.T) {
 	t.Parallel()
 
@@ -67,22 +54,6 @@ func TestFakeManagerReturnsConfiguredSessions(t *testing.T) {
 	}
 	if len(sessions) != 1 || sessions[0].Username != "alice" {
 		t.Fatalf("expected alice session, got %v", sessions)
-	}
-}
-
-func TestFakeManagerReturnsConfiguredUsers(t *testing.T) {
-	t.Parallel()
-
-	manager := NewFakeManager()
-	manager.Users = []User{
-		{Username: "alice", Group: "default", Active: true},
-	}
-	users, err := manager.ListUsers(context.Background())
-	if err != nil {
-		t.Fatalf("list users: %v", err)
-	}
-	if len(users) != 1 || users[0].Username != "alice" {
-		t.Fatalf("expected alice user, got %v", users)
 	}
 }
 

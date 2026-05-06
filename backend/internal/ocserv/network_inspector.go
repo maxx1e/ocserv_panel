@@ -33,11 +33,6 @@ type NetworkInspector struct {
 	configPath string
 }
 
-// NewNetworkInspector returns a NetworkInspector using the real /proc/sys directory.
-func NewNetworkInspector(runner CommandRunner) *NetworkInspector {
-	return &NetworkInspector{runner: runner, procDir: "/proc/sys", configPath: ""}
-}
-
 // NewNetworkInspectorWithProcDir returns a NetworkInspector that reads kernel
 // parameters from procDir instead of /proc/sys. Used in tests.
 func NewNetworkInspectorWithProcDir(runner CommandRunner, procDir string) *NetworkInspector {
