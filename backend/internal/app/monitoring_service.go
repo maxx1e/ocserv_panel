@@ -44,7 +44,7 @@ func NewMonitoringService(store metrics.Store, authorizer rbac.Authorizer, now f
 		recorder:   recorder,
 		authorizer: authorizer,
 		now:        now,
-		catalog:    &catalog,
+		catalog:    catalog,
 	}
 }
 

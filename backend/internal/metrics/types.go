@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -65,11 +66,12 @@ type MetricDefinition struct {
 }
 
 type Catalog struct {
+	mu      sync.RWMutex
 	metrics map[MetricName]MetricDefinition
 }
 
-func DefaultCatalog() Catalog {
-	metrics := []MetricDefinition{
+func DefaultCatalog() *Catalog {
+	defs := []MetricDefinition{
 		collectingMetric(MetricHostCPUUtilization, "host CPU utilization"),
 		collectingMetric(MetricHostMemoryUtilization, "host memory utilization"),
 		collectingMetric(MetricNetInterfaceRXBytes, "network interface received bytes"),
@@ -84,15 +86,18 @@ func DefaultCatalog() Catalog {
 		collectingMetric(MetricConcurrentSessionsLimit, "concurrent sessions limit"),
 	}
 
-	catalog := Catalog{metrics: make(map[MetricName]MetricDefinition, len(metrics))}
-	for _, metric := range metrics {
+	catalog := &Catalog{metrics: make(map[MetricName]MetricDefinition, len(defs))}
+	for _, metric := range defs {
 		catalog.metrics[metric.Name] = metric
 	}
 
 	return catalog
 }
 
-func (c Catalog) Find(name MetricName) (MetricDefinition, bool) {
+// Find returns the metric definition for the given name.
+func (c *Catalog) Find(name MetricName) (MetricDefinition, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	metric, ok := c.metrics[name]
 	return metric, ok
 }
@@ -100,11 +105,24 @@ func (c Catalog) Find(name MetricName) (MetricDefinition, bool) {
 // SetState updates the state and reason of a metric in the catalog.
 // If the metric does not exist in the catalog, the call is a no-op.
 func (c *Catalog) SetState(name MetricName, state State, reason string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if def, ok := c.metrics[name]; ok {
 		def.State = state
 		def.Reason = reason
 		c.metrics[name] = def
 	}
+}
+
+// List returns a snapshot of all metric definitions.
+func (c *Catalog) List() []MetricDefinition {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	defs := make([]MetricDefinition, 0, len(c.metrics))
+	for _, d := range c.metrics {
+		defs = append(defs, d)
+	}
+	return defs
 }
 
 type Sample struct {
