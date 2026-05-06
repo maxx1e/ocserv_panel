@@ -46,6 +46,7 @@ type App struct {
 	healthService     *app.HealthService
 	logTailService    *app.LogTailService
 	configService     *app.ConfigManagementService
+	adminUserService  *app.AdminUserService
 	authorizer        rbac.Authorizer
 	loginLimiter      *auth.RateLimiter
 	cookieSecure      bool
@@ -178,6 +179,7 @@ func NewAppRouter(
 	healthService *app.HealthService,
 	logTailService *app.LogTailService,
 	configService *app.ConfigManagementService,
+	adminUserService *app.AdminUserService,
 	authorizer rbac.Authorizer,
 	opts AppOptions,
 ) http.Handler {
@@ -194,6 +196,7 @@ func NewAppRouter(
 		healthService:     healthService,
 		logTailService:    logTailService,
 		configService:     configService,
+		adminUserService:  adminUserService,
 		authorizer:        authorizer,
 		loginLimiter:      opts.LoginLimiter,
 		cookieSecure:      opts.CookieSecure,
@@ -247,6 +250,17 @@ func NewAppRouter(
 	mux.HandleFunc("GET /api/config/backups/{n}/diff", appHandler.handleConfigBackupDiff)
 	mux.HandleFunc("POST /api/config/rollback/{n}", appHandler.handleConfigRollback)
 	mux.HandleFunc("GET /api/config/network", appHandler.handleConfigNetwork)
+	// Admin user management API
+	mux.HandleFunc("GET /api/admin/users", appHandler.handleAdminUsersList)
+	mux.HandleFunc("POST /api/admin/users", appHandler.handleAdminUserCreate)
+	mux.HandleFunc("PUT /api/admin/users/{id}", appHandler.handleAdminUserUpdate)
+	mux.HandleFunc("DELETE /api/admin/users/{id}", appHandler.handleAdminUserDelete)
+	mux.HandleFunc("POST /api/admin/users/{id}/disable", appHandler.handleAdminUserDisable)
+	mux.HandleFunc("POST /api/admin/users/{id}/enable", appHandler.handleAdminUserEnable)
+	mux.HandleFunc("POST /api/admin/users/{id}/reset-password", appHandler.handleAdminUserResetPassword)
+	// VPN user lock/unlock
+	mux.HandleFunc("POST /api/ocserv/users/{username}/lock", appHandler.handleOcservUserLock)
+	mux.HandleFunc("POST /api/ocserv/users/{username}/unlock", appHandler.handleOcservUserUnlock)
 
 	return securityHeaders(mux)
 }
@@ -500,6 +514,8 @@ func (a *App) writeAppError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, app.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, "invalid request")
+	case errors.Is(err, app.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not found")
 	case errors.Is(err, app.ErrSetupAlreadyComplete):
 		writeError(w, http.StatusConflict, "setup already complete")
 	case errors.Is(err, app.ErrUnauthenticated):

@@ -129,3 +129,53 @@ func ParsePasswdFile(data []byte) []PasswdUser {
 	}
 	return users
 }
+
+// LockUser disables a user by setting their hash field to "!" in the password file.
+func (a *OcpasswdAdapter) LockUser(ctx context.Context, username string) error {
+	_ = ctx
+	return a.setUserActive(username, false)
+}
+
+// UnlockUser re-enables a locked user by setting their hash field to "*" (requires password reset).
+func (a *OcpasswdAdapter) UnlockUser(ctx context.Context, username string) error {
+	_ = ctx
+	return a.setUserActive(username, true)
+}
+
+func (a *OcpasswdAdapter) setUserActive(username string, active bool) error {
+	data, err := os.ReadFile(a.filePath)
+	if err != nil {
+		return fmt.Errorf("read password file: %w", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	found := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		parts := strings.SplitN(trimmed, ":", 3)
+		if len(parts) < 2 || parts[0] != username {
+			continue
+		}
+		found = true
+		if active {
+			if len(parts) == 3 && parts[2] == "!" {
+				parts[2] = "*"
+				lines[i] = strings.Join(parts, ":")
+			}
+		} else {
+			if len(parts) < 3 {
+				lines[i] = trimmed + ":!"
+			} else {
+				parts[2] = "!"
+				lines[i] = strings.Join(parts, ":")
+			}
+		}
+		break
+	}
+	if !found {
+		return fmt.Errorf("user %s not found", username)
+	}
+	return os.WriteFile(a.filePath, []byte(strings.Join(lines, "\n")), 0600)
+}

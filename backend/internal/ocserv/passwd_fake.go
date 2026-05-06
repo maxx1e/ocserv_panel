@@ -2,6 +2,7 @@ package ocserv
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -86,4 +87,38 @@ func (f *FakePasswdManager) SetError(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.err = err
+}
+
+// LockUser marks a user as inactive (disabled) in the in-memory store.
+func (f *FakePasswdManager) LockUser(ctx context.Context, username string) error {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	u, ok := f.users[username]
+	if !ok {
+		return fmt.Errorf("user %s not found", username)
+	}
+	u.Active = false
+	f.users[username] = u
+	return nil
+}
+
+// UnlockUser marks a user as active (enabled) in the in-memory store.
+func (f *FakePasswdManager) UnlockUser(ctx context.Context, username string) error {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	u, ok := f.users[username]
+	if !ok {
+		return fmt.Errorf("user %s not found", username)
+	}
+	u.Active = true
+	f.users[username] = u
+	return nil
 }

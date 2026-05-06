@@ -357,6 +357,42 @@ func (a *App) handleOcservUserUpdatePassword(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleOcservUserLock locks (disables) an ocserv user account.
+func (a *App) handleOcservUserLock(w http.ResponseWriter, r *http.Request) {
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		return
+	}
+	username := r.PathValue("username")
+	if username == "" {
+		writeError(w, http.StatusBadRequest, "username is required")
+		return
+	}
+	if err := a.ocservService.LockOcservUser(r.Context(), principal, username); err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleOcservUserUnlock unlocks (re-enables) an ocserv user account.
+func (a *App) handleOcservUserUnlock(w http.ResponseWriter, r *http.Request) {
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		return
+	}
+	username := r.PathValue("username")
+	if username == "" {
+		writeError(w, http.StatusBadRequest, "username is required")
+		return
+	}
+	if err := a.ocservService.UnlockOcservUser(r.Context(), principal, username); err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleOcservConfigIssues returns ocserv configuration validation issues.
 func (a *App) handleOcservConfigIssues(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodGet) {

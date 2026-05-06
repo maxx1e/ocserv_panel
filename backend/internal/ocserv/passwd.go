@@ -16,4 +16,6 @@ type PasswdManager interface {
 	UpdatePassword(ctx context.Context, username, newPassword string) error
 	ListUsers(ctx context.Context) ([]PasswdUser, error)
 	UserExists(ctx context.Context, username string) (bool, error)
+	LockUser(ctx context.Context, username string) error
+	UnlockUser(ctx context.Context, username string) error
 }

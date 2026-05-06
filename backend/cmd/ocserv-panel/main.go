@@ -121,6 +121,8 @@ func main() {
 
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker)
 
+	adminUserService := app.NewAdminUserService(persistence, recorder, rbac.NewDefaultAuthorizer(), auth.HashPassword)
+
 	// Create housekeeping scheduler
 	housekeepingScheduler := app.NewHousekeepingScheduler(
 		persistence,
@@ -179,7 +181,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, configMgmtService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter}),
+		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, configMgmtService, adminUserService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,

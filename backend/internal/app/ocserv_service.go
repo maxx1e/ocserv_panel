@@ -232,6 +232,40 @@ func (s *OcservService) UpdateOcservUserPassword(ctx context.Context, principal 
 	return nil
 }
 
+// LockOcservUser locks (disables) a VPN user.
+func (s *OcservService) LockOcservUser(ctx context.Context, principal auth.Principal, username string) error {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.lock"); err != nil {
+		return err
+	}
+	if err := ocserv.ValidateUsername(username); err != nil {
+		return fmt.Errorf("invalid username: %w", err)
+	}
+	actorID := principal.ID
+	if err := s.users.LockUser(ctx, username); err != nil {
+		_ = s.record(ctx, &actorID, "ocserv.users.lock", "ocserv_user", username, audit.OutcomeFailure, err.Error(), nil)
+		return fmt.Errorf("lock ocserv user %s: %w", username, err)
+	}
+	_ = s.record(ctx, &actorID, "ocserv.users.lock", "ocserv_user", username, audit.OutcomeSuccess, "ocserv user locked", nil)
+	return nil
+}
+
+// UnlockOcservUser unlocks (re-enables) a VPN user.
+func (s *OcservService) UnlockOcservUser(ctx context.Context, principal auth.Principal, username string) error {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.unlock"); err != nil {
+		return err
+	}
+	if err := ocserv.ValidateUsername(username); err != nil {
+		return fmt.Errorf("invalid username: %w", err)
+	}
+	actorID := principal.ID
+	if err := s.users.UnlockUser(ctx, username); err != nil {
+		_ = s.record(ctx, &actorID, "ocserv.users.unlock", "ocserv_user", username, audit.OutcomeFailure, err.Error(), nil)
+		return fmt.Errorf("unlock ocserv user %s: %w", username, err)
+	}
+	_ = s.record(ctx, &actorID, "ocserv.users.unlock", "ocserv_user", username, audit.OutcomeSuccess, "ocserv user unlocked", nil)
+	return nil
+}
+
 // ConfigIssues returns ocserv configuration validation issues.
 func (s *OcservService) ConfigIssues(ctx context.Context, principal auth.Principal) ([]ocserv.ConfigIssue, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.issues"); err != nil {
