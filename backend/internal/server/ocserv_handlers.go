@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"time"
 
-	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/ocserv"
 )
 
@@ -94,7 +93,6 @@ func (a *App) handleOcservReadiness(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.ocservService.Readiness(r.Context(), auth.Principal{})
 		return
 	}
 	readiness, err := a.ocservService.Readiness(r.Context(), principal)
@@ -112,7 +110,6 @@ func (a *App) handleOcservServiceStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.ocservService.ServiceStatus(r.Context(), auth.Principal{})
 		return
 	}
 	status, err := a.ocservService.ServiceStatus(r.Context(), principal)
@@ -133,7 +130,6 @@ func (a *App) handleOcservServiceStart(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_ = a.ocservService.StartService(r.Context(), auth.Principal{})
 		return
 	}
 	if err := a.ocservService.StartService(r.Context(), principal); err != nil {
@@ -150,7 +146,6 @@ func (a *App) handleOcservServiceStop(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_ = a.ocservService.StopService(r.Context(), auth.Principal{})
 		return
 	}
 	if err := a.ocservService.StopService(r.Context(), principal); err != nil {
@@ -167,7 +162,6 @@ func (a *App) handleOcservServiceRestart(w http.ResponseWriter, r *http.Request)
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_ = a.ocservService.RestartService(r.Context(), auth.Principal{})
 		return
 	}
 	if err := a.ocservService.RestartService(r.Context(), principal); err != nil {
@@ -184,7 +178,6 @@ func (a *App) handleOcservSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.ocservService.ListSessions(r.Context(), auth.Principal{})
 		return
 	}
 	sessions, err := a.ocservService.ListSessions(r.Context(), principal)
@@ -206,7 +199,6 @@ func (a *App) handleOcservSessionDisconnect(w http.ResponseWriter, r *http.Reque
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_ = a.ocservService.DisconnectSession(r.Context(), auth.Principal{}, "")
 		return
 	}
 	var req disconnectSessionRequest
@@ -231,7 +223,6 @@ func (a *App) handleOcservSessionDetail(w http.ResponseWriter, r *http.Request) 
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.ocservService.GetSessionDetail(r.Context(), auth.Principal{}, "")
 		return
 	}
 	id := r.PathValue("id")
@@ -254,7 +245,6 @@ func (a *App) handleOcservSessionTerminate(w http.ResponseWriter, r *http.Reques
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_ = a.ocservService.TerminateSession(r.Context(), auth.Principal{}, "")
 		return
 	}
 	var req terminateSessionRequest
@@ -279,7 +269,6 @@ func (a *App) handleOcservUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.ocservService.ListOcservUsers(r.Context(), auth.Principal{})
 		return
 	}
 	users, err := a.ocservService.ListOcservUsers(r.Context(), principal)
@@ -301,7 +290,6 @@ func (a *App) handleOcservUserCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_ = a.ocservService.CreateOcservUser(r.Context(), auth.Principal{}, "", "")
 		return
 	}
 	var req createOcservUserRequest
@@ -326,7 +314,6 @@ func (a *App) handleOcservUserDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_ = a.ocservService.DeleteOcservUser(r.Context(), auth.Principal{}, "")
 		return
 	}
 	username := r.PathValue("username")
@@ -348,7 +335,6 @@ func (a *App) handleOcservUserUpdatePassword(w http.ResponseWriter, r *http.Requ
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_ = a.ocservService.UpdateOcservUserPassword(r.Context(), auth.Principal{}, "", "")
 		return
 	}
 	username := r.PathValue("username")
@@ -378,7 +364,6 @@ func (a *App) handleOcservConfigIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.ocservService.ConfigIssues(r.Context(), auth.Principal{})
 		return
 	}
 	issues, err := a.ocservService.ConfigIssues(r.Context(), principal)

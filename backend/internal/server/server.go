@@ -381,7 +381,6 @@ func (a *App) handleDashboardSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.dashboardService.Summary(r.Context(), auth.Principal{})
 		return
 	}
 	summary, err := a.dashboardService.Summary(r.Context(), principal)
@@ -398,7 +397,6 @@ func (a *App) handleHistoryAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.dashboardService.HistoryAnalytics(r.Context(), auth.Principal{})
 		return
 	}
 	analytics, err := a.dashboardService.HistoryAnalytics(r.Context(), principal)
@@ -415,7 +413,6 @@ func (a *App) handleHistoryPurge(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.dashboardService.PurgeHistory(r.Context(), auth.Principal{}, 0, "")
 		return
 	}
 	var req purgeHistoryRequest
@@ -436,7 +433,6 @@ func (a *App) handleMonitoringCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.monitoringService.Catalog(r.Context(), auth.Principal{})
 		return
 	}
 	catalog, err := a.monitoringService.Catalog(r.Context(), principal)
@@ -453,7 +449,6 @@ func (a *App) handleMonitoringOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.monitoringService.Overview(r.Context(), auth.Principal{}, queryValueDefault(r, "window", "1h"))
 		return
 	}
 	window := queryValueDefault(r, "window", "1h")
@@ -471,13 +466,6 @@ func (a *App) handleMonitoringSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.monitoringService.Series(
-			r.Context(),
-			auth.Principal{},
-			metrics.MetricName(r.URL.Query().Get("metric")),
-			queryValueDefault(r, "window", "1h"),
-			queryValueDefault(r, "step", "60s"),
-		)
 		return
 	}
 	metric := r.URL.Query().Get("metric")

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"ocserv_panel/backend/internal/app"
-	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/ocserv"
 )
 
@@ -86,7 +85,6 @@ type configRollbackResponse struct {
 func (a *App) handleConfigRead(w http.ResponseWriter, r *http.Request) {
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.configService.ReadConfig(r.Context(), auth.Principal{})
 		return
 	}
 
@@ -107,7 +105,6 @@ func (a *App) handleConfigRead(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.configService.ValidateContent(r.Context(), auth.Principal{}, "")
 		return
 	}
 
@@ -138,7 +135,6 @@ func (a *App) handleConfigValidate(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.configService.DiffWithContent(r.Context(), auth.Principal{}, "")
 		return
 	}
 
@@ -164,7 +160,6 @@ func (a *App) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.configService.ApplyConfig(r.Context(), auth.Principal{}, "")
 		return
 	}
 
@@ -202,7 +197,6 @@ func (a *App) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleConfigBackups(w http.ResponseWriter, r *http.Request) {
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.configService.ListBackups(r.Context(), auth.Principal{})
 		return
 	}
 
@@ -227,7 +221,6 @@ func (a *App) handleConfigBackups(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleConfigBackupGet(w http.ResponseWriter, r *http.Request) {
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.configService.GetBackup(r.Context(), auth.Principal{}, 0)
 		return
 	}
 
@@ -252,7 +245,6 @@ func (a *App) handleConfigBackupGet(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleConfigBackupDiff(w http.ResponseWriter, r *http.Request) {
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.configService.DiffWithBackup(r.Context(), auth.Principal{}, 0)
 		return
 	}
 
@@ -274,7 +266,6 @@ func (a *App) handleConfigBackupDiff(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.configService.Rollback(r.Context(), auth.Principal{}, 0)
 		return
 	}
 
@@ -299,7 +290,6 @@ func (a *App) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleConfigNetwork(w http.ResponseWriter, r *http.Request) {
 	principal, ok := a.authenticate(w, r)
 	if !ok {
-		_, _ = a.configService.InspectNetwork(r.Context(), auth.Principal{})
 		return
 	}
 

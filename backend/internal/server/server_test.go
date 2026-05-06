@@ -445,63 +445,54 @@ func TestDashboardSummaryIncludesRequiredStatusAndLocalData(t *testing.T) {
 	}
 }
 
-func TestProtectedEndpointsAuditUnauthenticatedAttempts(t *testing.T) {
+func TestProtectedEndpointsRejectUnauthenticated(t *testing.T) {
 	tests := []struct {
 		name   string
 		method string
 		path   string
 		body   any
-		action string
 	}{
 		{
 			name:   "dashboard summary",
 			method: http.MethodGet,
 			path:   "/api/dashboard/summary",
-			action: "dashboard.summary",
 		},
 		{
 			name:   "history analytics",
 			method: http.MethodGet,
 			path:   "/api/history/analytics",
-			action: "history.analytics",
 		},
 		{
 			name:   "history purge",
 			method: http.MethodPost,
 			path:   "/api/history/purge",
 			body:   purgeRequest(30, "PURGE"),
-			action: "history.purge",
 		},
 		{
 			name:   "monitoring catalog",
 			method: http.MethodGet,
 			path:   "/api/monitoring/catalog",
-			action: "monitoring.catalog",
 		},
 		{
 			name:   "monitoring overview",
 			method: http.MethodGet,
 			path:   "/api/monitoring/overview",
-			action: "monitoring.overview",
 		},
 		{
 			name:   "monitoring series",
 			method: http.MethodGet,
 			path:   "/api/monitoring/series?metric=host_cpu_utilization",
-			action: "monitoring.series",
 		},
 		{
 			name:   "ocserv session detail",
 			method: http.MethodGet,
 			path:   "/api/ocserv/sessions/some-id",
-			action: "ocserv.sessions.detail",
 		},
 		{
 			name:   "ocserv session terminate",
 			method: http.MethodPost,
 			path:   "/api/ocserv/sessions/terminate",
 			body:   map[string]string{"sessionId": "some-id"},
-			action: "ocserv.sessions.terminate",
 		},
 	}
 
@@ -512,7 +503,12 @@ func TestProtectedEndpointsAuditUnauthenticatedAttempts(t *testing.T) {
 			rec := serveAPI(t, h.router, tt.method, tt.path, tt.body, "")
 			assertStatus(t, rec, http.StatusUnauthorized)
 
-			assertDeniedAuditAction(t, h.store, tt.action)
+			// After removing the double-call pattern, unauthenticated requests
+			// no longer produce audit records — authenticate() returns 401 directly.
+			events, _ := h.store.RecentAuditEvents(context.Background(), 100)
+			if len(events) != 0 {
+				t.Errorf("expected no audit events for unauthenticated request, got %d", len(events))
+			}
 		})
 	}
 }
