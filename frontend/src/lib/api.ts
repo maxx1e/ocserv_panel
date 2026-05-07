@@ -647,8 +647,17 @@ export function getVpnUsers(): Promise<VpnUser[]> {
   return apiFetch<VpnUser[]>('/api/ocserv/users');
 }
 
-export function createVpnUser(username: string, password: string): Promise<void> {
-  return apiFetch<void>('/api/ocserv/users/create', { method: 'POST', body: { username, password } });
+export function createVpnUser(username: string, password: string, group?: string): Promise<void> {
+  const body: { username: string; password: string; group?: string } = { username, password };
+  if (group) body.group = group;
+  return apiFetch<void>('/api/ocserv/users/create', { method: 'POST', body });
+}
+
+export function updateVpnUserGroup(username: string, group: string): Promise<void> {
+  return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}/group`, {
+    method: 'PUT',
+    body: { group }
+  });
 }
 
 export function deleteVpnUser(username: string): Promise<void> {
@@ -698,6 +707,92 @@ export function bulkLockVpnUsers(usernames: string[]): Promise<BulkResult> {
 
 export function bulkUnlockVpnUsers(usernames: string[]): Promise<BulkResult> {
   return apiFetch<BulkResult>('/api/ocserv/users/bulk-unlock', { method: 'POST', body: { usernames } });
+}
+
+// ─── Audit Log Types ──────────────────────────────────────────────────────
+
+export type AuditLogLine = {
+  timestamp: string;
+  level: string;
+  message: string;
+  component: string;
+  raw: string;
+  metadata?: Record<string, string>;
+};
+
+export type AuditLogResponse = {
+  source: string;
+  lines: AuditLogLine[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+};
+
+export type AuditLogSource = {
+  name: string;
+  label: string;
+  available: boolean;
+  path: string;
+  reader: string;
+  logLevel: number | null;
+  logLevelLabel: string | null;
+};
+
+export type AuditLogSourcesResponse = {
+  sources: AuditLogSource[];
+};
+
+export type AuditLogParams = {
+  source: string;
+  search?: string;
+  level?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+  order?: 'asc' | 'desc';
+};
+
+// ─── Audit Log API ────────────────────────────────────────────────────────
+
+export function getAuditLogs(params: AuditLogParams): Promise<AuditLogResponse> {
+  const query = new URLSearchParams();
+  query.set('source', params.source);
+  if (params.search) query.set('search', params.search);
+  if (params.level) query.set('level', params.level);
+  if (params.from) query.set('from', params.from);
+  if (params.to) query.set('to', params.to);
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.offset) query.set('offset', String(params.offset));
+  if (params.order) query.set('order', params.order);
+  return apiFetch<AuditLogResponse>(`/api/audit/logs?${query.toString()}`);
+}
+
+export function getAuditLogSources(): Promise<AuditLogSourcesResponse> {
+  return apiFetch<AuditLogSourcesResponse>('/api/audit/logs/sources');
+}
+
+export async function exportAuditLogs(params: AuditLogParams & { format?: string }): Promise<Blob> {
+  const query = new URLSearchParams();
+  query.set('source', params.source);
+  if (params.search) query.set('search', params.search);
+  if (params.level) query.set('level', params.level);
+  if (params.from) query.set('from', params.from);
+  if (params.to) query.set('to', params.to);
+  if (params.format) query.set('format', params.format);
+  query.set('limit', '5000');
+
+  const response = await fetch(`/api/audit/logs/export?${query.toString()}`, {
+    credentials: 'same-origin'
+  });
+  if (!response.ok) {
+    throw new ApiError(
+      response.status === 403 ? 'Export requires owner permissions.' : 'Export failed.',
+      response.status
+    );
+  }
+  return response.blob();
 }
 
 // ─── Utility Functions ─────────────────────────────────────────────────────
