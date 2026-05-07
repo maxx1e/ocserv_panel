@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
-	"log/slog"
 	"strconv"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/store"
@@ -19,7 +21,7 @@ type HousekeepingScheduler struct {
 	recorder audit.Recorder
 	purge    PurgeFunc
 	interval time.Duration
-	logger   *slog.Logger
+	logger   zerolog.Logger
 }
 
 // NewHousekeepingScheduler creates a scheduler that purges history at the given interval.
@@ -41,7 +43,7 @@ func NewHousekeepingScheduler(
 		recorder: recorder,
 		purge:    purge,
 		interval: interval,
-		logger:   slog.Default(),
+		logger:   log.Logger,
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -53,7 +55,7 @@ func NewHousekeepingScheduler(
 type HousekeepingOption func(*HousekeepingScheduler)
 
 // HousekeepingWithLogger sets the logger.
-func HousekeepingWithLogger(logger *slog.Logger) HousekeepingOption {
+func HousekeepingWithLogger(logger zerolog.Logger) HousekeepingOption {
 	return func(h *HousekeepingScheduler) { h.logger = logger }
 }
 
@@ -75,7 +77,7 @@ func (h *HousekeepingScheduler) GetRetentionDays(ctx context.Context) int {
 
 // Run starts the housekeeping scheduler loop. It blocks until ctx is cancelled.
 func (h *HousekeepingScheduler) Run(ctx context.Context) {
-	h.logger.Info("housekeeping scheduler started", "interval", h.interval)
+	h.logger.Info().Dur("interval", h.interval).Msg("housekeeping scheduler started")
 	ticker := time.NewTicker(h.interval)
 	defer ticker.Stop()
 
@@ -85,7 +87,7 @@ func (h *HousekeepingScheduler) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			h.logger.Info("housekeeping scheduler stopped")
+			h.logger.Info().Msg("housekeeping scheduler stopped")
 			return
 		case <-ticker.C:
 			h.runOnce(ctx)
@@ -98,11 +100,11 @@ func (h *HousekeepingScheduler) runOnce(ctx context.Context) {
 		return
 	}
 	retentionDays := h.GetRetentionDays(ctx)
-	h.logger.Info("housekeeping purge starting", "retention_days", retentionDays)
+	h.logger.Info().Int("retention_days", retentionDays).Msg("housekeeping purge starting")
 
 	deleted, err := h.purge(ctx, retentionDays)
 	if err != nil {
-		h.logger.Error("housekeeping purge failed", "error", err, "retention_days", retentionDays)
+		h.logger.Error().Err(err).Int("retention_days", retentionDays).Msg("housekeeping purge failed")
 		_ = h.recorder.Record(ctx, audit.Event{
 			Action:       "housekeeping.purge",
 			ResourceType: "historical_session",
@@ -113,7 +115,7 @@ func (h *HousekeepingScheduler) runOnce(ctx context.Context) {
 		})
 		return
 	}
-	h.logger.Info("housekeeping purge completed", "deleted_rows", deleted, "retention_days", retentionDays)
+	h.logger.Info().Int64("deleted_rows", deleted).Int("retention_days", retentionDays).Msg("housekeeping purge completed")
 	_ = h.recorder.Record(ctx, audit.Event{
 		Action:       "housekeeping.purge",
 		ResourceType: "historical_session",
