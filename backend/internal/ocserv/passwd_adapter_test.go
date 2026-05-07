@@ -2,6 +2,7 @@ package ocserv
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -418,3 +419,82 @@ var errTest = errSentinel("test error")
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
+
+// --- Password file missing tests ---
+
+func TestOcpasswdAdapter_DeleteUser_PasswordFileMissing(t *testing.T) {
+	t.Parallel()
+
+	runner := NewFakeCommandRunner()
+	adapter := NewOcpasswdAdapter("/usr/local/bin/ocpasswd", "/nonexistent/path/ocpasswd", "/etc/ocserv/ocserv.conf", runner)
+
+	err := adapter.DeleteUser(context.Background(), "alice")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "password file") {
+		t.Fatalf("expected error mentioning password file, got: %v", err)
+	}
+	// Verify the sentinel error is in the chain.
+	if !errors.Is(err, ErrPasswordFileMissing) {
+		t.Fatalf("expected ErrPasswordFileMissing in error chain, got: %v", err)
+	}
+}
+
+func TestOcpasswdAdapter_LockUser_PasswordFileMissing(t *testing.T) {
+	t.Parallel()
+
+	runner := NewFakeCommandRunner()
+	adapter := NewOcpasswdAdapter("/usr/local/bin/ocpasswd", "/nonexistent/path/ocpasswd", "/etc/ocserv/ocserv.conf", runner)
+
+	err := adapter.LockUser(context.Background(), "alice")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrPasswordFileMissing) {
+		t.Fatalf("expected ErrPasswordFileMissing in error chain, got: %v", err)
+	}
+}
+
+func TestOcpasswdAdapter_UnlockUser_PasswordFileMissing(t *testing.T) {
+	t.Parallel()
+
+	runner := NewFakeCommandRunner()
+	adapter := NewOcpasswdAdapter("/usr/local/bin/ocpasswd", "/nonexistent/path/ocpasswd", "/etc/ocserv/ocserv.conf", runner)
+
+	err := adapter.UnlockUser(context.Background(), "alice")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrPasswordFileMissing) {
+		t.Fatalf("expected ErrPasswordFileMissing in error chain, got: %v", err)
+	}
+}
+
+func TestOcpasswdAdapter_CreateUser_CreatesDirIfMissing(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	// Point to a subdirectory that doesn't exist yet
+	nestedDir := filepath.Join(tmpDir, "sub", "dir")
+	passwdFile := filepath.Join(nestedDir, "ocpasswd")
+
+	runner := NewFakeCommandRunner()
+	runner.Results["/usr/local/bin/ocpasswd"] = CommandResult{ExitCode: 0}
+
+	adapter := NewOcpasswdAdapter("/usr/local/bin/ocpasswd", passwdFile, "/etc/ocserv/ocserv.conf", runner)
+
+	err := adapter.CreateUser(context.Background(), "alice", "secret123")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Directory should have been created
+	info, err := os.Stat(nestedDir)
+	if err != nil {
+		t.Fatalf("expected directory to be created, stat error: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("expected directory, got file")
+	}
+}

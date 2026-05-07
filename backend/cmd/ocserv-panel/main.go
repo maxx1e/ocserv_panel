@@ -80,12 +80,13 @@ func main() {
 				liveCfg = cfg
 			}
 			return ocserv.ReadinessConfig{
-				OcservBinPath:   liveCfg.Installation.OcservBinPath,
-				OcctlBinPath:    liveCfg.Installation.OcctlBinPath,
-				OcpasswdBinPath: liveCfg.Installation.OcpasswdBinPath,
-				ConfigPath:      liveCfg.Installation.OcservConfigPath,
-				SocketPath:      liveCfg.Installation.OcservSocketPath,
-				UnitName:        liveCfg.Service.SystemdUnitName,
+				OcservBinPath:    liveCfg.Installation.OcservBinPath,
+				OcctlBinPath:     liveCfg.Installation.OcctlBinPath,
+				OcpasswdBinPath:  liveCfg.Installation.OcpasswdBinPath,
+				ConfigPath:       liveCfg.Installation.OcservConfigPath,
+				PasswordFilePath: liveCfg.Installation.OcpasswdFilePath,
+				SocketPath:       liveCfg.Installation.OcservSocketPath,
+				UnitName:         liveCfg.Service.SystemdUnitName,
 			}
 		},
 		runner,

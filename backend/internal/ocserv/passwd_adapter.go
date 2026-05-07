@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -40,6 +41,11 @@ func (a *OcpasswdAdapter) CreateUser(ctx context.Context, username, password str
 
 // DeleteUser removes a user from the password file using ocpasswd -d.
 func (a *OcpasswdAdapter) DeleteUser(ctx context.Context, username string) error {
+	// Verify password file exists before attempting deletion.
+	if _, err := os.Stat(a.filePath); os.IsNotExist(err) {
+		return fmt.Errorf("password file %s: %w", a.filePath, ErrPasswordFileMissing)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -91,6 +97,14 @@ func (a *OcpasswdAdapter) UserExists(ctx context.Context, username string) (bool
 // runPasswdCommand runs ocpasswd for create/update operations, piping the
 // password via stdin to avoid it appearing in process arguments.
 func (a *OcpasswdAdapter) runPasswdCommand(ctx context.Context, username, password string) error {
+	// Ensure the directory for the password file exists (ocpasswd creates the file but not the directory).
+	dir := filepath.Dir(a.filePath)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
+			return fmt.Errorf("create password file directory %s: %w", dir, mkErr)
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -145,6 +159,9 @@ func (a *OcpasswdAdapter) UnlockUser(ctx context.Context, username string) error
 func (a *OcpasswdAdapter) setUserActive(username string, active bool) error {
 	data, err := os.ReadFile(a.filePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("password file %s: %w", a.filePath, ErrPasswordFileMissing)
+		}
 		return fmt.Errorf("read password file: %w", err)
 	}
 	lines := strings.Split(string(data), "\n")

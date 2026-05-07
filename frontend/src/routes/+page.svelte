@@ -79,6 +79,9 @@
     panelConfig: {
       warning: { title: 'Panel Config', description: 'Panel configuration file not found.', action: 'Verify config path or create default configuration.' },
     },
+    passwordFile: {
+      warning: { title: 'Password File', description: 'VPN password file not found. User operations will fail.', action: 'Create a VPN user to auto-generate the file, or check the configured path in Settings.' },
+    },
   };
 
   const STORAGE_TOOLTIPS: Record<string, Record<string, { title: string; description: string; action: string }>> = {
@@ -139,6 +142,7 @@
       const socketStatus: HealthItem['status'] = v.socketPresent ? 'healthy' : 'warning';
       const cfgStatus: HealthItem['status'] = v.configPresent && v.configValid ? 'healthy'
         : v.configPresent && !v.configValid ? 'critical' : 'warning';
+      const pwdFileStatus: HealthItem['status'] = v.passwordFilePresent ? 'healthy' : 'warning';
       return [
         {
           label: 'Systemd service',
@@ -156,6 +160,11 @@
           status: cfgStatus,
           detail: v.configErrors || undefined,
           tooltip: cfgStatus !== 'healthy' ? HEALTH_TOOLTIPS.config[cfgStatus] ?? null : null,
+        },
+        {
+          label: 'Password file',
+          status: pwdFileStatus,
+          tooltip: pwdFileStatus !== 'healthy' ? HEALTH_TOOLTIPS.passwordFile[pwdFileStatus] ?? null : null,
         },
       ];
     })()

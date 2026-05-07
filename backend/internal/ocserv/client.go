@@ -13,6 +13,9 @@ var ErrNotConfigured = errors.New("ocserv integration is not configured")
 // ErrSessionNotFound is returned when a requested session ID does not exist.
 var ErrSessionNotFound = errors.New("ocserv session not found")
 
+// ErrPasswordFileMissing is returned when the ocserv password file does not exist at the configured path.
+var ErrPasswordFileMissing = errors.New("ocserv password file does not exist")
+
 // Session represents an active ocserv session as reported by occtl show sessions.
 type Session struct {
 	ID             string    `json:"ID"`

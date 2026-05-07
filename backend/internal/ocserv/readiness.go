@@ -10,25 +10,27 @@ import (
 
 // OcservReadiness describes the installation and runtime state of ocserv.
 type OcservReadiness struct {
-	BinaryPresent   bool   `json:"binary_present"`
-	BinaryVersion   string `json:"binary_version,omitempty"`
-	ConfigPresent   bool   `json:"config_present"`
-	ConfigValid     bool   `json:"config_valid"`
-	ConfigErrors    string `json:"config_errors,omitempty"`
-	ServiceRunning  bool   `json:"service_running"`
-	SocketPresent   bool   `json:"socket_present"`
-	OcctlPresent    bool   `json:"occtl_present"`
-	OcpasswdPresent bool   `json:"ocpasswd_present"`
+	BinaryPresent       bool   `json:"binary_present"`
+	BinaryVersion       string `json:"binary_version,omitempty"`
+	ConfigPresent       bool   `json:"config_present"`
+	ConfigValid         bool   `json:"config_valid"`
+	ConfigErrors        string `json:"config_errors,omitempty"`
+	PasswordFilePresent bool   `json:"password_file_present"`
+	ServiceRunning      bool   `json:"service_running"`
+	SocketPresent       bool   `json:"socket_present"`
+	OcctlPresent        bool   `json:"occtl_present"`
+	OcpasswdPresent     bool   `json:"ocpasswd_present"`
 }
 
 // ReadinessConfig holds the paths needed for readiness checks.
 type ReadinessConfig struct {
-	OcservBinPath   string
-	OcctlBinPath    string
-	OcpasswdBinPath string
-	ConfigPath      string
-	SocketPath      string
-	UnitName        string
+	OcservBinPath    string
+	OcctlBinPath     string
+	OcpasswdBinPath  string
+	ConfigPath       string
+	PasswordFilePath string
+	SocketPath       string
+	UnitName         string
 }
 
 // ReadinessChecker probes the system for ocserv installation and runtime state.
@@ -68,6 +70,9 @@ func (c *ReadinessChecker) Check(ctx context.Context) (*OcservReadiness, error) 
 
 	// Config file presence.
 	r.ConfigPresent = fileExists(cfg.ConfigPath)
+
+	// Password file presence.
+	r.PasswordFilePresent = fileExists(cfg.PasswordFilePath)
 
 	// Config validation — only if both binary and config are present.
 	if r.ConfigPresent && r.BinaryPresent {

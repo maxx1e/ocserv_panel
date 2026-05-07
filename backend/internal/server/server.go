@@ -543,6 +543,8 @@ func (a *App) writeAppError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusServiceUnavailable, "ocserv is not available")
 	case errors.Is(err, ocserv.ErrSessionNotFound):
 		writeError(w, http.StatusNotFound, "session not found")
+	case errors.Is(err, ocserv.ErrPasswordFileMissing):
+		writeError(w, http.StatusServiceUnavailable, "the VPN password file does not exist — check server configuration")
 	case isMetricsValidationError(err):
 		writeError(w, http.StatusBadRequest, "invalid request")
 	default:

@@ -409,6 +409,7 @@ export type VPNServerHealth = {
   configPresent: boolean;
   configValid: boolean;
   configErrors?: string;
+  passwordFilePresent: boolean;
   binaryPresent: boolean;
   binaryVersion?: string;
 };

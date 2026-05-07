@@ -181,10 +181,10 @@ func (s *OcservService) CreateOcservUser(ctx context.Context, principal auth.Pri
 		return err
 	}
 	if err := ocserv.ValidateUsername(username); err != nil {
-		return fmt.Errorf("invalid username: %w", err)
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	if err := ocserv.ValidatePassword(password); err != nil {
-		return fmt.Errorf("invalid password: %w", err)
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
 	if err := s.users.CreateUser(ctx, username, password); err != nil {
@@ -201,7 +201,7 @@ func (s *OcservService) DeleteOcservUser(ctx context.Context, principal auth.Pri
 		return err
 	}
 	if err := ocserv.ValidateUsername(username); err != nil {
-		return fmt.Errorf("invalid username: %w", err)
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
 	if err := s.users.DeleteUser(ctx, username); err != nil {
@@ -218,10 +218,10 @@ func (s *OcservService) UpdateOcservUserPassword(ctx context.Context, principal 
 		return err
 	}
 	if err := ocserv.ValidateUsername(username); err != nil {
-		return fmt.Errorf("invalid username: %w", err)
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	if err := ocserv.ValidatePassword(newPassword); err != nil {
-		return fmt.Errorf("invalid password: %w", err)
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
 	if err := s.users.UpdatePassword(ctx, username, newPassword); err != nil {
@@ -238,7 +238,7 @@ func (s *OcservService) LockOcservUser(ctx context.Context, principal auth.Princ
 		return err
 	}
 	if err := ocserv.ValidateUsername(username); err != nil {
-		return fmt.Errorf("invalid username: %w", err)
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
 	if err := s.users.LockUser(ctx, username); err != nil {
@@ -255,7 +255,7 @@ func (s *OcservService) UnlockOcservUser(ctx context.Context, principal auth.Pri
 		return err
 	}
 	if err := ocserv.ValidateUsername(username); err != nil {
-		return fmt.Errorf("invalid username: %w", err)
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
 	if err := s.users.UnlockUser(ctx, username); err != nil {
