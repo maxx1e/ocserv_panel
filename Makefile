@@ -29,9 +29,8 @@ build-frontend:
 
 release: clean build-backend build-frontend
 	@echo "→ Packaging release tarball..."
-	@mkdir -p $(DIST)/migrations $(DIST)/sudoers.d
+	@mkdir -p $(DIST)/migrations
 	cp migrations/*.sql $(DIST)/migrations/
-	cp deploy/sudoers.d/ocserv-panel $(DIST)/sudoers.d/
 	cp deploy/ocserv-panel.service $(DIST)/
 	cp deploy/install.sh $(DIST)/
 	chmod +x $(DIST)/install.sh

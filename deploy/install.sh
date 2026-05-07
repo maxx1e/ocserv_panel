@@ -3,6 +3,8 @@
 #
 # Usage:
 #   sudo ./install.sh              # fresh install or upgrade
+#   sudo ./install.sh --status     # check current installation health
+#   sudo ./install.sh --fix        # check health and auto-fix common issues
 #   sudo ./install.sh --uninstall  # remove installation
 #   sudo ./install.sh --help       # show usage
 #
@@ -15,11 +17,26 @@
 #   Log dir         : /var/log/ocserv-panel/
 #   Metrics (tsdb)  : /var/lib/ocserv-panel/metrics/
 #   systemd unit    : /etc/systemd/system/ocserv-panel.service
-#   Sudoers file    : /etc/sudoers.d/ocserv-panel
-#   Service user    : ocserv-panel (system, no login shell)
-#   Health endpoint : http://127.0.0.1:${PANEL_PORT}/api/health
+#   Health endpoint : https://127.0.0.1:${PANEL_PORT}/api/health
 
-set -euo pipefail
+# ─── Error handling ──────────────────────────────────────────────────────────
+# We do NOT use "set -e" because it causes silent exits on benign failures
+# (e.g. grep not matching, test returning false, arithmetic returning 0).
+# Instead, every critical command is wrapped with explicit error checks.
+set -uo pipefail
+
+# Global error trap — catches unexpected failures and reports the line number
+trap '__err_handler $LINENO "$BASH_COMMAND"' ERR
+
+__err_handler() {
+    local line="$1"
+    local cmd="$2"
+    # Only report truly unexpected errors — skip intentional failures
+    printf '\033[0;31m[error]\033[0m Unexpected failure at line %d: %s\n' "${line}" "${cmd}" >&2
+    printf '\033[0;31m[error]\033[0m The installer encountered an unexpected error and cannot continue.\n' >&2
+    printf '\033[0;31m[error]\033[0m Re-run with "bash -x %s" for detailed trace output.\n' "${BASH_SOURCE[0]}" >&2
+    exit 1
+}
 
 # ─── Script location ─────────────────────────────────────────────────────────
 
@@ -42,10 +59,14 @@ DATA_DIR="/var/lib/ocserv-panel"
 LOG_DIR="/var/log/ocserv-panel"
 METRICS_DIR="${DATA_DIR}/metrics"
 SYSTEMD_UNIT="/etc/systemd/system/ocserv-panel.service"
-SUDOERS_FILE="/etc/sudoers.d/ocserv-panel"
-SERVICE_USER="ocserv-panel"
-SERVICE_GROUP="ocserv-panel"
-PANEL_PORT="8080"
+# Service runs as root — no dedicated user or sudoers needed
+PANEL_PORT="8443"
+
+# ─── Fix mode flag ───────────────────────────────────────────────────────────
+
+FIX_MODE="false"
+FIXES_APPLIED=0
+FIXES_FAILED=0
 
 # ─── Detected values (populated by detect_ocserv) ────────────────────────────
 
@@ -69,12 +90,111 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
-ok()   { printf "${GREEN}  [ok]${RESET} %s\n" "$*"; }
-fail() { printf "${RED}  [fail]${RESET} %s\n" "$*"; }
-warn() { printf "${YELLOW}  [warn]${RESET} %s\n" "$*"; }
-info() { printf "${BLUE}  [->]${RESET} %s\n" "$*"; }
+ok()   { printf "${GREEN}  [✓]${RESET} %s\n" "$*"; }
+fail() { printf "${RED}  [✗]${RESET} %s\n" "$*"; }
+warn() { printf "${YELLOW}  [!]${RESET} %s\n" "$*"; }
+info() { printf "${BLUE}  [→]${RESET} %s\n" "$*"; }
 bold() { printf "${BOLD}%s${RESET}\n" "$*"; }
-die()  { printf "${RED}[error]${RESET} %s\n" "$*" >&2; exit 1; }
+
+die() {
+    echo ""
+    printf "${RED}┌─────────────────────────────────────────────────┐${RESET}\n"
+    printf "${RED}│ ERROR: %-40s │${RESET}\n" "$*"
+    printf "${RED}└─────────────────────────────────────────────────┘${RESET}\n"
+    echo ""
+    printf "  Troubleshooting:\n"
+    printf "    • Re-run with: ${BOLD}bash -x %s${RESET}\n" "$0"
+    printf "    • Check system logs: ${BOLD}journalctl -xe${RESET}\n"
+    echo ""
+    exit 1
+}
+
+# ─── Step execution wrapper ──────────────────────────────────────────────────
+# Runs a function and reports success/failure clearly.
+# Usage: run_step "Description" function_name [args...]
+
+run_step() {
+    local description="$1"
+    shift
+    info "${description}..."
+    if "$@"; then
+        ok "${description}"
+    else
+        local rc=$?
+        fail "${description}"
+        die "Step failed: ${description} (exit code ${rc})"
+    fi
+}
+
+# ─── Usage ────────────────────────────────────────────────────────────────────
+
+# ─── Fix helper ──────────────────────────────────────────────────────────────
+# Attempts a fix only when FIX_MODE is enabled. Returns 0 if fix was applied
+# successfully, 1 otherwise (including when FIX_MODE is off).
+# Usage: try_fix "Description" command [args...]
+
+try_fix() {
+    local description="$1"
+    shift
+    if [[ "${FIX_MODE}" != "true" ]]; then
+        return 1
+    fi
+    info "Fixing: ${description}..."
+    if "$@"; then
+        ok "Fixed: ${description}"
+        FIXES_APPLIED=$((FIXES_APPLIED + 1))
+        return 0
+    else
+        fail "Could not fix: ${description}"
+        FIXES_FAILED=$((FIXES_FAILED + 1))
+        return 1
+    fi
+}
+
+# ─── Certificate group access helper ────────────────────────────────────────
+# Creates ssl-cert group if needed, adds the service user to it, sets group
+# ownership on the cert directory, and ensures parent directory traversal.
+# Usage: __fix_cert_group_access <user> <cert_dir>
+
+__fix_cert_group_access() {
+    local user="$1"
+    local dir="$2"
+
+    # Create ssl-cert group if it doesn't exist
+    if ! getent group ssl-cert >/dev/null 2>&1; then
+        if ! groupadd ssl-cert; then
+            return 1
+        fi
+    fi
+
+    # Add service user to ssl-cert group
+    if ! usermod -aG ssl-cert "${user}"; then
+        return 1
+    fi
+
+    # Set group ownership on cert directory and contents
+    if ! chgrp -R ssl-cert "${dir}"; then
+        return 1
+    fi
+    chmod -R g+rX "${dir}"
+
+    # Ensure parent directories allow group traversal (e.g. /etc/letsencrypt/live)
+    local parent="${dir}"
+    while [[ "${parent}" != "/" ]]; do
+        parent="$(dirname "${parent}")"
+        # Stop at /etc or / to avoid overly broad changes
+        if [[ "${parent}" == "/" || "${parent}" == "/etc" ]]; then
+            break
+        fi
+        # Only add g+x if the directory is not already group-traversable
+        if [[ ! -x "${parent}" ]] || ! stat -c '%A' "${parent}" 2>/dev/null | grep -q '...x'; then
+            chgrp ssl-cert "${parent}" 2>/dev/null || true
+            chmod g+x "${parent}" 2>/dev/null || true
+        fi
+    done
+
+    return 0
+}
 
 # ─── Usage ────────────────────────────────────────────────────────────────────
 
@@ -84,20 +204,42 @@ ocserv-panel installer
 
 Usage:
   sudo $0              # fresh install or upgrade
+  sudo $0 --status     # check current installation health
+  sudo $0 --fix        # check health and auto-fix common issues
   sudo $0 --uninstall  # remove installation
   sudo $0 --help       # show this help
 
 The installer:
   - Detects your ocserv configuration automatically
-  - Creates the ocserv-panel system user
   - Installs binary, static assets, and migrations
   - Generates /etc/ocserv-panel/config.toml (skipped on upgrade if file exists)
-  - Installs sudoers rules with detected binary paths
-  - Installs and starts the systemd service
+  - Installs and starts the systemd service (runs as root)
   - Verifies the health endpoint
 
 Re-running the installer on an existing installation performs an upgrade:
   existing data and configuration are preserved and backed up before changes.
+
+Status check (--status):
+  Inspects the current installation and reports any issues:
+  binary, service, config, certificates, permissions, health, and ocserv integration.
+
+Fix mode (--fix):
+  Runs the same checks as --status, but automatically attempts to resolve
+  common issues such as:
+  - Missing or incorrectly owned data directories
+  - SQLite database file permission/ownership problems
+  - WAL/SHM journal file ownership mismatches
+  - Config file permission modes
+  - Sudoers file permission modes
+  - Service not enabled on boot
+  - Certificate read access for the service user
+
+Prerequisites:
+  - Root access (sudo)
+  - systemd
+  - ocserv installed and configured
+  - TLS certificates (e.g. Let's Encrypt)
+
 EOF
 }
 
@@ -105,11 +247,13 @@ EOF
 
 header() {
     local version="unknown"
-    [[ -f "${VERSION_FILE}" ]] && version="$(cat "${VERSION_FILE}")"
+    if [[ -f "${VERSION_FILE}" ]]; then
+        version="$(cat "${VERSION_FILE}")"
+    fi
     echo ""
-    bold "=========================================="
-    bold "  ocserv-panel Installer  v${version}"
-    bold "=========================================="
+    bold "╔══════════════════════════════════════════════╗"
+    bold "║  ocserv-panel Installer  v${version}"
+    bold "╚══════════════════════════════════════════════╝"
     echo ""
 }
 
@@ -117,7 +261,9 @@ header() {
 
 read_version() {
     local version="unknown"
-    [[ -f "${VERSION_FILE}" ]] && version="$(cat "${VERSION_FILE}")"
+    if [[ -f "${VERSION_FILE}" ]]; then
+        version="$(cat "${VERSION_FILE}")"
+    fi
     echo "${version}"
 }
 
@@ -139,8 +285,9 @@ detect_ocserv() {
             break
         fi
     done
-    [[ -z "${DETECTED_OCSERV_BIN}" ]] && \
-        DETECTED_OCSERV_BIN="$(command -v ocserv 2>/dev/null || true)"
+    if [[ -z "${DETECTED_OCSERV_BIN}" ]]; then
+        DETECTED_OCSERV_BIN="$(command -v ocserv 2>/dev/null)" || true
+    fi
 
     for candidate in \
         /usr/bin/occtl \
@@ -152,8 +299,9 @@ detect_ocserv() {
             break
         fi
     done
-    [[ -z "${DETECTED_OCCTL_BIN}" ]] && \
-        DETECTED_OCCTL_BIN="$(command -v occtl 2>/dev/null || true)"
+    if [[ -z "${DETECTED_OCCTL_BIN}" ]]; then
+        DETECTED_OCCTL_BIN="$(command -v occtl 2>/dev/null)" || true
+    fi
 
     for candidate in \
         /usr/bin/ocpasswd \
@@ -165,23 +313,27 @@ detect_ocserv() {
             break
         fi
     done
-    [[ -z "${DETECTED_OCPASSWD_BIN}" ]] && \
-        DETECTED_OCPASSWD_BIN="$(command -v ocpasswd 2>/dev/null || true)"
+    if [[ -z "${DETECTED_OCPASSWD_BIN}" ]]; then
+        DETECTED_OCPASSWD_BIN="$(command -v ocpasswd 2>/dev/null)" || true
+    fi
 
     # Config file — try to find it from the running unit first
     DETECTED_OCSERV_CONF=""
     if command -v systemctl &>/dev/null; then
-        local exec_start
-        exec_start="$(systemctl show ocserv --property=ExecStart 2>/dev/null | grep -oP '(?<=path=)[^ ;]+' | head -1 || true)"
+        local exec_start=""
+        exec_start="$(systemctl show ocserv --property=ExecStart 2>/dev/null \
+            | grep -oP '(?<=path=)[^ ;]+' | head -1)" || true
         if [[ -n "${exec_start}" ]]; then
             # Extract -c <configfile> argument
-            local unit_conf
+            local unit_conf=""
             unit_conf="$(systemctl show ocserv --property=ExecStart 2>/dev/null \
-                | grep -oP '(?<=-c )\S+' | head -1 || true)"
-            [[ -n "${unit_conf}" && -f "${unit_conf}" ]] && \
+                | grep -oP '(?<=-c )\S+' | head -1)" || true
+            if [[ -n "${unit_conf}" && -f "${unit_conf}" ]]; then
                 DETECTED_OCSERV_CONF="${unit_conf}"
+            fi
         fi
     fi
+
     # Fall back to well-known paths
     if [[ -z "${DETECTED_OCSERV_CONF}" ]]; then
         for candidate in \
@@ -200,22 +352,25 @@ detect_ocserv() {
     if [[ -n "${DETECTED_OCSERV_CONF}" && -r "${DETECTED_OCSERV_CONF}" ]]; then
         local conf="${DETECTED_OCSERV_CONF}"
 
-        # socket-file = <path>
-        DETECTED_OCSERV_SOCKET="$(grep -E '^\s*socket-file\s*=' "${conf}" \
-            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'" || true)"
-        [[ -z "${DETECTED_OCSERV_SOCKET}" ]] && \
-            DETECTED_OCSERV_SOCKET="/var/run/ocserv-socket"
+        # occtl-socket-file = <path> (the management socket used by occtl)
+        # NOTE: "socket-file" is internal worker IPC with .PID suffix — NOT for occtl.
+        DETECTED_OCSERV_SOCKET="$(grep -E '^\s*occtl-socket-file\s*=' "${conf}" \
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+        if [[ -z "${DETECTED_OCSERV_SOCKET}" ]]; then
+            DETECTED_OCSERV_SOCKET="/var/run/occtl.socket"
+        fi
 
         # plain[passwd=<path>] in auth directive
         DETECTED_OCPASSWD_FILE="$(grep -E '^\s*auth\s*=' "${conf}" \
-            | grep -oP '(?<=passwd=)[^]]+' | head -1 | tr -d '"' | tr -d "'" || true)"
-        [[ -z "${DETECTED_OCPASSWD_FILE}" ]] && \
+            | grep -oP '(?<=passwd=)[^]]+' | head -1 | tr -d '"' | tr -d "'")" || true
+        if [[ -z "${DETECTED_OCPASSWD_FILE}" ]]; then
             DETECTED_OCPASSWD_FILE="/etc/ocserv/ocpasswd"
+        fi
 
         # server-cert = <path>
         DETECTED_CERT_PATH="$(grep -E '^\s*server-cert\s*=' "${conf}" \
-            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'" || true)"
-        if [[ -n "${DETECTED_CERT_PATH}" && ! "${DETECTED_CERT_PATH}" = /* ]]; then
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+        if [[ -n "${DETECTED_CERT_PATH}" && "${DETECTED_CERT_PATH}" != /* ]]; then
             # Relative path — resolve from config dir
             local conf_dir
             conf_dir="$(dirname "${DETECTED_OCSERV_CONF}")"
@@ -224,8 +379,8 @@ detect_ocserv() {
 
         # server-key = <path>
         DETECTED_KEY_PATH="$(grep -E '^\s*server-key\s*=' "${conf}" \
-            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'" || true)"
-        if [[ -n "${DETECTED_KEY_PATH}" && ! "${DETECTED_KEY_PATH}" = /* ]]; then
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+        if [[ -n "${DETECTED_KEY_PATH}" && "${DETECTED_KEY_PATH}" != /* ]]; then
             local conf_dir
             conf_dir="$(dirname "${DETECTED_OCSERV_CONF}")"
             DETECTED_KEY_PATH="${conf_dir}/${DETECTED_KEY_PATH}"
@@ -238,12 +393,18 @@ detect_ocserv() {
     fi
 
     # Final defaults for anything still empty
-    [[ -z "${DETECTED_OCSERV_CONF}" ]]      && DETECTED_OCSERV_CONF="/etc/ocserv/ocserv.conf"
-    [[ -z "${DETECTED_OCSERV_SOCKET}" ]]    && DETECTED_OCSERV_SOCKET="/var/run/ocserv-socket"
-    [[ -z "${DETECTED_OCPASSWD_FILE}" ]]    && DETECTED_OCPASSWD_FILE="/etc/ocserv/ocpasswd"
-    [[ -z "${DETECTED_CERT_PATH}" ]]        && DETECTED_CERT_PATH=""
-    [[ -z "${DETECTED_KEY_PATH}" ]]         && DETECTED_KEY_PATH=""
-    [[ -z "${DETECTED_CERT_DIR}" ]]         && DETECTED_CERT_DIR="/etc/letsencrypt/live"
+    if [[ -z "${DETECTED_OCSERV_CONF}" ]]; then
+        DETECTED_OCSERV_CONF="/etc/ocserv/ocserv.conf"
+    fi
+    if [[ -z "${DETECTED_OCSERV_SOCKET}" ]]; then
+        DETECTED_OCSERV_SOCKET="/var/run/occtl.socket"
+    fi
+    if [[ -z "${DETECTED_OCPASSWD_FILE}" ]]; then
+        DETECTED_OCPASSWD_FILE="/etc/ocserv/ocpasswd"
+    fi
+    if [[ -z "${DETECTED_CERT_DIR}" ]]; then
+        DETECTED_CERT_DIR="/etc/letsencrypt/live"
+    fi
 }
 
 # ─── Detect existing installation ─────────────────────────────────────────────
@@ -251,8 +412,15 @@ detect_ocserv() {
 detect_existing() {
     EXISTING_VERSION=""
     if [[ -x "${BINARY_DST}" ]]; then
-        EXISTING_VERSION="$(${BINARY_DST} --version 2>/dev/null | awk '{print $NF}' || true)"
-        [[ -z "${EXISTING_VERSION}" ]] && EXISTING_VERSION="unknown"
+        # The binary may fail (missing config, db, etc.) — that's fine during
+        # detection. We use if-construct which is exempt from ERR trap.
+        local ver_output=""
+        if ver_output="$("${BINARY_DST}" --version 2>/dev/null)"; then
+            EXISTING_VERSION="$(echo "${ver_output}" | awk '{print $NF}')" || true
+        fi
+        if [[ -z "${EXISTING_VERSION}" ]]; then
+            EXISTING_VERSION="unknown"
+        fi
     fi
 }
 
@@ -261,95 +429,224 @@ detect_existing() {
 preflight() {
     bold "Preflight checks"
     echo ""
-    local ok=true
+    local errors=0
 
     # Running as root
     if [[ "${EUID}" -eq 0 ]]; then
         ok "Running as root"
     else
         fail "Must run as root (use sudo)"
-        ok=false
+        errors=$((errors + 1))
     fi
 
     # systemd available
-    if command -v systemctl &>/dev/null && systemctl list-units &>/dev/null 2>&1; then
-        ok "systemd is available"
+    if command -v systemctl &>/dev/null; then
+        if systemctl list-units &>/dev/null 2>&1; then
+            ok "systemd is available and running"
+        else
+            fail "systemctl found but systemd is not running"
+            printf "       → Is this system using systemd? Check: ${BOLD}ps 1${RESET}\n"
+            errors=$((errors + 1))
+        fi
     else
-        fail "systemd not found or not running"
-        ok=false
+        fail "systemctl not found"
+        printf "       → This installer requires systemd. Are you on a supported distro?\n"
+        errors=$((errors + 1))
     fi
 
-    # Artifacts present
-    if [[ -f "${BINARY_SRC}" && -x "${BINARY_SRC}" ]]; then
-        ok "Binary artifact found: ${BINARY_SRC}"
+    # Artifacts present — binary
+    if [[ -f "${BINARY_SRC}" ]]; then
+        if [[ -x "${BINARY_SRC}" ]]; then
+            ok "Binary: ${BINARY_SRC}"
+        else
+            fail "Binary found but not executable: ${BINARY_SRC}"
+            printf "       → Fix with: ${BOLD}chmod +x %s${RESET}\n" "${BINARY_SRC}"
+            errors=$((errors + 1))
+        fi
     else
-        fail "Binary not found or not executable: ${BINARY_SRC}"
-        ok=false
+        fail "Binary not found: ${BINARY_SRC}"
+        printf "       → Expected layout after extracting the tarball:\n"
+        printf "         bin/ocserv-panel, static/, migrations/, install.sh\n"
+        printf "       → Did you extract the tarball correctly?\n"
+        printf "         ${BOLD}tar xzf ocserv-panel-*.tar.gz -C /opt/ocserv-panel${RESET}\n"
+        errors=$((errors + 1))
     fi
 
+    # Artifacts present — static directory
     if [[ -d "${STATIC_SRC}" ]]; then
-        ok "Static assets found: ${STATIC_SRC}"
+        local file_count
+        file_count="$(find "${STATIC_SRC}" -type f | wc -l)" || true
+        if [[ "${file_count}" -gt 0 ]]; then
+            ok "Static assets: ${STATIC_SRC} (${file_count} files)"
+        else
+            fail "Static assets directory is empty: ${STATIC_SRC}"
+            printf "       → The frontend build may have failed. Rebuild with: ${BOLD}make build-frontend${RESET}\n"
+            errors=$((errors + 1))
+        fi
     else
         fail "Static assets directory not found: ${STATIC_SRC}"
-        ok=false
+        printf "       → Expected after tarball extraction. Check archive contents.\n"
+        errors=$((errors + 1))
     fi
 
+    # Artifacts present — migrations
     if [[ -d "${MIGRATIONS_SRC}" ]]; then
-        ok "Migrations directory found: ${MIGRATIONS_SRC}"
+        local sql_count
+        sql_count="$(find "${MIGRATIONS_SRC}" -name '*.sql' -type f | wc -l)" || true
+        if [[ "${sql_count}" -gt 0 ]]; then
+            ok "Migrations: ${MIGRATIONS_SRC} (${sql_count} SQL files)"
+        else
+            fail "Migrations directory has no .sql files: ${MIGRATIONS_SRC}"
+            errors=$((errors + 1))
+        fi
     else
         fail "Migrations directory not found: ${MIGRATIONS_SRC}"
-        ok=false
+        printf "       → Expected after tarball extraction. Check archive contents.\n"
+        errors=$((errors + 1))
     fi
 
+    # VERSION file
     if [[ -f "${VERSION_FILE}" ]]; then
-        ok "VERSION file found: $(cat "${VERSION_FILE}")"
+        ok "Version: $(cat "${VERSION_FILE}")"
     else
-        warn "VERSION file not found at ${VERSION_FILE}, will use 'unknown'"
-    fi
-
-    # ocserv detection summary
-    if [[ -n "${DETECTED_OCSERV_BIN}" ]]; then
-        ok "ocserv binary: ${DETECTED_OCSERV_BIN}"
-    else
-        warn "ocserv binary not found — install paths will use defaults"
-    fi
-
-    if [[ -n "${DETECTED_OCCTL_BIN}" ]]; then
-        ok "occtl binary: ${DETECTED_OCCTL_BIN}"
-    else
-        warn "occtl binary not found — sudoers rule will use /usr/bin/occtl"
-    fi
-
-    if [[ -n "${DETECTED_OCPASSWD_BIN}" ]]; then
-        ok "ocpasswd binary: ${DETECTED_OCPASSWD_BIN}"
-    else
-        warn "ocpasswd binary not found — sudoers rule will use /usr/bin/ocpasswd"
-    fi
-
-    if [[ -n "${DETECTED_OCSERV_CONF}" && -f "${DETECTED_OCSERV_CONF}" ]]; then
-        ok "ocserv config: ${DETECTED_OCSERV_CONF}"
-    else
-        warn "ocserv config not found at ${DETECTED_OCSERV_CONF} — using default path"
-    fi
-
-    # visudo available for sudoers validation
-    if command -v visudo &>/dev/null; then
-        ok "visudo available for sudoers validation"
-    else
-        warn "visudo not found — sudoers file will be installed without syntax check"
-    fi
-
-    # curl available for health check
-    if command -v curl &>/dev/null; then
-        ok "curl available for health check"
-    else
-        warn "curl not found — post-install health check will be skipped"
+        warn "VERSION file missing — will use 'unknown' as version identifier"
     fi
 
     echo ""
-    if [[ "${ok}" != "true" ]]; then
-        die "Preflight failed. Correct the errors above and re-run."
+    bold "ocserv detection"
+    echo ""
+
+    # ocserv binary
+    if [[ -n "${DETECTED_OCSERV_BIN}" && -x "${DETECTED_OCSERV_BIN}" ]]; then
+        local ocserv_ver=""
+        ocserv_ver="$("${DETECTED_OCSERV_BIN}" --version 2>/dev/null | head -1)" || true
+        ok "ocserv: ${DETECTED_OCSERV_BIN} ${ocserv_ver:+(${ocserv_ver})}"
+    else
+        fail "ocserv binary not found"
+        printf "       → Is ocserv installed? Check: ${BOLD}which ocserv${RESET}\n"
+        printf "       → Install ocserv first, then re-run this installer.\n"
+        errors=$((errors + 1))
     fi
+
+    # occtl
+    if [[ -n "${DETECTED_OCCTL_BIN}" && -x "${DETECTED_OCCTL_BIN}" ]]; then
+        ok "occtl: ${DETECTED_OCCTL_BIN}"
+    else
+        fail "occtl binary not found"
+        printf "       → occtl is required for session management.\n"
+        printf "       → Usually installed alongside ocserv. Check: ${BOLD}which occtl${RESET}\n"
+        errors=$((errors + 1))
+    fi
+
+    # ocpasswd
+    if [[ -n "${DETECTED_OCPASSWD_BIN}" && -x "${DETECTED_OCPASSWD_BIN}" ]]; then
+        ok "ocpasswd: ${DETECTED_OCPASSWD_BIN}"
+    else
+        fail "ocpasswd binary not found"
+        printf "       → ocpasswd is required for VPN user management.\n"
+        printf "       → Usually installed alongside ocserv. Check: ${BOLD}which ocpasswd${RESET}\n"
+        errors=$((errors + 1))
+    fi
+
+    # ocserv config
+    if [[ -n "${DETECTED_OCSERV_CONF}" && -f "${DETECTED_OCSERV_CONF}" ]]; then
+        ok "Config: ${DETECTED_OCSERV_CONF}"
+    else
+        fail "ocserv config not found at: ${DETECTED_OCSERV_CONF:-/etc/ocserv/ocserv.conf}"
+        printf "       → The panel needs to read ocserv.conf for user/session management.\n"
+        printf "       → Check: ${BOLD}ls /etc/ocserv/ocserv.conf${RESET}\n"
+        errors=$((errors + 1))
+    fi
+
+    # ocserv running check
+    if command -v systemctl &>/dev/null; then
+        if systemctl is-active --quiet ocserv 2>/dev/null; then
+            ok "ocserv service: running"
+        else
+            warn "ocserv service is not running"
+            printf "       → The panel can still be installed, but some features won't work\n"
+            printf "         until ocserv is started: ${BOLD}systemctl start ocserv${RESET}\n"
+        fi
+    fi
+
+    echo ""
+    bold "TLS certificates"
+    echo ""
+
+    # TLS cert detection
+    if [[ -n "${DETECTED_CERT_PATH}" && -f "${DETECTED_CERT_PATH}" ]]; then
+        ok "Certificate: ${DETECTED_CERT_PATH}"
+    elif [[ -n "${DETECTED_CERT_PATH}" ]]; then
+        fail "Certificate path configured but file not found: ${DETECTED_CERT_PATH}"
+        printf "       → The panel needs TLS certs for HTTPS.\n"
+        printf "       → Check that Let's Encrypt renewal is working: ${BOLD}certbot certificates${RESET}\n"
+        errors=$((errors + 1))
+    else
+        warn "No TLS certificate detected in ocserv config"
+        printf "       → The panel will be installed without HTTPS.\n"
+        printf "       → For production, configure TLS certs after install.\n"
+    fi
+
+    if [[ -n "${DETECTED_KEY_PATH}" && -f "${DETECTED_KEY_PATH}" ]]; then
+        ok "Private key: ${DETECTED_KEY_PATH}"
+    elif [[ -n "${DETECTED_KEY_PATH}" ]]; then
+        fail "Key path configured but file not found: ${DETECTED_KEY_PATH}"
+        errors=$((errors + 1))
+    fi
+
+    echo ""
+    bold "System tools"
+    echo ""
+
+    # curl for health check
+    if command -v curl &>/dev/null; then
+        ok "curl: available (health check enabled)"
+    else
+        warn "curl not found — post-install health check will be skipped"
+        printf "       → Install curl for automated verification: ${BOLD}apt install curl${RESET}\n"
+    fi
+
+    # Disk space check (need at least 100MB free on /usr and /var)
+    local usr_free var_free
+    usr_free="$(df -m /usr 2>/dev/null | awk 'NR==2{print $4}')" || true
+    var_free="$(df -m /var 2>/dev/null | awk 'NR==2{print $4}')" || true
+    if [[ -n "${usr_free}" && "${usr_free}" -lt 100 ]]; then
+        fail "Less than 100MB free on /usr (${usr_free}MB available)"
+        printf "       → The binary and static assets need ~50MB on /usr\n"
+        errors=$((errors + 1))
+    else
+        ok "Disk space /usr: ${usr_free:-unknown}MB available"
+    fi
+    if [[ -n "${var_free}" && "${var_free}" -lt 100 ]]; then
+        fail "Less than 100MB free on /var (${var_free}MB available)"
+        printf "       → Database and metrics are stored in /var/lib/ocserv-panel\n"
+        errors=$((errors + 1))
+    else
+        ok "Disk space /var: ${var_free:-unknown}MB available"
+    fi
+
+    # Existing installation info
+    echo ""
+    if [[ -n "${EXISTING_VERSION}" ]]; then
+        bold "Existing installation"
+        echo ""
+        info "Found version: ${EXISTING_VERSION} → will upgrade to $(read_version)"
+    fi
+
+    # Final verdict
+    echo ""
+    if [[ "${errors}" -gt 0 ]]; then
+        echo ""
+        printf "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        printf "${RED}  Preflight failed: %d error(s) found${RESET}\n" "${errors}"
+        printf "${RED}  Fix the issues above and re-run the installer.${RESET}\n"
+        printf "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+        echo ""
+        exit 1
+    fi
+
+    ok "All preflight checks passed"
+    echo ""
 }
 
 # ─── Installation plan display ────────────────────────────────────────────────
@@ -368,33 +665,34 @@ show_plan() {
     fi
     echo ""
     echo "  Detected ocserv paths:"
-    echo "    ocserv binary  : ${DETECTED_OCSERV_BIN:-/usr/sbin/ocserv (default)}"
-    echo "    occtl binary   : ${DETECTED_OCCTL_BIN:-/usr/bin/occtl (default)}"
-    echo "    ocpasswd binary: ${DETECTED_OCPASSWD_BIN:-/usr/bin/ocpasswd (default)}"
+    echo "    ocserv binary  : ${DETECTED_OCSERV_BIN:-not found}"
+    echo "    occtl binary   : ${DETECTED_OCCTL_BIN:-not found}"
+    echo "    ocpasswd binary: ${DETECTED_OCPASSWD_BIN:-not found}"
     echo "    config file    : ${DETECTED_OCSERV_CONF}"
     echo "    socket         : ${DETECTED_OCSERV_SOCKET}"
     echo "    password file  : ${DETECTED_OCPASSWD_FILE}"
-    [[ -n "${DETECTED_CERT_PATH}" ]] && \
-        echo "    server-cert    : ${DETECTED_CERT_PATH}"
+    if [[ -n "${DETECTED_CERT_PATH}" ]]; then
+        echo "    TLS cert       : ${DETECTED_CERT_PATH}"
+        echo "    TLS key        : ${DETECTED_KEY_PATH}"
+    fi
     echo ""
     echo "  Steps:"
     local n=1
-    [[ "${mode}" == "upgrade" ]] && { echo "  ${n}. Stop existing service"; (( n++ )); }
-    [[ "${mode}" == "upgrade" ]] && { echo "  ${n}. Backup data (DB + config)"; (( n++ )); }
-    echo "  ${n}. Create system user '${SERVICE_USER}'"; (( n++ ))
-    echo "  ${n}. Install binary → ${BINARY_DST}"; (( n++ ))
-    echo "  ${n}. Install static assets → ${STATIC_DST}"; (( n++ ))
-    echo "  ${n}. Install migrations → ${MIGRATIONS_DST}"; (( n++ ))
-    if [[ "${mode}" == "upgrade" && -f "${CONFIG_FILE}" ]]; then
-        echo "  ${n}. Config preserved (upgrade) → ${CONFIG_FILE}"; (( n++ ))
-    else
-        echo "  ${n}. Generate config → ${CONFIG_FILE}"; (( n++ ))
+    if [[ "${mode}" == "upgrade" ]]; then
+        echo "  ${n}. Stop existing service"; n=$((n + 1))
+        echo "  ${n}. Backup data (DB + config)"; n=$((n + 1))
     fi
-    echo "  ${n}. Install sudoers → ${SUDOERS_FILE}"; (( n++ ))
-    echo "  ${n}. Verify certificate read access for ${SERVICE_USER}"; (( n++ ))
-    echo "  ${n}. Install systemd unit → ${SYSTEMD_UNIT}"; (( n++ ))
-    echo "  ${n}. Enable and start service"; (( n++ ))
-    echo "  ${n}. Verify health endpoint"; (( n++ ))
+    echo "  ${n}. Install binary → ${BINARY_DST}"; n=$((n + 1))
+    echo "  ${n}. Install static assets → ${STATIC_DST}"; n=$((n + 1))
+    echo "  ${n}. Install migrations → ${MIGRATIONS_DST}"; n=$((n + 1))
+    if [[ "${mode}" == "upgrade" && -f "${CONFIG_FILE}" ]]; then
+        echo "  ${n}. Config preserved (upgrade) → ${CONFIG_FILE}"; n=$((n + 1))
+    else
+        echo "  ${n}. Generate config → ${CONFIG_FILE}"; n=$((n + 1))
+    fi
+    echo "  ${n}. Install systemd unit → ${SYSTEMD_UNIT}"; n=$((n + 1))
+    echo "  ${n}. Enable and start service"; n=$((n + 1))
+    echo "  ${n}. Verify health endpoint"
     echo ""
 }
 
@@ -417,17 +715,21 @@ confirm() {
         case "${answer,,}" in
             y|yes) return 0 ;;
             n|no)  return 1 ;;
-            *)     echo "Please answer y or n." ;;
+            *)     echo "  Please answer y or n." ;;
         esac
     done
 }
 
 # ─── Stop existing service ────────────────────────────────────────────────────
 
-stop_existing() {
-    info "Stopping existing service..."
+do_stop_existing() {
     if systemctl is-active --quiet ocserv-panel 2>/dev/null; then
-        systemctl stop ocserv-panel
+        if ! systemctl stop ocserv-panel; then
+            fail "Could not stop ocserv-panel service"
+            printf "       → Check: ${BOLD}systemctl status ocserv-panel${RESET}\n"
+            printf "       → Force stop: ${BOLD}systemctl kill ocserv-panel${RESET}\n"
+            return 1
+        fi
         ok "Service stopped"
     else
         ok "Service was not running"
@@ -436,94 +738,117 @@ stop_existing() {
 
 # ─── Backup data ──────────────────────────────────────────────────────────────
 
-backup_data() {
+do_backup_data() {
     local backup_dir="/var/backups/ocserv-panel"
     local timestamp
     timestamp="$(date +%Y%m%dT%H%M%S)"
     local backup_file="${backup_dir}/backup-${EXISTING_VERSION}-${timestamp}.tar.gz"
 
-    info "Backing up data to ${backup_file}..."
-    mkdir -p "${backup_dir}"
+    if ! mkdir -p "${backup_dir}"; then
+        fail "Cannot create backup directory: ${backup_dir}"
+        return 1
+    fi
 
     local items=()
-    [[ -f "${DATA_DIR}/ocserv_panel.db" ]]   && items+=("${DATA_DIR}/ocserv_panel.db")
-    [[ -f "${DATA_DIR}/ocserv_panel.db-wal" ]] && items+=("${DATA_DIR}/ocserv_panel.db-wal")
-    [[ -f "${CONFIG_FILE}" ]]                 && items+=("${CONFIG_FILE}")
+    if [[ -f "${DATA_DIR}/ocserv_panel.db" ]]; then
+        items+=("${DATA_DIR}/ocserv_panel.db")
+    fi
+    if [[ -f "${DATA_DIR}/ocserv_panel.db-wal" ]]; then
+        items+=("${DATA_DIR}/ocserv_panel.db-wal")
+    fi
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        items+=("${CONFIG_FILE}")
+    fi
 
     if [[ ${#items[@]} -gt 0 ]]; then
-        tar -czf "${backup_file}" "${items[@]}" 2>/dev/null
-        ok "Backup written: ${backup_file}"
+        if tar -czf "${backup_file}" "${items[@]}" 2>/dev/null; then
+            ok "Backup: ${backup_file}"
+        else
+            fail "Backup creation failed"
+            printf "       → Check disk space and permissions on ${backup_dir}\n"
+            return 1
+        fi
     else
         ok "No existing data to back up"
     fi
 }
 
-# ─── Create system user ───────────────────────────────────────────────────────
-
-create_user() {
-    info "Creating system user '${SERVICE_USER}'..."
-    if id "${SERVICE_USER}" &>/dev/null; then
-        ok "User '${SERVICE_USER}' already exists"
-    else
-        useradd \
-            --system \
-            --no-create-home \
-            --shell /usr/sbin/nologin \
-            --comment "ocserv Panel service account" \
-            "${SERVICE_USER}"
-        ok "User '${SERVICE_USER}' created"
-    fi
-}
-
 # ─── Install binary ───────────────────────────────────────────────────────────
 
-install_binary() {
-    info "Installing binary → ${BINARY_DST}..."
-    install -o root -g root -m 755 "${BINARY_SRC}" "${BINARY_DST}"
-    ok "Binary installed"
+do_install_binary() {
+    if ! install -o root -g root -m 755 "${BINARY_SRC}" "${BINARY_DST}"; then
+        fail "Failed to install binary to ${BINARY_DST}"
+        printf "       → Check: permissions on $(dirname "${BINARY_DST}"), disk space\n"
+        return 1
+    fi
+    # Verify the installed binary runs
+    if "${BINARY_DST}" --version &>/dev/null; then
+        ok "Binary installed and verified: ${BINARY_DST}"
+    else
+        warn "Binary installed but --version check failed (may be fine if config is not yet set up)"
+    fi
 }
 
 # ─── Install static assets ────────────────────────────────────────────────────
 
-install_static() {
-    info "Installing static assets → ${STATIC_DST}..."
-    mkdir -p "${STATIC_DST}"
-    # Use rsync if available for efficiency; fall back to cp
+do_install_static() {
+    if ! mkdir -p "${STATIC_DST}"; then
+        fail "Cannot create directory: ${STATIC_DST}"
+        return 1
+    fi
+
     if command -v rsync &>/dev/null; then
-        rsync -a --delete "${STATIC_SRC}/" "${STATIC_DST}/"
+        if ! rsync -a --delete "${STATIC_SRC}/" "${STATIC_DST}/"; then
+            fail "rsync failed copying static assets"
+            return 1
+        fi
     else
         rm -rf "${STATIC_DST}"
-        cp -r "${STATIC_SRC}" "${STATIC_DST}"
+        if ! cp -r "${STATIC_SRC}" "${STATIC_DST}"; then
+            fail "cp failed copying static assets"
+            return 1
+        fi
     fi
     chown -R "root:root" "${STATIC_DST}"
-    ok "Static assets installed"
+    ok "Static assets: ${STATIC_DST}"
 }
 
 # ─── Install migrations ───────────────────────────────────────────────────────
 
-install_migrations() {
-    info "Installing migrations → ${MIGRATIONS_DST}..."
-    mkdir -p "${MIGRATIONS_DST}"
+do_install_migrations() {
+    if ! mkdir -p "${MIGRATIONS_DST}"; then
+        fail "Cannot create directory: ${MIGRATIONS_DST}"
+        return 1
+    fi
+
     if command -v rsync &>/dev/null; then
-        rsync -a --delete "${MIGRATIONS_SRC}/" "${MIGRATIONS_DST}/"
+        if ! rsync -a --delete "${MIGRATIONS_SRC}/" "${MIGRATIONS_DST}/"; then
+            fail "rsync failed copying migrations"
+            return 1
+        fi
     else
         rm -rf "${MIGRATIONS_DST}"
-        cp -r "${MIGRATIONS_SRC}" "${MIGRATIONS_DST}"
+        if ! cp -r "${MIGRATIONS_SRC}" "${MIGRATIONS_DST}"; then
+            fail "cp failed copying migrations"
+            return 1
+        fi
     fi
     chown -R "root:root" "${MIGRATIONS_DST}"
-    ok "Migrations installed"
+    ok "Migrations: ${MIGRATIONS_DST}"
 }
 
 # ─── Generate config.toml ─────────────────────────────────────────────────────
 
-generate_config() {
+do_generate_config() {
     if [[ -f "${CONFIG_FILE}" ]]; then
-        ok "Config file already exists — preserving: ${CONFIG_FILE}"
+        ok "Config preserved (existing): ${CONFIG_FILE}"
         return 0
     fi
 
-    info "Generating config → ${CONFIG_FILE}..."
-    mkdir -p "${CONFIG_DIR}"
+    if ! mkdir -p "${CONFIG_DIR}"; then
+        fail "Cannot create config directory: ${CONFIG_DIR}"
+        return 1
+    fi
 
     local hostname
     hostname="$(hostname -f 2>/dev/null || hostname)"
@@ -531,7 +856,7 @@ generate_config() {
     local occtl_bin="${DETECTED_OCCTL_BIN:-/usr/bin/occtl}"
     local ocpasswd_bin="${DETECTED_OCPASSWD_BIN:-/usr/bin/ocpasswd}"
     local ocserv_conf="${DETECTED_OCSERV_CONF:-/etc/ocserv/ocserv.conf}"
-    local ocserv_socket="${DETECTED_OCSERV_SOCKET:-/var/run/ocserv-socket}"
+    local ocserv_socket="${DETECTED_OCSERV_SOCKET:-/var/run/occtl.socket}"
     local ocpasswd_file="${DETECTED_OCPASSWD_FILE:-/etc/ocserv/ocpasswd}"
     local cert_dir="${DETECTED_CERT_DIR:-/etc/letsencrypt/live}"
     local tls_cert="${DETECTED_CERT_PATH:-}"
@@ -566,15 +891,15 @@ panel_systemd_unit = "ocserv-panel"
 
 [service]
 name = "ocserv-panel"
-user = "${SERVICE_USER}"
-group = "${SERVICE_GROUP}"
+user = "root"
+group = "root"
 start_on_boot = true
 systemd_unit_name = "ocserv"
 
 [web]
 host    = "0.0.0.0"
 port    = ${PANEL_PORT}
-base_url = "http://${hostname}:${PANEL_PORT}"
+base_url = "https://${hostname}:${PANEL_PORT}"
 
 [security]
 tls_cert_path  = "${tls_cert}"
@@ -594,150 +919,30 @@ dashboard_refresh_interval = 15
 log_file_read_enabled = true
 EOF
 
-    chown "root:${SERVICE_GROUP}" "${CONFIG_FILE}"
-    chmod 640 "${CONFIG_FILE}"
-    ok "Config written: ${CONFIG_FILE}"
-}
-
-# ─── Install sudoers ──────────────────────────────────────────────────────────
-
-install_sudoers() {
-    info "Generating sudoers rules → ${SUDOERS_FILE}..."
-
-    # Resolve full paths for every command in sudoers.
-    # Using detected paths falls back to command -v fallbacks.
-    local systemctl_bin
-    systemctl_bin="$(command -v systemctl 2>/dev/null || echo /usr/bin/systemctl)"
-    local occtl_bin="${DETECTED_OCCTL_BIN:-$(command -v occtl 2>/dev/null || echo /usr/bin/occtl)}"
-    local ocpasswd_bin="${DETECTED_OCPASSWD_BIN:-$(command -v ocpasswd 2>/dev/null || echo /usr/bin/ocpasswd)}"
-    local ocpasswd_file="${DETECTED_OCPASSWD_FILE:-/etc/ocserv/ocpasswd}"
-
-    # Temporary file used for visudo validation
-    local tmp_sudoers
-    tmp_sudoers="$(mktemp)"
-    # shellcheck disable=SC2064
-    trap "rm -f '${tmp_sudoers}'" EXIT
-
-    cat > "${tmp_sudoers}" <<EOF
-# Sudoers rules for the ocserv-panel service account
-# Generated by installer on $(date -u '+%Y-%m-%dT%H:%M:%SZ')
-# Managed file — do not edit by hand.
-
-# ocserv service lifecycle
-${SERVICE_USER} ALL=(root) NOPASSWD: ${systemctl_bin} start ocserv
-${SERVICE_USER} ALL=(root) NOPASSWD: ${systemctl_bin} stop ocserv
-${SERVICE_USER} ALL=(root) NOPASSWD: ${systemctl_bin} restart ocserv
-${SERVICE_USER} ALL=(root) NOPASSWD: ${systemctl_bin} reload ocserv
-${SERVICE_USER} ALL=(root) NOPASSWD: ${systemctl_bin} status ocserv
-${SERVICE_USER} ALL=(root) NOPASSWD: ${systemctl_bin} is-active ocserv
-${SERVICE_USER} ALL=(root) NOPASSWD: ${systemctl_bin} is-enabled ocserv
-
-# Session and status queries via occtl
-${SERVICE_USER} ALL=(root) NOPASSWD: ${occtl_bin} disconnect id *
-${SERVICE_USER} ALL=(root) NOPASSWD: ${occtl_bin} show users
-${SERVICE_USER} ALL=(root) NOPASSWD: ${occtl_bin} show user *
-${SERVICE_USER} ALL=(root) NOPASSWD: ${occtl_bin} show status
-${SERVICE_USER} ALL=(root) NOPASSWD: ${occtl_bin} reload
-
-# Password file management via ocpasswd
-${SERVICE_USER} ALL=(root) NOPASSWD: ${ocpasswd_bin} -c ${ocpasswd_file} *
-${SERVICE_USER} ALL=(root) NOPASSWD: ${ocpasswd_bin} -c ${ocpasswd_file} -d *
-${SERVICE_USER} ALL=(root) NOPASSWD: ${ocpasswd_bin} -c ${ocpasswd_file} -l *
-${SERVICE_USER} ALL=(root) NOPASSWD: ${ocpasswd_bin} -c ${ocpasswd_file} -u *
-EOF
-
-    # Validate with visudo if available
-    if command -v visudo &>/dev/null; then
-        if visudo -c -f "${tmp_sudoers}" &>/dev/null; then
-            install -o root -g root -m 440 "${tmp_sudoers}" "${SUDOERS_FILE}"
-            ok "Sudoers file installed and validated: ${SUDOERS_FILE}"
-        else
-            warn "visudo validation failed — sudoers file NOT installed"
-            warn "Inspect ${tmp_sudoers} to diagnose"
-            trap - EXIT
-            return 1
-        fi
-    else
-        install -o root -g root -m 440 "${tmp_sudoers}" "${SUDOERS_FILE}"
-        warn "visudo not available — sudoers installed without syntax check"
-    fi
-    trap - EXIT
-    rm -f "${tmp_sudoers}"
-}
-
-# ─── Verify certificate access ────────────────────────────────────────────────
-
-verify_cert_access() {
-    info "Verifying certificate read access for '${SERVICE_USER}'..."
-
-    local cert_path="${DETECTED_CERT_PATH}"
-    local key_path="${DETECTED_KEY_PATH}"
-
-    if [[ -z "${cert_path}" && -z "${key_path}" ]]; then
-        ok "No TLS cert paths detected — skipping cert access check"
-        return 0
-    fi
-
-    local access_ok=true
-
-    for cert_file in "${cert_path}" "${key_path}"; do
-        [[ -z "${cert_file}" ]] && continue
-        if [[ ! -e "${cert_file}" ]]; then
-            warn "Cert/key file not found: ${cert_file}"
-            continue
-        fi
-        # Check if SERVICE_USER can read the file
-        if su -s /bin/sh "${SERVICE_USER}" -c "test -r '${cert_file}'" 2>/dev/null; then
-            ok "'${SERVICE_USER}' can read: ${cert_file}"
-        else
-            warn "'${SERVICE_USER}' cannot read: ${cert_file}"
-            access_ok=false
-        fi
-    done
-
-    if [[ "${access_ok}" == "false" ]]; then
-        warn "Certificate access issue detected."
-        warn "To grant read access without changing ownership, use setfacl:"
-        local dir="${DETECTED_CERT_DIR:-$(dirname "${cert_path}")}"
-        cat <<EOF
-
-    # Grant recursive read access on the cert directory:
-    setfacl -R -m u:${SERVICE_USER}:rX "${dir}"
-    setfacl -R -d -m u:${SERVICE_USER}:rX "${dir}"
-
-    # Or for Let's Encrypt, add the user to the certbot group:
-    usermod -aG ssl-cert ${SERVICE_USER}
-
-EOF
-        warn "The service will start but TLS may not work until cert access is fixed."
-    fi
+    chown root:root "${CONFIG_FILE}"
+    chmod 644 "${CONFIG_FILE}"
+    ok "Config generated: ${CONFIG_FILE}"
 }
 
 # ─── Install systemd unit ─────────────────────────────────────────────────────
 
-install_systemd() {
-    info "Installing systemd unit → ${SYSTEMD_UNIT}..."
-
+do_install_systemd() {
     local tls_cert="${DETECTED_CERT_PATH:-}"
     local tls_key="${DETECTED_KEY_PATH:-}"
-    local cert_dir="${DETECTED_CERT_DIR:-/etc/letsencrypt/live}"
-    local ocserv_conf_dir
-    ocserv_conf_dir="$(dirname "${DETECTED_OCSERV_CONF:-/etc/ocserv/ocserv.conf}")"
-
-    # Build ReadOnlyPaths list — include cert dir only if it exists
-    local ro_paths="${CONFIG_DIR} ${ocserv_conf_dir} ${SHARE_DIR}"
-    [[ -d "${cert_dir}" ]] && ro_paths="${ro_paths} ${cert_dir}"
 
     # Build optional TLS env lines
     local tls_env_lines=""
     if [[ -n "${tls_cert}" ]]; then
-        tls_env_lines="Environment=\"OCSERV_PANEL_TLS_CERT=${tls_cert}\"\nEnvironment=\"OCSERV_PANEL_TLS_KEY=${tls_key}\""
+        tls_env_lines="Environment=\"OCSERV_PANEL_TLS_CERT=${tls_cert}\"
+Environment=\"OCSERV_PANEL_TLS_KEY=${tls_key}\"
+Environment=\"OCSERV_PANEL_COOKIE_SECURE=true\""
     fi
 
     # Create data and log directories
-    mkdir -p "${DATA_DIR}" "${LOG_DIR}" "${METRICS_DIR}"
-    chown "${SERVICE_USER}:${SERVICE_GROUP}" "${DATA_DIR}" "${LOG_DIR}" "${METRICS_DIR}"
-    chmod 750 "${DATA_DIR}" "${LOG_DIR}" "${METRICS_DIR}"
+    if ! mkdir -p "${DATA_DIR}" "${LOG_DIR}" "${METRICS_DIR}"; then
+        fail "Cannot create data directories"
+        return 1
+    fi
 
     cat > "${SYSTEMD_UNIT}" <<EOF
 [Unit]
@@ -747,8 +952,6 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=${SERVICE_USER}
-Group=${SERVICE_GROUP}
 WorkingDirectory=${DATA_DIR}
 
 ExecStart=${BINARY_DST}
@@ -759,7 +962,7 @@ Environment="OCSERV_PANEL_CONFIG_PATH=${CONFIG_FILE}"
 Environment="OCSERV_PANEL_TSDB_PATH=${METRICS_DIR}"
 Environment="OCSERV_PANEL_MIGRATIONS_DIR=${MIGRATIONS_DST}"
 Environment="OCSERV_PANEL_STATIC_DIR=${STATIC_DST}"
-$(printf '%b' "${tls_env_lines}")
+${tls_env_lines}
 
 Restart=on-failure
 RestartSec=5s
@@ -767,80 +970,101 @@ TimeoutStartSec=30s
 TimeoutStopSec=10s
 
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=${DATA_DIR} ${LOG_DIR}
-ReadOnlyPaths=${ro_paths}
-
-NoNewPrivileges=true
-PrivateDevices=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-RestrictNamespaces=true
-LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    ok "Systemd unit installed and daemon reloaded"
+    if ! systemctl daemon-reload; then
+        fail "systemctl daemon-reload failed"
+        printf "       → Check: ${BOLD}systemctl status${RESET}\n"
+        return 1
+    fi
+    ok "Systemd unit installed: ${SYSTEMD_UNIT}"
 }
 
 # ─── Start service ────────────────────────────────────────────────────────────
 
-start_service() {
-    info "Enabling and starting ocserv-panel service..."
-    systemctl enable ocserv-panel
-    systemctl start ocserv-panel
+do_start_service() {
+    if ! systemctl enable ocserv-panel 2>/dev/null; then
+        fail "systemctl enable ocserv-panel failed"
+        return 1
+    fi
 
-    # Wait briefly for the service to reach active state
+    if ! systemctl start ocserv-panel; then
+        fail "Service failed to start"
+        echo ""
+        printf "       Recent logs:\n"
+        journalctl -u ocserv-panel --no-pager -n 15 2>/dev/null | sed 's/^/         /' || true
+        echo ""
+        printf "       Troubleshooting:\n"
+        printf "         ${BOLD}systemctl status ocserv-panel${RESET}\n"
+        printf "         ${BOLD}journalctl -u ocserv-panel -f${RESET}\n"
+        echo ""
+        printf "       Common causes:\n"
+        printf "         • TLS cert files not found at configured path\n"
+        printf "         • Port ${PANEL_PORT} already in use (check: ss -tlnp | grep ${PANEL_PORT})\n"
+        printf "         • Database path not writable\n"
+        return 1
+    fi
+
+    # Wait for service to stabilise
     local retries=6
     local i=0
-    while (( i < retries )); do
+    while [[ $i -lt $retries ]]; do
         if systemctl is-active --quiet ocserv-panel; then
-            ok "Service is active"
+            ok "Service is active and running"
             return 0
         fi
         sleep 1
-        (( i++ ))
+        i=$((i + 1))
     done
 
-    fail "Service did not become active within ${retries} seconds"
-    systemctl status ocserv-panel --no-pager || true
-    die "Service failed to start. Check 'journalctl -u ocserv-panel' for details."
+    # Service started but isn't stable
+    fail "Service started but is not stable after ${retries} seconds"
+    printf "       → It may be crash-looping. Check:\n"
+    printf "         ${BOLD}journalctl -u ocserv-panel --no-pager -n 30${RESET}\n"
+    return 1
 }
 
 # ─── Verify health endpoint ───────────────────────────────────────────────────
 
-verify_health() {
+do_verify_health() {
     if ! command -v curl &>/dev/null; then
         warn "curl not available — skipping health check"
+        printf "       → Verify manually: open https://<your-host>:${PANEL_PORT} in a browser\n"
         return 0
     fi
 
-    info "Verifying health endpoint..."
-    local health_url="http://127.0.0.1:${PANEL_PORT}/api/health"
+    # Use HTTPS if TLS certs are configured, otherwise HTTP
+    local scheme="http"
+    if [[ -n "${DETECTED_CERT_PATH}" && -n "${DETECTED_KEY_PATH}" ]]; then
+        scheme="https"
+    fi
+    local health_url="${scheme}://127.0.0.1:${PANEL_PORT}/api/health"
     local retries=5
     local i=0
+    local last_code="000"
 
-    while (( i < retries )); do
-        local http_code
-        http_code="$(curl -s -o /dev/null -w '%{http_code}' \
-            --connect-timeout 2 --max-time 5 "${health_url}" 2>/dev/null || echo 000)"
-        if [[ "${http_code}" == "200" ]]; then
-            ok "Health endpoint responded: ${health_url}"
+    while [[ $i -lt $retries ]]; do
+        last_code="$(curl -sk -o /dev/null -w '%{http_code}' \
+            --connect-timeout 2 --max-time 5 "${health_url}" 2>/dev/null)" || last_code="000"
+        if [[ "${last_code}" == "200" ]]; then
+            ok "Health check passed: ${health_url} → 200 OK"
             return 0
         fi
-        (( i++ ))
+        i=$((i + 1))
         sleep 2
     done
 
-    warn "Health endpoint did not respond with 200 after ${retries} attempts"
-    warn "This may be normal if the service needs extra time to initialise."
-    warn "Manual check: curl ${health_url}"
+    warn "Health endpoint did not respond with 200 (last HTTP code: ${last_code})"
+    printf "       → The service may still be initialising.\n"
+    printf "       → Manual check: ${BOLD}curl -k ${health_url}${RESET}\n"
+    if [[ "${last_code}" == "000" ]]; then
+        printf "       → Code 000 means connection refused — service may not be listening yet.\n"
+        printf "       → Check: ${BOLD}ss -tlnp | grep ${PANEL_PORT}${RESET}\n"
+    fi
+    return 0
 }
 
 # ─── Success banner ───────────────────────────────────────────────────────────
@@ -851,24 +1075,474 @@ success_banner() {
     local version
     version="$(read_version)"
 
+    # Determine scheme
+    local scheme="http"
+    if [[ -n "${DETECTED_CERT_PATH}" && -n "${DETECTED_KEY_PATH}" ]]; then
+        scheme="https"
+    fi
+
     echo ""
-    bold "=========================================="
-    bold "  Installation complete  v${version}"
-    bold "=========================================="
+    printf "${GREEN}╔══════════════════════════════════════════════════╗${RESET}\n"
+    printf "${GREEN}║  Installation complete! v%-23s ║${RESET}\n" "${version}"
+    printf "${GREEN}╚══════════════════════════════════════════════════╝${RESET}\n"
     echo ""
     info "Access the panel at:"
-    printf "  %s\n" "http://${hostname}:${PANEL_PORT}"
+    echo ""
+    printf "    ${BOLD}${scheme}://${hostname}:${PANEL_PORT}${RESET}\n"
+    echo ""
+    info "First login: create your admin account at the setup page."
     echo ""
     info "Useful commands:"
-    echo "  systemctl status ocserv-panel"
-    echo "  journalctl -u ocserv-panel -f"
-    echo "  systemctl restart ocserv-panel"
+    echo "    systemctl status ocserv-panel     # service status"
+    echo "    journalctl -u ocserv-panel -f     # live logs"
+    echo "    systemctl restart ocserv-panel    # restart after config changes"
+    echo "    /usr/local/bin/ocserv-panel -v    # show version"
     echo ""
     if [[ -z "${DETECTED_CERT_PATH}" ]]; then
-        warn "No TLS certificate detected. The panel is running in HTTP mode."
-        warn "For production use, configure a TLS certificate and consider HAProxy"
-        warn "for TLS termination. See deploy/haproxy.cfg.snippet for guidance."
+        warn "No TLS certificate detected — the panel is running in HTTP mode."
+        printf "       For production use, configure TLS in ${CONFIG_FILE}\n"
+        printf "       and set OCSERV_PANEL_TLS_CERT / OCSERV_PANEL_TLS_KEY.\n"
+        echo ""
     fi
+}
+
+# ─── Status check ────────────────────────────────────────────────────────────
+
+status_check() {
+    echo ""
+    bold "╔══════════════════════════════════════════════════╗"
+    bold "║  ocserv-panel Installation Status               ║"
+    bold "╚══════════════════════════════════════════════════╝"
+    echo ""
+
+    local errors=0
+    local warnings=0
+
+    # ── Binary ──
+    bold "Binary"
+    echo ""
+    if [[ -x "${BINARY_DST}" ]]; then
+        local ver=""
+        if ver="$("${BINARY_DST}" --version 2>/dev/null)"; then
+            ok "Installed: ${BINARY_DST} (${ver})"
+        else
+            ok "Installed: ${BINARY_DST} (version check failed)"
+        fi
+    else
+        fail "Not installed: ${BINARY_DST}"
+        errors=$((errors + 1))
+    fi
+
+    # ── Systemd service ──
+    echo ""
+    bold "Systemd service"
+    echo ""
+    if [[ -f "${SYSTEMD_UNIT}" ]]; then
+        ok "Unit file: ${SYSTEMD_UNIT}"
+    else
+        fail "Unit file missing: ${SYSTEMD_UNIT}"
+        errors=$((errors + 1))
+    fi
+
+    if command -v systemctl &>/dev/null; then
+        if systemctl is-enabled --quiet ocserv-panel 2>/dev/null; then
+            ok "Enabled: yes (starts on boot)"
+        else
+            warn "Enabled: no (will not start on boot)"
+            if ! try_fix "Enable ocserv-panel on boot" systemctl enable ocserv-panel 2>/dev/null; then
+                printf "       → Enable with: ${BOLD}systemctl enable ocserv-panel${RESET}\n"
+            fi
+            warnings=$((warnings + 1))
+        fi
+
+        local svc_state
+        svc_state="$(systemctl is-active ocserv-panel 2>/dev/null)" || true
+        case "${svc_state}" in
+            active)
+                ok "Status: ${svc_state}"
+                # Show uptime
+                local since=""
+                since="$(systemctl show ocserv-panel --property=ActiveEnterTimestamp 2>/dev/null \
+                    | cut -d= -f2)" || true
+                if [[ -n "${since}" ]]; then
+                    printf "       Running since: ${since}\n"
+                fi
+                ;;
+            failed)
+                fail "Status: ${svc_state}"
+                printf "       → Last logs:\n"
+                journalctl -u ocserv-panel --no-pager -n 5 2>/dev/null | sed 's/^/         /' || true
+                printf "       → Full logs: ${BOLD}journalctl -u ocserv-panel -n 50${RESET}\n"
+                errors=$((errors + 1))
+                ;;
+            inactive)
+                warn "Status: ${svc_state} (not running)"
+                printf "       → Start with: ${BOLD}systemctl start ocserv-panel${RESET}\n"
+                warnings=$((warnings + 1))
+                ;;
+            *)
+                warn "Status: ${svc_state:-unknown}"
+                warnings=$((warnings + 1))
+                ;;
+        esac
+
+        # Show listening port
+        local listen_info=""
+        listen_info="$(ss -tlnp 2>/dev/null | grep ":${PANEL_PORT} ")" || true
+        if [[ -n "${listen_info}" ]]; then
+            ok "Listening on port ${PANEL_PORT}"
+        else
+            if [[ "${svc_state}" == "active" ]]; then
+                warn "Service active but port ${PANEL_PORT} not found in listener list"
+                printf "       → Check: ${BOLD}ss -tlnp | grep ${PANEL_PORT}${RESET}\n"
+                warnings=$((warnings + 1))
+            fi
+        fi
+    fi
+
+    # ── Configuration ──
+    echo ""
+    bold "Configuration"
+    echo ""
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        local perms owner
+        perms="$(stat -c '%a' "${CONFIG_FILE}" 2>/dev/null)" || true
+        owner="$(stat -c '%U:%G' "${CONFIG_FILE}" 2>/dev/null)" || true
+        ok "Config: ${CONFIG_FILE} (${owner}, mode ${perms})"
+        if [[ "${perms}" != "644" ]]; then
+            warn "Expected mode 644, got ${perms}"
+            if ! try_fix "Set config file mode to 644" chmod 644 "${CONFIG_FILE}"; then
+                printf "       → Fix: ${BOLD}chmod 644 %s${RESET}\n" "${CONFIG_FILE}"
+            fi
+            warnings=$((warnings + 1))
+        fi
+    else
+        fail "Config missing: ${CONFIG_FILE}"
+        printf "       → Re-run installer or create from template:\n"
+        printf "         ${BOLD}cp deploy/config.toml.example %s${RESET}\n" "${CONFIG_FILE}"
+        errors=$((errors + 1))
+    fi
+
+    # ── Data directories ──
+    echo ""
+    bold "Data directories"
+    echo ""
+    for dir_path in "${DATA_DIR}" "${LOG_DIR}" "${METRICS_DIR}"; do
+        if [[ -d "${dir_path}" ]]; then
+            ok "${dir_path} exists"
+        else
+            fail "Missing: ${dir_path}"
+            if ! try_fix "Create directory ${dir_path}" mkdir -p "${dir_path}"; then
+                printf "       → Create: ${BOLD}mkdir -p %s${RESET}\n" "${dir_path}"
+            fi
+            errors=$((errors + 1))
+        fi
+    done
+
+    # ── Database health ──
+    echo ""
+    bold "Database health"
+    echo ""
+
+    # Determine the database path from config DSN
+    local db_dsn="" db_file="${DATA_DIR}/ocserv_panel.db"
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        db_dsn="$(grep -E '^\s*dsn\s*=' "${CONFIG_FILE}" \
+            | head -1 | sed 's/^[^=]*=\s*//' | tr -d '"' | tr -d "'")" || true
+    fi
+
+    # Parse the actual file path from the DSN
+    if [[ -n "${db_dsn}" ]]; then
+        # DSN format: "file:/path/to/db?params" or just "/path/to/db"
+        local parsed_path=""
+        parsed_path="$(echo "${db_dsn}" | sed 's|^file:||' | sed 's|?.*||')" || true
+        if [[ -n "${parsed_path}" ]]; then
+            if [[ "${parsed_path}" == /* ]]; then
+                db_file="${parsed_path}"
+                ok "DSN uses absolute path: ${db_file}"
+            else
+                warn "DSN uses relative path: '${parsed_path}'"
+                printf "       → Relative paths resolve from the service WorkingDirectory.\n"
+                printf "       → If the service starts from a different directory, the DB won't be found.\n"
+                printf "       → Recommended: use absolute path in config DSN:\n"
+                printf "         ${BOLD}dsn = \"file:${DATA_DIR}/${parsed_path}?_journal=WAL&_busy_timeout=5000\"${RESET}\n"
+                # Auto-fix: rewrite DSN to use absolute path
+                local abs_dsn="file:${DATA_DIR}/${parsed_path}?_journal=WAL&_busy_timeout=5000"
+                local abs_dsn_escaped
+                abs_dsn_escaped="$(printf '%s' "${abs_dsn}" | sed 's|[&/]|\\&|g')"
+                if try_fix "Rewrite DSN to absolute path in config" \
+                    sed -i "s|^\(\s*dsn\s*=\s*\).*|\1\"${abs_dsn_escaped}\"|" "${CONFIG_FILE}"; then
+                    db_file="${DATA_DIR}/${parsed_path}"
+                else
+                    db_file="${DATA_DIR}/${parsed_path}"
+                fi
+                warnings=$((warnings + 1))
+            fi
+        fi
+    else
+        warn "Could not read DSN from config — checking default path"
+        warnings=$((warnings + 1))
+    fi
+
+    local db_dir
+    db_dir="$(dirname "${db_file}")"
+
+    # Check 1: Parent directory exists
+    if [[ -d "${db_dir}" ]]; then
+        ok "Database directory exists: ${db_dir}"
+    else
+        fail "Database directory missing: ${db_dir}"
+        if ! try_fix "Create database directory" mkdir -p "${db_dir}"; then
+            printf "       → Create: ${BOLD}mkdir -p %s${RESET}\n" "${db_dir}"
+        fi
+        errors=$((errors + 1))
+    fi
+
+    # Check 3: Database file itself
+    if [[ -f "${db_file}" ]]; then
+        local db_size db_owner db_perms
+        db_size="$(du -h "${db_file}" 2>/dev/null | cut -f1)" || true
+        db_owner="$(stat -c '%U:%G' "${db_file}" 2>/dev/null)" || true
+        db_perms="$(stat -c '%a' "${db_file}" 2>/dev/null)" || true
+        ok "Database file: ${db_file} (${db_size}, ${db_owner}, mode ${db_perms})"
+
+        # sqlite3 integrity probe (if available)
+        if command -v sqlite3 &>/dev/null; then
+            local probe_result=""
+            probe_result="$(sqlite3 "${db_file}" "SELECT count(*) FROM sqlite_master;" 2>&1)" || true
+            if [[ "${probe_result}" =~ ^[0-9]+$ ]]; then
+                ok "sqlite3 probe: ${probe_result} tables accessible"
+            else
+                warn "sqlite3 probe failed: ${probe_result}"
+                printf "       → The database file may be corrupted or locked.\n"
+                warnings=$((warnings + 1))
+            fi
+        fi
+    else
+        info "Database file not yet created: ${db_file}"
+        printf "       → Will be created on first successful service start.\n"
+    fi
+
+    # Check 4: Disk space for database partition
+    local db_free_mb=""
+    db_free_mb="$(df -m "${db_dir}" 2>/dev/null | awk 'NR==2{print $4}')" || true
+    if [[ -n "${db_free_mb}" ]]; then
+        if [[ "${db_free_mb}" -lt 50 ]]; then
+            fail "Low disk space on database partition: ${db_free_mb}MB free"
+            printf "       → SQLite needs free space for WAL, transactions, and VACUUM.\n"
+            errors=$((errors + 1))
+        elif [[ "${db_free_mb}" -lt 200 ]]; then
+            warn "Database partition has only ${db_free_mb}MB free"
+            warnings=$((warnings + 1))
+        else
+            ok "Database partition: ${db_free_mb}MB free"
+        fi
+    fi
+
+    # Check 5: Filesystem read-only check
+    if [[ -d "${db_dir}" ]]; then
+        local mount_info=""
+        mount_info="$(findmnt -n -o OPTIONS --target "${db_dir}" 2>/dev/null)" || true
+        if [[ -n "${mount_info}" ]] && echo ",${mount_info}," | grep -q ',ro,'; then
+            fail "Database directory is on a READ-ONLY filesystem!"
+            printf "       → SQLite cannot operate on a read-only filesystem.\n"
+            printf "       → Check: ${BOLD}mount | grep '$(df "${db_dir}" 2>/dev/null | awk 'NR==2{print $1}')'${RESET}\n"
+            errors=$((errors + 1))
+        fi
+    fi
+
+    # ── Static assets ──
+    echo ""
+    bold "Static assets"
+    echo ""
+    if [[ -d "${STATIC_DST}" ]]; then
+        local file_count
+        file_count="$(find "${STATIC_DST}" -type f | wc -l)" || true
+        ok "${STATIC_DST} (${file_count} files)"
+        if [[ -f "${STATIC_DST}/index.html" ]]; then
+            ok "SPA entry point: index.html present"
+        else
+            fail "index.html missing — frontend may not have been built correctly"
+            errors=$((errors + 1))
+        fi
+    else
+        fail "Static directory missing: ${STATIC_DST}"
+        errors=$((errors + 1))
+    fi
+
+    # ── Migrations ──
+    if [[ -d "${MIGRATIONS_DST}" ]]; then
+        local sql_count
+        sql_count="$(find "${MIGRATIONS_DST}" -name '*.sql' | wc -l)" || true
+        ok "Migrations: ${MIGRATIONS_DST} (${sql_count} SQL files)"
+    else
+        fail "Migrations directory missing: ${MIGRATIONS_DST}"
+        errors=$((errors + 1))
+    fi
+
+    # ── TLS Certificates ──
+    echo ""
+    bold "TLS certificates"
+    echo ""
+
+    # Read cert paths from the installed config if available
+    local tls_cert="" tls_key=""
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        tls_cert="$(grep -E '^\s*tls_cert_path\s*=' "${CONFIG_FILE}" \
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+        tls_key="$(grep -E '^\s*tls_key_path\s*=' "${CONFIG_FILE}" \
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+    fi
+
+    if [[ -z "${tls_cert}" && -z "${tls_key}" ]]; then
+        info "TLS not configured — running in HTTP mode"
+    else
+        # Check cert files exist
+        if [[ -n "${tls_cert}" && -f "${tls_cert}" ]]; then
+            ok "Certificate file: ${tls_cert}"
+            # Check expiry
+            if command -v openssl &>/dev/null; then
+                local expiry
+                expiry="$(openssl x509 -in "${tls_cert}" -noout -enddate 2>/dev/null \
+                    | sed 's/notAfter=//')" || true
+                if [[ -n "${expiry}" ]]; then
+                    # Check if expired
+                    if openssl x509 -in "${tls_cert}" -noout -checkend 0 &>/dev/null; then
+                        ok "Certificate valid until: ${expiry}"
+                        # Warn if expiring in 14 days
+                        if ! openssl x509 -in "${tls_cert}" -noout -checkend 1209600 &>/dev/null; then
+                            warn "Certificate expires within 14 days!"
+                            printf "       → Check renewal: ${BOLD}certbot certificates${RESET}\n"
+                            warnings=$((warnings + 1))
+                        fi
+                    else
+                        fail "Certificate is EXPIRED (${expiry})"
+                        printf "       → Renew: ${BOLD}certbot renew${RESET}\n"
+                        errors=$((errors + 1))
+                    fi
+                fi
+            fi
+        elif [[ -n "${tls_cert}" ]]; then
+            fail "Certificate file not found: ${tls_cert}"
+            errors=$((errors + 1))
+        fi
+
+        if [[ -n "${tls_key}" && -f "${tls_key}" ]]; then
+            ok "Key file: ${tls_key}"
+        elif [[ -n "${tls_key}" ]]; then
+            fail "Key file not found: ${tls_key}"
+            errors=$((errors + 1))
+        fi
+    fi
+
+    # ── ocserv integration ──
+    echo ""
+    bold "ocserv integration"
+    echo ""
+
+    # Read paths from config
+    local ocserv_bin="" occtl_bin="" ocpasswd_bin="" ocserv_conf="" ocserv_socket=""
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        ocserv_bin="$(grep -E '^\s*ocserv_bin_path\s*=' "${CONFIG_FILE}" \
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+        occtl_bin="$(grep -E '^\s*occtl_bin_path\s*=' "${CONFIG_FILE}" \
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+        ocpasswd_bin="$(grep -E '^\s*ocpasswd_bin_path\s*=' "${CONFIG_FILE}" \
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+        ocserv_conf="$(grep -E '^\s*ocserv_config_path\s*=' "${CONFIG_FILE}" \
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+        ocserv_socket="$(grep -E '^\s*ocserv_socket_path\s*=' "${CONFIG_FILE}" \
+            | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+    fi
+
+    # Binaries
+    for bin_pair in "ocserv:${ocserv_bin}" "occtl:${occtl_bin}" "ocpasswd:${ocpasswd_bin}"; do
+        local bin_name="${bin_pair%%:*}"
+        local bin_path="${bin_pair#*:}"
+        if [[ -n "${bin_path}" && -x "${bin_path}" ]]; then
+            ok "${bin_name}: ${bin_path}"
+        elif [[ -n "${bin_path}" ]]; then
+            fail "${bin_name}: ${bin_path} (not found or not executable)"
+            errors=$((errors + 1))
+        fi
+    done
+
+    # Config file
+    if [[ -n "${ocserv_conf}" && -f "${ocserv_conf}" ]]; then
+        ok "ocserv config: ${ocserv_conf}"
+    elif [[ -n "${ocserv_conf}" ]]; then
+        fail "ocserv config not found: ${ocserv_conf}"
+        errors=$((errors + 1))
+    fi
+
+    # Socket
+    if [[ -n "${ocserv_socket}" ]]; then
+        if [[ -S "${ocserv_socket}" ]]; then
+            ok "ocserv socket: ${ocserv_socket}"
+        else
+            warn "ocserv socket not found: ${ocserv_socket}"
+            printf "       → Is ocserv running? Check: ${BOLD}systemctl status ocserv${RESET}\n"
+            warnings=$((warnings + 1))
+        fi
+    fi
+
+    # ocserv service status
+    if command -v systemctl &>/dev/null; then
+        if systemctl is-active --quiet ocserv 2>/dev/null; then
+            ok "ocserv service: running"
+        else
+            warn "ocserv service: not running"
+            printf "       → Start: ${BOLD}systemctl start ocserv${RESET}\n"
+            warnings=$((warnings + 1))
+        fi
+    fi
+
+    # ── Health check ──
+    echo ""
+    bold "Health check"
+    echo ""
+    if command -v curl &>/dev/null; then
+        local scheme="http"
+        if [[ -n "${tls_cert}" && -n "${tls_key}" ]]; then
+            scheme="https"
+        fi
+        local health_url="${scheme}://127.0.0.1:${PANEL_PORT}/api/health"
+        local http_code
+        http_code="$(curl -sk -o /dev/null -w '%{http_code}' \
+            --connect-timeout 3 --max-time 5 "${health_url}" 2>/dev/null)" || http_code="000"
+        if [[ "${http_code}" == "200" ]]; then
+            ok "Health endpoint: ${health_url} → 200 OK"
+        elif [[ "${http_code}" == "000" ]]; then
+            fail "Health endpoint: connection refused (${health_url})"
+            printf "       → Service may not be running or not listening on port ${PANEL_PORT}\n"
+            printf "       → Check: ${BOLD}systemctl status ocserv-panel${RESET}\n"
+            errors=$((errors + 1))
+        else
+            warn "Health endpoint: HTTP ${http_code} (${health_url})"
+            printf "       → Expected 200 OK. Check service logs.\n"
+            warnings=$((warnings + 1))
+        fi
+    else
+        info "curl not available — cannot perform health check"
+    fi
+
+    # ── Summary ──
+    echo ""
+    printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    if [[ "${errors}" -eq 0 && "${warnings}" -eq 0 ]]; then
+        printf "${GREEN}  Status: All checks passed ✓${RESET}\n"
+    elif [[ "${errors}" -eq 0 ]]; then
+        printf "${YELLOW}  Status: OK with %d warning(s)${RESET}\n" "${warnings}"
+        if [[ "${FIX_MODE}" != "true" ]]; then
+            printf "  Run ${BOLD}--fix${RESET} to attempt automatic repair.\n"
+        fi
+    else
+        printf "${RED}  Status: %d error(s), %d warning(s)${RESET}\n" "${errors}" "${warnings}"
+        if [[ "${FIX_MODE}" != "true" ]]; then
+            printf "  Run ${BOLD}--fix${RESET} to attempt automatic repair.\n"
+        fi
+    fi
+    printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     echo ""
 }
 
@@ -887,6 +1561,8 @@ uninstall() {
         exit 0
     fi
 
+    echo ""
+
     # Stop and disable service
     info "Stopping and disabling service..."
     if systemctl is-active --quiet ocserv-panel 2>/dev/null; then
@@ -895,7 +1571,7 @@ uninstall() {
         ok "Service was not running"
     fi
     if systemctl is-enabled --quiet ocserv-panel 2>/dev/null; then
-        systemctl disable ocserv-panel && ok "Service disabled"
+        systemctl disable ocserv-panel 2>/dev/null && ok "Service disabled"
     fi
 
     # Remove systemd unit
@@ -903,12 +1579,6 @@ uninstall() {
         rm -f "${SYSTEMD_UNIT}"
         systemctl daemon-reload
         ok "Systemd unit removed"
-    fi
-
-    # Remove sudoers
-    if [[ -f "${SUDOERS_FILE}" ]]; then
-        rm -f "${SUDOERS_FILE}"
-        ok "Sudoers file removed"
     fi
 
     # Remove binary
@@ -931,6 +1601,7 @@ uninstall() {
         ok "Config preserved at ${CONFIG_DIR}"
     fi
 
+    echo ""
     if confirm "Remove data directory ${DATA_DIR} (SQLite database and metrics)?" "n"; then
         rm -rf "${DATA_DIR}"
         ok "Data directory removed"
@@ -938,18 +1609,12 @@ uninstall() {
         ok "Data preserved at ${DATA_DIR}"
     fi
 
+    echo ""
     if confirm "Remove log directory ${LOG_DIR}?" "n"; then
         rm -rf "${LOG_DIR}"
         ok "Log directory removed"
     else
         ok "Logs preserved at ${LOG_DIR}"
-    fi
-
-    if confirm "Remove service user '${SERVICE_USER}'?" "n"; then
-        if id "${SERVICE_USER}" &>/dev/null; then
-            userdel "${SERVICE_USER}"
-            ok "User '${SERVICE_USER}' removed"
-        fi
     fi
 
     echo ""
@@ -964,6 +1629,40 @@ main() {
     case "${arg}" in
         --help|-h)
             usage
+            exit 0
+            ;;
+        --status|--check)
+            if [[ "${EUID}" -ne 0 ]]; then
+                die "Must run as root (use sudo)"
+            fi
+            status_check
+            exit 0
+            ;;
+        --fix)
+            if [[ "${EUID}" -ne 0 ]]; then
+                die "Must run as root (use sudo)"
+            fi
+            FIX_MODE="true"
+            status_check
+            echo ""
+            if [[ "${FIXES_APPLIED}" -gt 0 || "${FIXES_FAILED}" -gt 0 ]]; then
+                printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                printf "  Fix summary: ${GREEN}%d applied${RESET}, ${RED}%d failed${RESET}\n" "${FIXES_APPLIED}" "${FIXES_FAILED}"
+                printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                echo ""
+                if [[ "${FIXES_FAILED}" -gt 0 ]]; then
+                    printf "  Some issues could not be fixed automatically.\n"
+                    printf "  Review the output above for manual steps.\n"
+                    echo ""
+                else
+                    printf "  All fixable issues have been resolved.\n"
+                    printf "  Run ${BOLD}--status${RESET} again to verify.\n"
+                    echo ""
+                fi
+            else
+                ok "No fixes were needed — installation looks healthy."
+                echo ""
+            fi
             exit 0
             ;;
         --uninstall)
@@ -998,10 +1697,10 @@ main() {
         mode="upgrade"
     fi
 
-    # Phase 1: Preflight
+    # Phase 2: Preflight
     preflight
 
-    # Phase 2: Plan and confirm
+    # Phase 3: Plan and confirm
     show_plan "${mode}"
 
     if ! confirm "Proceed with ${mode}?" "y"; then
@@ -1010,24 +1709,22 @@ main() {
     fi
     echo ""
 
-    # Phase 3: Execute
+    # Phase 4: Execute
     if [[ "${mode}" == "upgrade" ]]; then
-        stop_existing
-        backup_data
+        run_step "Stop existing service" do_stop_existing
+        run_step "Backup data" do_backup_data
     fi
 
-    create_user
-    install_binary
-    install_static
-    install_migrations
-    generate_config
-    install_sudoers
-    verify_cert_access
-    install_systemd
-    start_service
+    run_step "Install binary" do_install_binary
+    run_step "Install static assets" do_install_static
+    run_step "Install migrations" do_install_migrations
+    run_step "Generate configuration" do_generate_config
+    run_step "Install systemd unit" do_install_systemd
+    run_step "Start service" do_start_service
 
-    # Phase 4: Verify
-    verify_health
+    # Phase 5: Verify
+    echo ""
+    do_verify_health
     success_banner
 }
 

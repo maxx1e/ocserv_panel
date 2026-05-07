@@ -102,7 +102,7 @@ func Defaults() Config {
 			DataDir:          "/var/lib/ocserv-panel",
 			LogDir:           "/var/log/ocserv-panel",
 			OcservConfigPath: "/etc/ocserv/ocserv.conf",
-			OcservSocketPath: "/var/run/ocserv-socket",
+			OcservSocketPath: "", // empty = let occtl use its compiled-in default
 			OcservBinPath:    "/usr/local/sbin/ocserv",
 			OcctlBinPath:     "/usr/local/bin/occtl",
 			OcpasswdBinPath:  "/usr/local/bin/ocpasswd",
@@ -115,8 +115,8 @@ func Defaults() Config {
 		},
 		Service: ServiceConfig{
 			Name:            "ocserv-panel",
-			User:            "ocserv-panel",
-			Group:           "ocserv-panel",
+			User:            "root",
+			Group:           "root",
 			StartOnBoot:     true,
 			MaintenanceMode: false,
 			SystemdUnitName: "ocserv",

@@ -14,7 +14,9 @@ static_dir = "/usr/share/ocserv-panel/static"
 
 # ocserv paths — adjust if your system uses different locations
 ocserv_config_path = "/etc/ocserv/ocserv.conf"
-ocserv_socket_path = "/var/run/ocserv-socket"
+# This is the occtl management socket (NOT the worker IPC socket-file which gets .PID appended)
+# Leave empty to let occtl use its compiled-in default (/var/run/occtl.socket)
+ocserv_socket_path = ""
 ocserv_bin_path = "/usr/sbin/ocserv"
 occtl_bin_path = "/usr/bin/occtl"
 ocpasswd_bin_path = "/usr/bin/ocpasswd"
@@ -30,8 +32,8 @@ panel_systemd_unit = "ocserv-panel"
 
 [service]
 name = "ocserv-panel"
-user = "ocserv-panel"
-group = "ocserv-panel"
+user = "root"
+group = "root"
 start_on_boot = true
 systemd_unit_name = "ocserv"
 
