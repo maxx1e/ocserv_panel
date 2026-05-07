@@ -673,6 +673,7 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 			nil,
 			rbac.NewDefaultAuthorizer(),
 			AppOptions{CookieSecure: cookieSecure},
+			"",
 		),
 	}
 }
@@ -1151,6 +1152,7 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 			nil,
 			rbac.NewDefaultAuthorizer(),
 			AppOptions{CookieSecure: true},
+			"",
 		),
 	}
 	h.createOwner(t, "owner", "owner-password")

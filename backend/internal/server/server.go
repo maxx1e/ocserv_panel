@@ -184,6 +184,7 @@ func NewAppRouter(
 	auditLogService *app.AuditLogService,
 	authorizer rbac.Authorizer,
 	opts AppOptions,
+	staticDir string,
 ) http.Handler {
 	now := opts.Now
 	if now == nil {
@@ -276,6 +277,11 @@ func NewAppRouter(
 	mux.HandleFunc("GET /api/audit/logs", appHandler.handleAuditLogs)
 	mux.HandleFunc("GET /api/audit/logs/sources", appHandler.handleAuditLogSources)
 	mux.HandleFunc("GET /api/audit/logs/export", appHandler.handleAuditLogExport)
+
+	// Serve frontend static files with SPA fallback.
+	if staticDir != "" {
+		mux.Handle("/", NewSPAFileServer(staticDir))
+	}
 
 	return securityHeaders(mux)
 }

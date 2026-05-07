@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,7 +30,14 @@ import (
 	"ocserv_panel/backend/internal/store"
 )
 
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Println("ocserv-panel", version)
+		os.Exit(0)
+	}
+
 	addr := envOrDefault("OCSERV_PANEL_ADDR", "127.0.0.1:8080")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -215,35 +224,74 @@ func main() {
 
 	loginLimiter := auth.NewRateLimiter(5, time.Minute)
 
+	staticDir := envOrDefault("OCSERV_PANEL_STATIC_DIR", cfg.Installation.StaticDir)
+
 	httpServer := &http.Server{
-		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, configMgmtService, adminUserService, auditLogService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter}),
+		Addr: addr,
+		Handler: server.NewAppRouter(
+			authService,
+			dashboardService,
+			monitoringService,
+			settingsService,
+			ocservService,
+			healthService,
+			logTailService,
+			configMgmtService,
+			adminUserService,
+			auditLogService,
+			rbac.NewDefaultAuthorizer(),
+			server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter},
+			staticDir,
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 	}
 
+	// Resolve TLS cert paths from env (overrides config).
+	tlsCert := envOrDefault("OCSERV_PANEL_TLS_CERT", cfg.Security.TLSCertPath)
+	tlsKey := envOrDefault("OCSERV_PANEL_TLS_KEY", cfg.Security.TLSKeyPath)
+
 	go func() {
 		<-ctx.Done()
-
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			log.Error().Err(err).Msg("backend shutdown failed")
 		}
 	}()
 
-	log.Info().
-		Str("addr", addr).
-		Str("config", configPath).
-		Bool("dsn_set", dbDSN != "").
-		Str("metrics_path", tsdbPathFromEnv()).
-		Str("ocserv_config", cfg.Installation.OcservConfigPath).
-		Msg("starting ocserv panel backend")
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Error().Err(err).Msg("backend server failed")
-		os.Exit(1)
+	if tlsCert != "" && tlsKey != "" {
+		certReloader, certErr := server.NewCertReloader(tlsCert, tlsKey)
+		if certErr != nil {
+			log.Error().Err(certErr).Msg("failed to load TLS certificates")
+			os.Exit(1)
+		}
+		defer certReloader.Stop()
+
+		httpServer.TLSConfig = &tls.Config{
+			GetCertificate: certReloader.GetCertificate,
+			MinVersion:     tls.VersionTLS12,
+		}
+
+		log.Info().
+			Str("addr", addr).
+			Str("tls_cert", tlsCert).
+			Str("static_dir", staticDir).
+			Msg("starting ocserv panel backend (HTTPS)")
+		if err := httpServer.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error().Err(err).Msg("backend server failed")
+			os.Exit(1)
+		}
+	} else {
+		log.Info().
+			Str("addr", addr).
+			Str("static_dir", staticDir).
+			Msg("starting ocserv panel backend (HTTP)")
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error().Err(err).Msg("backend server failed")
+			os.Exit(1)
+		}
 	}
 }
 
