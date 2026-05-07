@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,11 +11,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/db"
+	"ocserv_panel/backend/internal/logging"
 	"ocserv_panel/backend/internal/logs"
 	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/monitoring"
@@ -34,21 +36,21 @@ func main() {
 	dbDSN := envOrDefault("OCSERV_PANEL_DB_DSN", "file:ocserv_panel.db")
 	database, err := db.OpenSQLite(ctx, dbDSN)
 	if err != nil {
-		slog.Error("open sqlite database failed", "error", err)
+		log.Error().Err(err).Msg("open sqlite database failed")
 		os.Exit(1)
 	}
-	slog.Info("sqlite database ready", "dsn_set", dbDSN != "")
+	log.Info().Bool("dsn_set", dbDSN != "").Msg("sqlite database ready")
 	defer func() {
 		if err := database.Close(); err != nil {
-			slog.Error("close sqlite database failed", "error", err)
+			log.Error().Err(err).Msg("close sqlite database failed")
 		}
 	}()
 
 	if err := db.ApplyMigrations(ctx, database, resolveMigrationsDir()); err != nil {
-		slog.Error("apply sqlite migrations failed", "error", err)
+		log.Error().Err(err).Msg("apply sqlite migrations failed")
 		os.Exit(1)
 	}
-	slog.Info("migrations applied successfully")
+	log.Info().Msg("migrations applied successfully")
 
 	persistence := store.New(database)
 	recorder := audit.NewSQLiteRecorder(persistence)
@@ -57,17 +59,37 @@ func main() {
 	configPath := envOrDefault("OCSERV_PANEL_CONFIG_PATH", "/etc/ocserv-panel/config.toml")
 	cfg, cfgErr := config.Load(configPath)
 	if cfgErr != nil {
-		slog.Warn("loading config file failed, continuing with defaults", "path", configPath, "error", cfgErr)
+		log.Warn().Str("path", configPath).Err(cfgErr).Msg("loading config file failed, continuing with defaults")
 	} else {
-		slog.Info("config loaded", "path", configPath)
+		log.Info().Str("path", configPath).Msg("config loaded")
 	}
 	config.MergeEnv(&cfg, os.Getenv)
 
-	slog.Info("ocserv integration configured",
-		"config_path", cfg.Installation.OcservConfigPath,
-		"socket_path", cfg.Installation.OcservSocketPath,
-		"unit", cfg.Service.SystemdUnitName,
-	)
+	// Initialize structured logging.
+	logCloser, _ := logging.Setup(logging.Config{
+		Level:    "info",
+		FilePath: cfg.Installation.PanelLogPath,
+	})
+	defer logCloser()
+
+	// Handle SIGHUP for log rotation.
+	sighup := make(chan os.Signal, 1)
+	signal.Notify(sighup, syscall.SIGHUP)
+	go func() {
+		for range sighup {
+			if err := logging.ReopenFile(); err != nil {
+				log.Error().Err(err).Msg("failed to reopen log file on SIGHUP")
+			} else {
+				log.Info().Msg("log file reopened after SIGHUP")
+			}
+		}
+	}()
+
+	log.Info().
+		Str("config_path", cfg.Installation.OcservConfigPath).
+		Str("socket_path", cfg.Installation.OcservSocketPath).
+		Str("unit", cfg.Service.SystemdUnitName).
+		Msg("ocserv integration configured")
 
 	settingsService := app.NewSettingsService(&cfg, configPath, persistence, recorder, rbac.NewDefaultAuthorizer())
 
@@ -147,14 +169,13 @@ func main() {
 			return persistence.PurgeHistoricalBefore(ctx, cutoff)
 		},
 		24*time.Hour,
-		app.HousekeepingWithLogger(slog.Default()),
 	)
 	go housekeepingScheduler.Run(ctx)
 
 	metricStore := openMetricStore()
 	defer func() {
 		if err := metricStore.Close(); err != nil {
-			slog.Error("close metric store failed", "error", err)
+			log.Error().Err(err).Msg("close metric store failed")
 		}
 	}()
 	monitoringService := app.NewMonitoringService(metricStore, rbac.NewDefaultAuthorizer(), nil, recorder)
@@ -165,9 +186,9 @@ func main() {
 	if strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")) == "" {
 		vpnIface, vpnSource, err := monitoring.DiscoverVPNInterface()
 		if err != nil {
-			slog.Warn("vpn interface discovery failed", "error", err)
+			log.Warn().Err(err).Msg("vpn interface discovery failed")
 		} else if vpnIface != "" {
-			slog.Info("vpn interface discovered", "interface", vpnIface, "source", vpnSource)
+			log.Info().Str("interface", vpnIface).Str("source", vpnSource).Msg("vpn interface discovered")
 			collectors = append(collectors, monitoring.NewInterfaceCollector(
 				monitoring.OSReader{},
 				vpnIface,
@@ -177,17 +198,17 @@ func main() {
 			monitoringService.SetMetricState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
 			monitoringService.SetMetricState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
 		} else {
-			slog.Info("no vpn interface discovered; vpn metrics will remain unavailable")
+			log.Info().Msg("no vpn interface discovered; vpn metrics will remain unavailable")
 		}
 	} else {
-		slog.Info("vpn interface set via environment variable; skipping auto-discovery")
+		log.Info().Msg("vpn interface set via environment variable; skipping auto-discovery")
 	}
 
 	collectorService := monitoring.NewCollectorService(
 		metricStore,
 		collectors,
 		15*time.Second,
-		slog.Default(),
+		zerologAdapter{},
 		nil,
 	)
 	go collectorService.Run(ctx)
@@ -209,19 +230,19 @@ func main() {
 		defer cancel()
 
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			slog.Error("backend shutdown failed", "error", err)
+			log.Error().Err(err).Msg("backend shutdown failed")
 		}
 	}()
 
-	slog.Info("starting ocserv panel backend",
-		"addr", addr,
-		"config", configPath,
-		"dsn_set", dbDSN != "",
-		"metrics_path", tsdbPathFromEnv(),
-		"ocserv_config", cfg.Installation.OcservConfigPath,
-	)
+	log.Info().
+		Str("addr", addr).
+		Str("config", configPath).
+		Bool("dsn_set", dbDSN != "").
+		Str("metrics_path", tsdbPathFromEnv()).
+		Str("ocserv_config", cfg.Installation.OcservConfigPath).
+		Msg("starting ocserv panel backend")
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("backend server failed", "error", err)
+		log.Error().Err(err).Msg("backend server failed")
 		os.Exit(1)
 	}
 }
@@ -243,11 +264,11 @@ func openMetricStore() metrics.Store {
 	retention := 30 * 24 * time.Hour
 	metricStore, err := metrics.OpenTSDBStore(tsdbPath, retention)
 	if err == nil {
-		slog.Info("metrics store ready", "type", "tsdb", "path", tsdbPath, "retention", "30d")
+		log.Info().Str("type", "tsdb").Str("path", tsdbPath).Str("retention", "30d").Msg("metrics store ready")
 		return metricStore
 	}
 
-	slog.Warn("open metrics tsdb failed; using in-memory metrics store", "error", err)
+	log.Warn().Err(err).Msg("open metrics tsdb failed; using in-memory metrics store")
 
 	return metrics.NewMemoryStore()
 }
@@ -266,9 +287,9 @@ func configuredCollectors(reader monitoring.FileReader) []monitoring.Collector {
 			metrics.MetricNetInterfaceTXBytes,
 		))
 	} else if defaultIface, err := monitoring.DiscoverDefaultInterface(); err != nil {
-		slog.Warn("default interface discovery failed", "error", err)
+		log.Warn().Err(err).Msg("default interface discovery failed")
 	} else if defaultIface != "" {
-		slog.Info("default interface discovered", "interface", defaultIface)
+		log.Info().Str("interface", defaultIface).Msg("default interface discovered")
 		collectors = append(collectors, monitoring.NewInterfaceCollector(
 			reader,
 			defaultIface,
@@ -276,7 +297,7 @@ func configuredCollectors(reader monitoring.FileReader) []monitoring.Collector {
 			metrics.MetricNetInterfaceTXBytes,
 		))
 	} else {
-		slog.Info("no default interface discovered; network interface metrics will remain unavailable")
+		log.Info().Msg("no default interface discovered; network interface metrics will remain unavailable")
 	}
 
 	if iface := strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")); iface != "" {
@@ -314,4 +335,25 @@ func resolveMigrationsDir() string {
 	}
 
 	return filepath.Join("..", "migrations")
+}
+
+// zerologAdapter implements monitoring.Logger using the global zerolog logger.
+type zerologAdapter struct{}
+
+func (zerologAdapter) Debug(msg string, args ...any) {
+	log.Debug().Fields(pairsToMap(args)).Msg(msg)
+}
+
+func (zerologAdapter) Warn(msg string, args ...any) {
+	log.Warn().Fields(pairsToMap(args)).Msg(msg)
+}
+
+func pairsToMap(args []any) map[string]interface{} {
+	m := make(map[string]interface{}, len(args)/2)
+	for i := 0; i+1 < len(args); i += 2 {
+		if k, ok := args[i].(string); ok {
+			m[k] = args[i+1]
+		}
+	}
+	return m
 }
