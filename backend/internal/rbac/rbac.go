@@ -39,6 +39,10 @@ const (
 	PermissionAdminUsersCreate Permission = "admin:users:create"
 	PermissionAdminUsersUpdate Permission = "admin:users:update"
 	PermissionAdminUsersDelete Permission = "admin:users:delete"
+
+	// Audit log viewing permissions
+	PermissionAuditLogsRead   Permission = "audit:logs:read"
+	PermissionAuditLogsExport Permission = "audit:logs:export"
 )
 
 // Authorizer evaluates role grants.
@@ -73,6 +77,8 @@ func NewDefaultAuthorizer() Authorizer {
 				PermissionAdminUsersCreate:         {},
 				PermissionAdminUsersUpdate:         {},
 				PermissionAdminUsersDelete:         {},
+				PermissionAuditLogsRead:            {},
+				PermissionAuditLogsExport:          {},
 			},
 			RoleViewer: {
 				PermissionReadDashboard:       {},
@@ -83,6 +89,7 @@ func NewDefaultAuthorizer() Authorizer {
 				PermissionOcservUsersRead:     {},
 				PermissionOcservConfigRead:    {},
 				PermissionAdminUsersRead:      {},
+				PermissionAuditLogsRead:       {},
 			},
 		},
 	}
