@@ -46,6 +46,7 @@ type LogSourceInfo struct {
 	Available     bool   `json:"available"`
 	Path          string `json:"path"`
 	Reader        string `json:"reader"`
+	Reason        string `json:"reason"`
 	LogLevel      *int   `json:"logLevel"`
 	LogLevelLabel string `json:"logLevelLabel,omitempty"`
 }
@@ -246,6 +247,10 @@ func (s *AuditLogService) GetSources(ctx context.Context, principal auth.Princip
 			info.Reader = "file"
 		} else if journalReader, ok := s.journalReaders[name]; ok && journalReader.Available(ctx) {
 			info.Reader = "journal"
+		}
+
+		if !info.Available {
+			info.Reason = "service_not_running"
 		}
 
 		sources = append(sources, info)

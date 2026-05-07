@@ -178,3 +178,52 @@ func TestAuditLogService_ReadLogs_TimeValidation(t *testing.T) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
+
+func TestAuditLogService_GetSources_Reason_Unavailable(t *testing.T) {
+	fakeFile := logs.NewFakeLogReader(false, nil, nil)
+	fakeJournal := logs.NewFakeLogReader(false, nil, nil)
+	svc := NewAuditLogService(
+		func() config.Config { return config.Defaults() },
+		map[string]logs.LogReader{"panel": fakeFile, "ocserv": fakeFile},
+		map[string]logs.LogReader{"panel": fakeJournal, "ocserv": fakeJournal},
+		nil,
+		rbac.NewDefaultAuthorizer(),
+	)
+	principal := auth.Principal{ID: 1, Username: "admin", Roles: []string{"owner"}}
+	sources, err := svc.GetSources(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, src := range sources {
+		if src.Available {
+			t.Errorf("source %s should not be available", src.Name)
+		}
+		if src.Reason != "service_not_running" {
+			t.Errorf("source %s reason = %q, want service_not_running", src.Name, src.Reason)
+		}
+	}
+}
+
+func TestAuditLogService_GetSources_Reason_Available(t *testing.T) {
+	fakeFile := logs.NewFakeLogReader(true, &logs.ReadResult{}, nil)
+	svc := NewAuditLogService(
+		func() config.Config { return config.Defaults() },
+		map[string]logs.LogReader{"panel": fakeFile, "ocserv": fakeFile},
+		map[string]logs.LogReader{},
+		nil,
+		rbac.NewDefaultAuthorizer(),
+	)
+	principal := auth.Principal{ID: 1, Username: "admin", Roles: []string{"owner"}}
+	sources, err := svc.GetSources(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, src := range sources {
+		if !src.Available {
+			t.Errorf("source %s should be available", src.Name)
+		}
+		if src.Reason != "" {
+			t.Errorf("source %s reason = %q, want empty", src.Name, src.Reason)
+		}
+	}
+}
