@@ -735,6 +735,7 @@ export type AuditLogSource = {
   available: boolean;
   path: string;
   reader: string;
+  reason: string;
   logLevel: number | null;
   logLevelLabel: string | null;
 };
