@@ -47,6 +47,7 @@ type App struct {
 	logTailService    *app.LogTailService
 	configService     *app.ConfigManagementService
 	adminUserService  *app.AdminUserService
+	auditLogService   *app.AuditLogService
 	authorizer        rbac.Authorizer
 	loginLimiter      *auth.RateLimiter
 	cookieSecure      bool
@@ -180,6 +181,7 @@ func NewAppRouter(
 	logTailService *app.LogTailService,
 	configService *app.ConfigManagementService,
 	adminUserService *app.AdminUserService,
+	auditLogService *app.AuditLogService,
 	authorizer rbac.Authorizer,
 	opts AppOptions,
 ) http.Handler {
@@ -197,6 +199,7 @@ func NewAppRouter(
 		logTailService:    logTailService,
 		configService:     configService,
 		adminUserService:  adminUserService,
+		auditLogService:   auditLogService,
 		authorizer:        authorizer,
 		loginLimiter:      opts.LoginLimiter,
 		cookieSecure:      opts.CookieSecure,
@@ -235,6 +238,7 @@ func NewAppRouter(
 	mux.HandleFunc("/api/ocserv/users", appHandler.handleOcservUsers)
 	mux.HandleFunc("/api/ocserv/users/create", appHandler.handleOcservUserCreate)
 	mux.HandleFunc("/api/ocserv/users/{username}/password", appHandler.handleOcservUserUpdatePassword)
+	mux.HandleFunc("PUT /api/ocserv/users/{username}/group", appHandler.handleOcservUserUpdateGroup)
 	mux.HandleFunc("/api/ocserv/users/{username}", appHandler.handleOcservUserDelete)
 	mux.HandleFunc("/api/ocserv/config/issues", appHandler.handleOcservConfigIssues)
 	// health and log endpoints
@@ -268,6 +272,10 @@ func NewAppRouter(
 	mux.HandleFunc("POST /api/ocserv/users/bulk-delete", appHandler.handleOcservUsersBulkDelete)
 	mux.HandleFunc("POST /api/ocserv/users/bulk-lock", appHandler.handleOcservUsersBulkLock)
 	mux.HandleFunc("POST /api/ocserv/users/bulk-unlock", appHandler.handleOcservUsersBulkUnlock)
+	// Audit log viewing
+	mux.HandleFunc("GET /api/audit/logs", appHandler.handleAuditLogs)
+	mux.HandleFunc("GET /api/audit/logs/sources", appHandler.handleAuditLogSources)
+	mux.HandleFunc("GET /api/audit/logs/export", appHandler.handleAuditLogExport)
 
 	return securityHeaders(mux)
 }
@@ -545,6 +553,8 @@ func (a *App) writeAppError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "session not found")
 	case errors.Is(err, ocserv.ErrPasswordFileMissing):
 		writeError(w, http.StatusServiceUnavailable, "the VPN password file does not exist — check server configuration")
+	case errors.Is(err, app.ErrLogSourceUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "log source is unavailable")
 	case isMetricsValidationError(err):
 		writeError(w, http.StatusBadRequest, "invalid request")
 	default:

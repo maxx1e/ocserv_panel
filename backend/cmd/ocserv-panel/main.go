@@ -17,6 +17,7 @@ import (
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/db"
+	"ocserv_panel/backend/internal/logs"
 	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/monitoring"
 	"ocserv_panel/backend/internal/ocserv"
@@ -107,6 +108,19 @@ func main() {
 	healthService := app.NewHealthService(readinessChecker, persistence, healthCfgFn, rbac.NewDefaultAuthorizer(), tsdbPathFromEnv())
 	logTailService := app.NewLogTailService(healthCfgFn, app.OSLogFileReader{}, rbac.NewDefaultAuthorizer())
 
+	// Audit log viewing service
+	panelFileReader := logs.NewFileLogReader(cfg.Installation.PanelLogPath, logs.SourcePanel)
+	ocservFileReader := logs.NewFileLogReader(cfg.Installation.OcservLogPath, logs.SourceOcserv)
+	panelJournalReader := logs.NewJournalLogReader(cfg.Installation.PanelSystemdUnit, logs.SourcePanel, runner)
+	ocservJournalReader := logs.NewJournalLogReader(cfg.Service.SystemdUnitName, logs.SourceOcserv, runner)
+	auditLogService := app.NewAuditLogService(
+		healthCfgFn,
+		map[string]logs.LogReader{"panel": panelFileReader, "ocserv": ocservFileReader},
+		map[string]logs.LogReader{"panel": panelJournalReader, "ocserv": ocservJournalReader},
+		recorder,
+		rbac.NewDefaultAuthorizer(),
+	)
+
 	configFiles := ocserv.NewConfigFileManager(cfg.Installation.OcservConfigPath, 10)
 	configReloader := ocserv.NewConfigReloader(runner, cfg.Installation.OcctlBinPath)
 	networkInspector := ocserv.NewNetworkInspectorWithConfig(runner, "/proc/sys", cfg.Installation.OcservConfigPath)
@@ -182,7 +196,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, configMgmtService, adminUserService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter}),
+		Handler:           server.NewAppRouter(authService, dashboardService, monitoringService, settingsService, ocservService, healthService, logTailService, configMgmtService, adminUserService, auditLogService, rbac.NewDefaultAuthorizer(), server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
