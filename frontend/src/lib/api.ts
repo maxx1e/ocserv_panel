@@ -666,6 +666,39 @@ export function unlockVpnUser(username: string): Promise<void> {
   return apiFetch<void>(`/api/ocserv/users/${encodeURIComponent(username)}/unlock`, { method: 'POST' });
 }
 
+// ─── Bulk Operations ────────────────────────────────────────────────────────
+
+export type BulkResult = {
+  total: number;
+  succeeded: number;
+  failed: number;
+  errors: { id: string; error: string }[];
+};
+
+export function bulkDeleteAdminUsers(ids: number[]): Promise<BulkResult> {
+  return apiFetch<BulkResult>('/api/admin/users/bulk-delete', { method: 'POST', body: { ids } });
+}
+
+export function bulkDisableAdminUsers(ids: number[]): Promise<BulkResult> {
+  return apiFetch<BulkResult>('/api/admin/users/bulk-disable', { method: 'POST', body: { ids } });
+}
+
+export function bulkEnableAdminUsers(ids: number[]): Promise<BulkResult> {
+  return apiFetch<BulkResult>('/api/admin/users/bulk-enable', { method: 'POST', body: { ids } });
+}
+
+export function bulkDeleteVpnUsers(usernames: string[]): Promise<BulkResult> {
+  return apiFetch<BulkResult>('/api/ocserv/users/bulk-delete', { method: 'POST', body: { usernames } });
+}
+
+export function bulkLockVpnUsers(usernames: string[]): Promise<BulkResult> {
+  return apiFetch<BulkResult>('/api/ocserv/users/bulk-lock', { method: 'POST', body: { usernames } });
+}
+
+export function bulkUnlockVpnUsers(usernames: string[]): Promise<BulkResult> {
+  return apiFetch<BulkResult>('/api/ocserv/users/bulk-unlock', { method: 'POST', body: { usernames } });
+}
+
 // ─── Utility Functions ─────────────────────────────────────────────────────
 
 export function principalFromAuth(auth: AuthSummary | null): Principal | null {
