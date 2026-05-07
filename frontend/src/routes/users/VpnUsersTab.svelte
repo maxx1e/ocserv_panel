@@ -6,11 +6,17 @@
     unlockVpnUser,
     resetVpnPassword,
     deleteVpnUser,
-    type VpnUser
+    bulkDeleteVpnUsers,
+    bulkLockVpnUsers,
+    bulkUnlockVpnUsers,
+    type VpnUser,
+    type BulkResult
   } from '$lib/api';
   import VpnUserFormDialog from './VpnUserFormDialog.svelte';
   import DeleteConfirmDialog from './DeleteConfirmDialog.svelte';
   import ResetPasswordDialog from './ResetPasswordDialog.svelte';
+  import BulkActionToolbar from './BulkActionToolbar.svelte';
+  import BulkConfirmDialog from './BulkConfirmDialog.svelte';
 
   type Props = {
     users: VpnUser[];
@@ -41,6 +47,16 @@
 
   let successMsg = $state('');
   let errorMsg = $state('');
+
+  // ── bulk selection ────────────────────────────────────────────────────────
+
+  let selectedUsernames = $state<Set<string>>(new Set());
+  let bulkAction = $state<'delete' | 'lock' | 'unlock' | null>(null);
+  let bulkLoading = $state(false);
+  let bulkResultMsg = $state('');
+  let bulkErrorMsg = $state('');
+
+  const selectedCount = $derived(selectedUsernames.size);
 
   // ── derived ───────────────────────────────────────────────────────────────
 
@@ -81,6 +97,7 @@
   $effect(() => {
     filteredUsers;
     page = 1;
+    selectedUsernames = new Set();
   });
 
   // ── helpers ───────────────────────────────────────────────────────────────
@@ -135,6 +152,65 @@
     onRefresh();
   }
 
+  // ── bulk helpers ──────────────────────────────────────────────────────────
+
+  function toggleSelect(username: string) {
+    const next = new Set(selectedUsernames);
+    if (next.has(username)) next.delete(username);
+    else next.add(username);
+    selectedUsernames = next;
+  }
+
+  function toggleSelectAll() {
+    if (selectedUsernames.size === paged.items.length && paged.items.length > 0) {
+      selectedUsernames = new Set();
+    } else {
+      selectedUsernames = new Set(paged.items.map(u => u.username));
+    }
+  }
+
+  function clearSelection() {
+    selectedUsernames = new Set();
+  }
+
+  async function executeBulkAction() {
+    if (!bulkAction) return;
+    bulkLoading = true;
+    bulkResultMsg = '';
+    bulkErrorMsg = '';
+
+    try {
+      const usernames = [...selectedUsernames];
+      let result: BulkResult;
+
+      switch (bulkAction) {
+        case 'delete':
+          result = await bulkDeleteVpnUsers(usernames);
+          break;
+        case 'lock':
+          result = await bulkLockVpnUsers(usernames);
+          break;
+        case 'unlock':
+          result = await bulkUnlockVpnUsers(usernames);
+          break;
+      }
+
+      if (result!.failed > 0) {
+        bulkErrorMsg = `${result!.succeeded} succeeded, ${result!.failed} failed: ${result!.errors.map(e => e.error).join(', ')}`;
+      } else {
+        bulkResultMsg = `Successfully ${bulkAction === 'delete' ? 'deleted' : bulkAction === 'lock' ? 'locked' : 'unlocked'} ${result!.succeeded} user${result!.succeeded !== 1 ? 's' : ''}`;
+      }
+
+      clearSelection();
+      onRefresh();
+    } catch (err: unknown) {
+      bulkErrorMsg = err instanceof Error ? err.message : 'Bulk operation failed';
+    } finally {
+      bulkLoading = false;
+      bulkAction = null;
+    }
+  }
+
   function handleCreateSuccess() {
     successMsg = 'VPN user created.';
     onRefresh();
@@ -155,7 +231,30 @@
   </div>
 {/if}
 
-<!-- Toolbar -->
+{#if bulkResultMsg}
+  <div class="flex items-center justify-between px-4 py-3 rounded-lg text-sm bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 mb-4" role="status">
+    <span>{bulkResultMsg}</span>
+    <button type="button" onclick={() => (bulkResultMsg = '')} class="ml-4 text-green-600 hover:text-green-800" aria-label="Dismiss">&times;</button>
+  </div>
+{/if}
+{#if bulkErrorMsg}
+  <div class="flex items-center justify-between px-4 py-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 mb-4" role="alert">
+    <span>{bulkErrorMsg}</span>
+    <button type="button" onclick={() => (bulkErrorMsg = '')} class="ml-4 text-red-600 hover:text-red-800" aria-label="Dismiss">&times;</button>
+  </div>
+{/if}
+
+{#if isOwner}
+  <BulkActionToolbar
+    count={selectedCount}
+    actions={[
+      { label: 'Delete', variant: 'destructive', action: () => { bulkAction = 'delete'; } },
+      { label: 'Lock', variant: 'default', action: () => { bulkAction = 'lock'; } },
+      { label: 'Unlock', variant: 'default', action: () => { bulkAction = 'unlock'; } }
+    ]}
+    onClear={clearSelection}
+  />
+{/if}
 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
   <div class="flex items-center gap-3 flex-wrap">
     <!-- Search -->
@@ -208,6 +307,16 @@
       <table class="w-full">
         <thead>
           <tr class="bg-slate-50 dark:bg-slate-800">
+            {#if isOwner}
+              <th class="w-10 px-3 py-3">
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  checked={selectedUsernames.size === paged.items.length && paged.items.length > 0}
+                  onchange={toggleSelectAll}
+                />
+              </th>
+            {/if}
             <th
               class="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none"
               onclick={() => toggleSort('username')}
@@ -236,6 +345,16 @@
         <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
           {#each paged.items as user (user.username)}
             <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+              {#if isOwner}
+                <td class="px-3 py-3">
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300 text-blue-600"
+                    checked={selectedUsernames.has(user.username)}
+                    onchange={() => toggleSelect(user.username)}
+                  />
+                </td>
+              {/if}
               <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100">
                 {user.username}
               </td>
@@ -335,3 +454,12 @@
 <VpnUserFormDialog bind:open={createOpen} onSuccess={handleCreateSuccess} />
 <DeleteConfirmDialog bind:open={deleteOpen} itemName={deleteTarget?.username ?? ''} onConfirm={handleDelete} />
 <ResetPasswordDialog bind:open={resetPwdOpen} username={resetPwdTarget?.username ?? ''} onConfirm={handleResetPassword} />
+<BulkConfirmDialog
+  open={bulkAction !== null}
+  action={bulkAction === 'delete' ? 'Delete' : bulkAction === 'lock' ? 'Lock' : 'Unlock'}
+  count={selectedCount}
+  variant={bulkAction === 'delete' ? 'destructive' : 'default'}
+  loading={bulkLoading}
+  onConfirm={executeBulkAction}
+  onCancel={() => { bulkAction = null; }}
+/>
