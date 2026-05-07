@@ -7,11 +7,17 @@
     enableAdminUser,
     resetAdminPassword,
     deleteAdminUser,
-    type AdminUser
+    bulkDeleteAdminUsers,
+    bulkDisableAdminUsers,
+    bulkEnableAdminUsers,
+    type AdminUser,
+    type BulkResult
   } from '$lib/api';
   import AdminUserFormDialog from './AdminUserFormDialog.svelte';
   import DeleteConfirmDialog from './DeleteConfirmDialog.svelte';
   import ResetPasswordDialog from './ResetPasswordDialog.svelte';
+  import BulkActionToolbar from './BulkActionToolbar.svelte';
+  import BulkConfirmDialog from './BulkConfirmDialog.svelte';
 
   type Props = {
     users: AdminUser[];
@@ -45,6 +51,16 @@
 
   let successMsg = $state('');
   let errorMsg = $state('');
+
+  // ── bulk selection ────────────────────────────────────────────────────────
+
+  let selectedIds = $state<Set<number>>(new Set());
+  let bulkAction = $state<'delete' | 'disable' | 'enable' | null>(null);
+  let bulkLoading = $state(false);
+  let bulkResultMsg = $state('');
+  let bulkErrorMsg = $state('');
+
+  const selectedCount = $derived(selectedIds.size);
 
   // ── derived ───────────────────────────────────────────────────────────────
 
@@ -97,6 +113,7 @@
     // Reference the derived to track changes
     filteredUsers;
     page = 1;
+    selectedIds = new Set();
   });
 
   // ── helpers ───────────────────────────────────────────────────────────────
@@ -190,6 +207,65 @@
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  // ── bulk helpers ──────────────────────────────────────────────────────────
+
+  function toggleSelect(id: number) {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedIds = next;
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === paged.items.length && paged.items.length > 0) {
+      selectedIds = new Set();
+    } else {
+      selectedIds = new Set(paged.items.map(u => u.id));
+    }
+  }
+
+  function clearSelection() {
+    selectedIds = new Set();
+  }
+
+  async function executeBulkAction() {
+    if (!bulkAction) return;
+    bulkLoading = true;
+    bulkResultMsg = '';
+    bulkErrorMsg = '';
+
+    try {
+      const ids = [...selectedIds];
+      let result: BulkResult;
+
+      switch (bulkAction) {
+        case 'delete':
+          result = await bulkDeleteAdminUsers(ids);
+          break;
+        case 'disable':
+          result = await bulkDisableAdminUsers(ids);
+          break;
+        case 'enable':
+          result = await bulkEnableAdminUsers(ids);
+          break;
+      }
+
+      if (result.failed > 0) {
+        bulkErrorMsg = `${result.succeeded} succeeded, ${result.failed} failed: ${result.errors.map(e => e.error).join(', ')}`;
+      } else {
+        bulkResultMsg = `Successfully ${bulkAction === 'delete' ? 'deleted' : bulkAction === 'disable' ? 'disabled' : 'enabled'} ${result.succeeded} user${result.succeeded !== 1 ? 's' : ''}`;
+      }
+
+      clearSelection();
+      onRefresh();
+    } catch (err: any) {
+      bulkErrorMsg = err.message || 'Bulk operation failed';
+    } finally {
+      bulkLoading = false;
+      bulkAction = null;
+    }
+  }
 </script>
 
 <!-- Notifications -->
@@ -204,6 +280,31 @@
     <span>{errorMsg}</span>
     <button type="button" onclick={() => (errorMsg = '')} class="ml-4 text-red-600 hover:text-red-800" aria-label="Dismiss">&times;</button>
   </div>
+{/if}
+
+{#if bulkResultMsg}
+  <div class="flex items-center justify-between px-4 py-3 rounded-lg text-sm bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 mb-4" role="status">
+    <span>{bulkResultMsg}</span>
+    <button type="button" onclick={() => (bulkResultMsg = '')} class="ml-4 text-green-600 hover:text-green-800" aria-label="Dismiss">&times;</button>
+  </div>
+{/if}
+{#if bulkErrorMsg}
+  <div class="flex items-center justify-between px-4 py-3 rounded-lg text-sm bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 mb-4" role="alert">
+    <span>{bulkErrorMsg}</span>
+    <button type="button" onclick={() => (bulkErrorMsg = '')} class="ml-4 text-red-600 hover:text-red-800" aria-label="Dismiss">&times;</button>
+  </div>
+{/if}
+
+{#if isOwner}
+  <BulkActionToolbar
+    count={selectedCount}
+    actions={[
+      { label: 'Delete', variant: 'destructive', action: () => { bulkAction = 'delete'; } },
+      { label: 'Disable', variant: 'default', action: () => { bulkAction = 'disable'; } },
+      { label: 'Enable', variant: 'default', action: () => { bulkAction = 'enable'; } }
+    ]}
+    onClear={clearSelection}
+  />
 {/if}
 
 <!-- Toolbar -->
@@ -287,6 +388,16 @@
       <table class="w-full">
         <thead>
           <tr class="bg-slate-50 dark:bg-slate-800">
+            {#if isOwner}
+              <th class="w-10 px-3 py-3">
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  checked={selectedIds.size === paged.items.length && paged.items.length > 0}
+                  onchange={toggleSelectAll}
+                />
+              </th>
+            {/if}
             <th
               class="px-4 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none"
               onclick={() => toggleSort('username')}
@@ -333,6 +444,16 @@
         <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
           {#each paged.items as user (user.id)}
             <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+              {#if isOwner}
+                <td class="px-3 py-3">
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300 text-blue-600"
+                    checked={selectedIds.has(user.id)}
+                    onchange={() => toggleSelect(user.id)}
+                  />
+                </td>
+              {/if}
               <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100">
                 {user.username}
               </td>
@@ -451,3 +572,12 @@
 <AdminUserFormDialog bind:open={formOpen} mode={formMode} user={formUser} onSuccess={handleFormSuccess} />
 <DeleteConfirmDialog bind:open={deleteOpen} itemName={deleteTarget?.username ?? ''} onConfirm={handleDelete} />
 <ResetPasswordDialog bind:open={resetPwdOpen} username={resetPwdTarget?.username ?? ''} onConfirm={handleResetPassword} />
+<BulkConfirmDialog
+  open={bulkAction !== null}
+  action={bulkAction === 'delete' ? 'Delete' : bulkAction === 'disable' ? 'Disable' : 'Enable'}
+  count={selectedCount}
+  variant={bulkAction === 'delete' ? 'destructive' : 'default'}
+  loading={bulkLoading}
+  onConfirm={executeBulkAction}
+  onCancel={() => { bulkAction = null; }}
+/>
