@@ -29,6 +29,7 @@ type InstallationConfig struct {
 	CertDir          string `toml:"cert_dir"`
 	OcservLogPath    string `toml:"ocserv_log_path"`
 	PanelLogPath     string `toml:"panel_log_path"`
+	PanelSystemdUnit string `toml:"panel_systemd_unit"`
 }
 
 // ServiceConfig holds service runtime settings.
@@ -108,6 +109,7 @@ func Defaults() Config {
 			CertDir:          "/etc/ocserv/certs",
 			OcservLogPath:    "/var/log/ocserv/ocserv.log",
 			PanelLogPath:     "/var/log/ocserv-panel/panel.log",
+			PanelSystemdUnit: "ocserv-panel",
 		},
 		Service: ServiceConfig{
 			Name:            "ocserv-panel",
@@ -150,6 +152,35 @@ func Load(path string) (Config, error) {
 		if os.IsNotExist(err) {
 			return cfg, nil
 		}
+		return Config{}, fmt.Errorf("read config file %s: %w", path, err)
+	}
+	if err := unmarshalTOML(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+
+	// Backward compatibility: if OcpasswdFilePath is empty, try the legacy
+	// ocpasswd_path TOML key that was renamed in v2.
+	if cfg.Installation.OcpasswdFilePath == "" {
+		var raw map[string]any
+		if err := unmarshalTOMLRaw(data, &raw); err == nil {
+			if inst, ok := raw["installation"].(map[string]any); ok {
+				if v, ok := inst["ocpasswd_path"].(string); ok && v != "" {
+					cfg.Installation.OcpasswdFilePath = v
+				}
+			}
+		}
+	}
+
+	return cfg, nil
+}
+
+// LoadStrict loads config from disk and returns an error if the file does not
+// exist. Use this for write operations where you need to ensure you are
+// modifying an existing file rather than silently creating one from defaults.
+func LoadStrict(path string) (Config, error) {
+	cfg := Defaults()
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return Config{}, fmt.Errorf("read config file %s: %w", path, err)
 	}
 	if err := unmarshalTOML(data, &cfg); err != nil {
