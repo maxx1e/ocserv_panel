@@ -261,6 +261,13 @@ func NewAppRouter(
 	// VPN user lock/unlock
 	mux.HandleFunc("POST /api/ocserv/users/{username}/lock", appHandler.handleOcservUserLock)
 	mux.HandleFunc("POST /api/ocserv/users/{username}/unlock", appHandler.handleOcservUserUnlock)
+	// Bulk operations
+	mux.HandleFunc("POST /api/admin/users/bulk-delete", appHandler.handleAdminUsersBulkDelete)
+	mux.HandleFunc("POST /api/admin/users/bulk-disable", appHandler.handleAdminUsersBulkDisable)
+	mux.HandleFunc("POST /api/admin/users/bulk-enable", appHandler.handleAdminUsersBulkEnable)
+	mux.HandleFunc("POST /api/ocserv/users/bulk-delete", appHandler.handleOcservUsersBulkDelete)
+	mux.HandleFunc("POST /api/ocserv/users/bulk-lock", appHandler.handleOcservUsersBulkLock)
+	mux.HandleFunc("POST /api/ocserv/users/bulk-unlock", appHandler.handleOcservUsersBulkUnlock)
 
 	return securityHeaders(mux)
 }
