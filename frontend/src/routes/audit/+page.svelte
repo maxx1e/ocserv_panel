@@ -19,6 +19,7 @@
   import LogToolbar from './LogToolbar.svelte';
   import LogTable from './LogTable.svelte';
   import LogLevelBanner from './LogLevelBanner.svelte';
+  import LogSourceUnavailable from './LogSourceUnavailable.svelte';
 
   // ── page state ────────────────────────────────────────────────────────────
 
@@ -124,7 +125,11 @@
     } catch (caught) {
       if (caught instanceof ApiError) {
         if (caught.status === 503) {
-          logError = `Log source "${activeTab}" is unavailable. Check that the log file exists or systemd journal is accessible.`;
+          // Source unavailable — the banner handles this via source metadata.
+          // Only show error text if sources haven't been loaded yet.
+          if (!activeSource) {
+            logError = `Log source "${activeTab}" is currently unavailable.`;
+          }
         } else {
           logError = caught.message;
         }
@@ -314,14 +319,7 @@
 
     <!-- Source unavailable -->
     {#if activeSource && !activeSource.available}
-      <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg p-4 text-center">
-        <p class="text-sm text-slate-500 dark:text-slate-400">
-          This log source is not configured or the file is not accessible.
-        </p>
-        <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">
-          Expected at: {activeSource.path}
-        </p>
-      </div>
+      <LogSourceUnavailable source={activeSource} onRetry={handleRefresh} />
     {:else}
       <!-- Toolbar -->
       <LogToolbar
