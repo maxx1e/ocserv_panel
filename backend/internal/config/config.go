@@ -30,6 +30,7 @@ type InstallationConfig struct {
 	OcservLogPath    string `toml:"ocserv_log_path"`
 	PanelLogPath     string `toml:"panel_log_path"`
 	PanelSystemdUnit string `toml:"panel_systemd_unit"`
+	StaticDir        string `toml:"static_dir"`
 }
 
 // ServiceConfig holds service runtime settings.
@@ -110,6 +111,7 @@ func Defaults() Config {
 			OcservLogPath:    "/var/log/ocserv/ocserv.log",
 			PanelLogPath:     "/var/log/ocserv-panel/panel.log",
 			PanelSystemdUnit: "ocserv-panel",
+			StaticDir:        "/usr/share/ocserv-panel/static",
 		},
 		Service: ServiceConfig{
 			Name:            "ocserv-panel",
@@ -286,6 +288,15 @@ func MergeEnv(cfg *Config, getenv func(string) string) {
 	}
 	if v := getenv("OCSERV_PANEL_CONFIG_PATH"); v != "" {
 		cfg.Installation.ConfigPath = v
+	}
+	if v := getenv("OCSERV_PANEL_STATIC_DIR"); v != "" {
+		cfg.Installation.StaticDir = v
+	}
+	if v := getenv("OCSERV_PANEL_TLS_CERT"); v != "" {
+		cfg.Security.TLSCertPath = v
+	}
+	if v := getenv("OCSERV_PANEL_TLS_KEY"); v != "" {
+		cfg.Security.TLSKeyPath = v
 	}
 }
 

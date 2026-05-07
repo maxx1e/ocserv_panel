@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -117,5 +118,90 @@ func TestMergeEnvOverrides(t *testing.T) {
 	}
 	if cfg.Database.DSN != "file:test.db" {
 		t.Fatalf("DSN = %q, want %q", cfg.Database.DSN, "file:test.db")
+	}
+}
+
+func TestLoadStrictMissingFileReturnsError(t *testing.T) {
+	_, err := LoadStrict(filepath.Join(t.TempDir(), "nonexistent.toml"))
+	if err == nil {
+		t.Fatal("LoadStrict should return error for missing file")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected os.ErrNotExist in error chain, got: %v", err)
+	}
+}
+
+func TestLoadStrictValidFileReturnsConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	cfg := Defaults()
+	cfg.General.AppName = "Strict Test"
+	if err := Save(cfg, path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := LoadStrict(path)
+	if err != nil {
+		t.Fatalf("LoadStrict: %v", err)
+	}
+	if loaded.General.AppName != "Strict Test" {
+		t.Fatalf("AppName = %q, want %q", loaded.General.AppName, "Strict Test")
+	}
+}
+
+func TestLoadStrictParseErrorReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.toml")
+	if err := os.WriteFile(path, []byte("not valid {{{{ TOML content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadStrict(path)
+	if err == nil {
+		t.Fatal("LoadStrict should return error for unparseable file")
+	}
+}
+
+// isWrappedNotExist checks for os.ErrNotExist in the error chain using errors.Is.
+func isWrappedNotExist(err error) bool {
+	return os.IsNotExist(err)
+}
+
+func TestDefaultsIncludeStaticDir(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Installation.StaticDir != "/usr/share/ocserv-panel/static" {
+		t.Fatalf("expected default StaticDir=/usr/share/ocserv-panel/static, got %q", cfg.Installation.StaticDir)
+	}
+}
+
+func TestMergeEnvStaticDir(t *testing.T) {
+	cfg := Defaults()
+	MergeEnv(&cfg, func(key string) string {
+		if key == "OCSERV_PANEL_STATIC_DIR" {
+			return "/opt/custom/static"
+		}
+		return ""
+	})
+	if cfg.Installation.StaticDir != "/opt/custom/static" {
+		t.Fatalf("expected StaticDir=/opt/custom/static after merge, got %q", cfg.Installation.StaticDir)
+	}
+}
+
+func TestMergeEnvTLSCert(t *testing.T) {
+	cfg := Defaults()
+	MergeEnv(&cfg, func(key string) string {
+		switch key {
+		case "OCSERV_PANEL_TLS_CERT":
+			return "/etc/letsencrypt/live/example.com/fullchain.pem"
+		case "OCSERV_PANEL_TLS_KEY":
+			return "/etc/letsencrypt/live/example.com/privkey.pem"
+		}
+		return ""
+	})
+	if cfg.Security.TLSCertPath != "/etc/letsencrypt/live/example.com/fullchain.pem" {
+		t.Fatalf("TLSCertPath not merged from env")
+	}
+	if cfg.Security.TLSKeyPath != "/etc/letsencrypt/live/example.com/privkey.pem" {
+		t.Fatalf("TLSKeyPath not merged from env")
 	}
 }
