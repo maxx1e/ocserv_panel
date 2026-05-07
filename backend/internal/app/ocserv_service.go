@@ -266,6 +266,111 @@ func (s *OcservService) UnlockOcservUser(ctx context.Context, principal auth.Pri
 	return nil
 }
 
+// BulkDeleteOcservUsers deletes multiple ocserv password-based users.
+// Each item is processed independently; failures are collected and returned in BulkResult.
+func (s *OcservService) BulkDeleteOcservUsers(ctx context.Context, principal auth.Principal, usernames []string) BulkResult {
+	result := BulkResult{Total: len(usernames), Errors: []BulkError{}}
+
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersDelete, "ocserv.users.bulk_delete"); err != nil {
+		result.Failed = result.Total
+		for _, u := range usernames {
+			result.Errors = append(result.Errors, BulkError{ID: u, Error: "permission denied"})
+		}
+		return result
+	}
+
+	actorID := principal.ID
+	for _, username := range usernames {
+		if err := ocserv.ValidateUsername(username); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: username, Error: "invalid username"})
+			continue
+		}
+
+		if err := s.users.DeleteUser(ctx, username); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: username, Error: err.Error()})
+			_ = s.record(ctx, &actorID, "ocserv.users.bulk_delete", "ocserv_user", username, audit.OutcomeFailure, err.Error(), nil)
+			continue
+		}
+
+		result.Succeeded++
+		_ = s.record(ctx, &actorID, "ocserv.users.bulk_delete", "ocserv_user", username, audit.OutcomeSuccess, "ocserv user deleted", nil)
+	}
+
+	return result
+}
+
+// BulkLockOcservUsers locks (disables) multiple ocserv password-based users.
+// Each item is processed independently; failures are collected and returned in BulkResult.
+func (s *OcservService) BulkLockOcservUsers(ctx context.Context, principal auth.Principal, usernames []string) BulkResult {
+	result := BulkResult{Total: len(usernames), Errors: []BulkError{}}
+
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.bulk_lock"); err != nil {
+		result.Failed = result.Total
+		for _, u := range usernames {
+			result.Errors = append(result.Errors, BulkError{ID: u, Error: "permission denied"})
+		}
+		return result
+	}
+
+	actorID := principal.ID
+	for _, username := range usernames {
+		if err := ocserv.ValidateUsername(username); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: username, Error: "invalid username"})
+			continue
+		}
+
+		if err := s.users.LockUser(ctx, username); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: username, Error: err.Error()})
+			_ = s.record(ctx, &actorID, "ocserv.users.bulk_lock", "ocserv_user", username, audit.OutcomeFailure, err.Error(), nil)
+			continue
+		}
+
+		result.Succeeded++
+		_ = s.record(ctx, &actorID, "ocserv.users.bulk_lock", "ocserv_user", username, audit.OutcomeSuccess, "ocserv user locked", nil)
+	}
+
+	return result
+}
+
+// BulkUnlockOcservUsers unlocks (re-enables) multiple ocserv password-based users.
+// Each item is processed independently; failures are collected and returned in BulkResult.
+func (s *OcservService) BulkUnlockOcservUsers(ctx context.Context, principal auth.Principal, usernames []string) BulkResult {
+	result := BulkResult{Total: len(usernames), Errors: []BulkError{}}
+
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.bulk_unlock"); err != nil {
+		result.Failed = result.Total
+		for _, u := range usernames {
+			result.Errors = append(result.Errors, BulkError{ID: u, Error: "permission denied"})
+		}
+		return result
+	}
+
+	actorID := principal.ID
+	for _, username := range usernames {
+		if err := ocserv.ValidateUsername(username); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: username, Error: "invalid username"})
+			continue
+		}
+
+		if err := s.users.UnlockUser(ctx, username); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: username, Error: err.Error()})
+			_ = s.record(ctx, &actorID, "ocserv.users.bulk_unlock", "ocserv_user", username, audit.OutcomeFailure, err.Error(), nil)
+			continue
+		}
+
+		result.Succeeded++
+		_ = s.record(ctx, &actorID, "ocserv.users.bulk_unlock", "ocserv_user", username, audit.OutcomeSuccess, "ocserv user unlocked", nil)
+	}
+
+	return result
+}
+
 // ConfigIssues returns ocserv configuration validation issues.
 func (s *OcservService) ConfigIssues(ctx context.Context, principal auth.Principal) ([]ocserv.ConfigIssue, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.issues"); err != nil {
