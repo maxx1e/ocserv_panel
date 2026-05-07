@@ -432,3 +432,216 @@ func TestAdminUserService_Create_InvalidRole(t *testing.T) {
 		t.Fatalf("expected ErrInvalidInput for invalid role, got %v", err)
 	}
 }
+
+func TestAdminUserService_BulkDelete(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("deletes multiple users", func(t *testing.T) {
+		mockStore := &mockAdminUserStore{
+			admins: []store.Admin{
+				{ID: 1, Username: "owner1", Roles: []rbac.Role{rbac.RoleOwner}, CreatedAt: now, UpdatedAt: now},
+				{ID: 2, Username: "user2", Roles: []rbac.Role{rbac.RoleViewer}, CreatedAt: now, UpdatedAt: now},
+				{ID: 3, Username: "user3", Roles: []rbac.Role{rbac.RoleViewer}, CreatedAt: now, UpdatedAt: now},
+			},
+			ownerCount: 1,
+		}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminOwnerPrincipal(1)
+
+		result := svc.BulkDeleteAdminUsers(context.Background(), principal, []int64{2, 3})
+
+		if result.Total != 2 {
+			t.Errorf("expected total 2, got %d", result.Total)
+		}
+		if result.Succeeded != 2 {
+			t.Errorf("expected succeeded 2, got %d", result.Succeeded)
+		}
+		if result.Failed != 0 {
+			t.Errorf("expected failed 0, got %d", result.Failed)
+		}
+	})
+
+	t.Run("skips self", func(t *testing.T) {
+		mockStore := &mockAdminUserStore{
+			admins: []store.Admin{
+				{ID: 1, Username: "owner1", Roles: []rbac.Role{rbac.RoleOwner}, CreatedAt: now, UpdatedAt: now},
+				{ID: 2, Username: "user2", Roles: []rbac.Role{rbac.RoleViewer}, CreatedAt: now, UpdatedAt: now},
+			},
+			ownerCount: 1,
+		}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminOwnerPrincipal(1)
+
+		result := svc.BulkDeleteAdminUsers(context.Background(), principal, []int64{1, 2})
+
+		if result.Succeeded != 1 {
+			t.Errorf("expected succeeded 1, got %d", result.Succeeded)
+		}
+		if result.Failed != 1 {
+			t.Errorf("expected failed 1, got %d", result.Failed)
+		}
+		if len(result.Errors) != 1 || result.Errors[0].ID != "1" {
+			t.Errorf("expected error for ID 1, got %+v", result.Errors)
+		}
+	})
+
+	t.Run("skips last owner", func(t *testing.T) {
+		mockStore := &mockAdminUserStore{
+			admins: []store.Admin{
+				{ID: 1, Username: "owner1", Roles: []rbac.Role{rbac.RoleOwner}, CreatedAt: now, UpdatedAt: now},
+				{ID: 2, Username: "owner2", Roles: []rbac.Role{rbac.RoleOwner}, CreatedAt: now, UpdatedAt: now},
+				{ID: 3, Username: "viewer", Roles: []rbac.Role{rbac.RoleViewer}, CreatedAt: now, UpdatedAt: now},
+			},
+			ownerCount: 1, // Only 1 remaining owner
+		}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminOwnerPrincipal(1)
+
+		result := svc.BulkDeleteAdminUsers(context.Background(), principal, []int64{2, 3})
+
+		if result.Succeeded != 1 {
+			t.Errorf("expected succeeded 1, got %d", result.Succeeded)
+		}
+		if result.Failed != 1 {
+			t.Errorf("expected failed 1, got %d", result.Failed)
+		}
+		if len(result.Errors) == 0 || result.Errors[0].Error != "cannot delete last owner" {
+			t.Errorf("expected 'cannot delete last owner' error, got %+v", result.Errors)
+		}
+	})
+
+	t.Run("viewer denied", func(t *testing.T) {
+		mockStore := &mockAdminUserStore{}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminViewerPrincipal(5)
+
+		result := svc.BulkDeleteAdminUsers(context.Background(), principal, []int64{2, 3})
+
+		if result.Succeeded != 0 {
+			t.Errorf("expected succeeded 0, got %d", result.Succeeded)
+		}
+		if result.Failed != 2 {
+			t.Errorf("expected failed 2, got %d", result.Failed)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		mockStore := &mockAdminUserStore{
+			admins:     []store.Admin{},
+			ownerCount: 1,
+		}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminOwnerPrincipal(1)
+
+		result := svc.BulkDeleteAdminUsers(context.Background(), principal, []int64{99})
+
+		if result.Failed != 1 {
+			t.Errorf("expected failed 1, got %d", result.Failed)
+		}
+		if len(result.Errors) == 0 || result.Errors[0].Error != "not found" {
+			t.Errorf("expected 'not found' error, got %+v", result.Errors)
+		}
+	})
+}
+
+func TestAdminUserService_BulkDisable(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("disables multiple", func(t *testing.T) {
+		mockStore := &mockAdminUserStore{
+			admins: []store.Admin{
+				{ID: 2, Username: "user2", Roles: []rbac.Role{rbac.RoleViewer}, CreatedAt: now, UpdatedAt: now},
+				{ID: 3, Username: "user3", Roles: []rbac.Role{rbac.RoleViewer}, CreatedAt: now, UpdatedAt: now},
+			},
+		}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminOwnerPrincipal(1)
+
+		result := svc.BulkDisableAdminUsers(context.Background(), principal, []int64{2, 3})
+
+		if result.Succeeded != 2 {
+			t.Errorf("expected succeeded 2, got %d", result.Succeeded)
+		}
+		if result.Failed != 0 {
+			t.Errorf("expected failed 0, got %d", result.Failed)
+		}
+	})
+
+	t.Run("skips self", func(t *testing.T) {
+		mockStore := &mockAdminUserStore{
+			admins: []store.Admin{
+				{ID: 1, Username: "owner1", Roles: []rbac.Role{rbac.RoleOwner}, CreatedAt: now, UpdatedAt: now},
+				{ID: 2, Username: "user2", Roles: []rbac.Role{rbac.RoleViewer}, CreatedAt: now, UpdatedAt: now},
+			},
+		}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminOwnerPrincipal(1)
+
+		result := svc.BulkDisableAdminUsers(context.Background(), principal, []int64{1, 2})
+
+		if result.Succeeded != 1 {
+			t.Errorf("expected succeeded 1, got %d", result.Succeeded)
+		}
+		if result.Failed != 1 {
+			t.Errorf("expected failed 1, got %d", result.Failed)
+		}
+	})
+
+	t.Run("store error", func(t *testing.T) {
+		mockStore := &mockAdminUserStore{
+			admins: []store.Admin{
+				{ID: 2, Username: "user2", Roles: []rbac.Role{rbac.RoleViewer}, CreatedAt: now, UpdatedAt: now},
+			},
+			disableErr: errors.New("db error"),
+		}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminOwnerPrincipal(1)
+
+		result := svc.BulkDisableAdminUsers(context.Background(), principal, []int64{2})
+
+		if result.Failed != 1 {
+			t.Errorf("expected failed 1, got %d", result.Failed)
+		}
+	})
+}
+
+func TestAdminUserService_BulkEnable(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("enables multiple", func(t *testing.T) {
+		disabledAt := now
+		mockStore := &mockAdminUserStore{
+			admins: []store.Admin{
+				{ID: 2, Username: "user2", Roles: []rbac.Role{rbac.RoleViewer}, DisabledAt: &disabledAt, CreatedAt: now, UpdatedAt: now},
+				{ID: 3, Username: "user3", Roles: []rbac.Role{rbac.RoleViewer}, DisabledAt: &disabledAt, CreatedAt: now, UpdatedAt: now},
+			},
+		}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminOwnerPrincipal(1)
+
+		result := svc.BulkEnableAdminUsers(context.Background(), principal, []int64{2, 3})
+
+		if result.Succeeded != 2 {
+			t.Errorf("expected succeeded 2, got %d", result.Succeeded)
+		}
+	})
+
+	t.Run("handles not found", func(t *testing.T) {
+		mockStore := &mockAdminUserStore{
+			admins: []store.Admin{
+				{ID: 2, Username: "user2", Roles: []rbac.Role{rbac.RoleViewer}, CreatedAt: now, UpdatedAt: now},
+			},
+		}
+		svc := newTestAdminUserService(mockStore)
+		principal := adminOwnerPrincipal(1)
+
+		result := svc.BulkEnableAdminUsers(context.Background(), principal, []int64{2, 99})
+
+		if result.Succeeded != 1 {
+			t.Errorf("expected succeeded 1, got %d", result.Succeeded)
+		}
+		if result.Failed != 1 {
+			t.Errorf("expected failed 1, got %d", result.Failed)
+		}
+	})
+}
