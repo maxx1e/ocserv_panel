@@ -1,0 +1,60 @@
+# ocserv-panel configuration
+# Copy to /etc/ocserv-panel/config.toml and adjust paths for your system.
+# The installer generates this file automatically with detected values.
+
+[general]
+app_name = "ocserv Panel"
+timezone = "UTC"
+
+[installation]
+config_path = "/etc/ocserv-panel/config.toml"
+data_dir = "/var/lib/ocserv-panel"
+log_dir = "/var/log/ocserv-panel"
+static_dir = "/usr/share/ocserv-panel/static"
+
+# ocserv paths — adjust if your system uses different locations
+ocserv_config_path = "/etc/ocserv/ocserv.conf"
+ocserv_socket_path = "/var/run/ocserv-socket"
+ocserv_bin_path = "/usr/sbin/ocserv"
+occtl_bin_path = "/usr/bin/occtl"
+ocpasswd_bin_path = "/usr/bin/ocpasswd"
+ocpasswd_file_path = "/etc/ocserv/ocpasswd"
+
+# Certificate directory (used for display/expiry checks)
+cert_dir = "/etc/letsencrypt/live/example.com"
+
+# Log file paths
+ocserv_log_path = "/var/log/ocserv/ocserv.log"
+panel_log_path = "/var/log/ocserv-panel/panel.log"
+panel_systemd_unit = "ocserv-panel"
+
+[service]
+name = "ocserv-panel"
+user = "ocserv-panel"
+group = "ocserv-panel"
+start_on_boot = true
+systemd_unit_name = "ocserv"
+
+[web]
+host = "0.0.0.0"
+port = 8443
+base_url = "https://your-domain.com:8443"
+
+[security]
+# TLS certificate and key paths (Let's Encrypt recommended)
+# Leave empty to run in HTTP-only mode (not recommended for production)
+tls_cert_path = "/etc/letsencrypt/live/example.com/fullchain.pem"
+tls_key_path = "/etc/letsencrypt/live/example.com/privkey.pem"
+csrf_enabled = true
+security_headers = true
+
+[database]
+dsn = "file:/var/lib/ocserv-panel/ocserv_panel.db?_journal=WAL&_busy_timeout=5000"
+max_open_conns = 5
+max_idle_conns = 2
+conn_max_lifetime = 300
+
+[monitoring]
+health_endpoint = true
+dashboard_refresh_interval = 15
+log_file_read_enabled = true

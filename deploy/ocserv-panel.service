@@ -1,55 +1,47 @@
 [Unit]
-Description=ocserv Panel — Local Web UI for ocserv VPN Administration
-Documentation=https://github.com/your-org/ocserv_panel
-After=network.target ocserv.service
-Wants=ocserv.service
+Description=ocserv Panel - Web UI for OpenConnect VPN Administration
+After=network-online.target ocserv.service
+Wants=network-online.target ocserv.service
 
 [Service]
 Type=simple
 User=ocserv-panel
 Group=ocserv-panel
-WorkingDirectory=/opt/ocserv_panel
+WorkingDirectory=/var/lib/ocserv-panel
 
-# Binary and data paths
 ExecStart=/usr/local/bin/ocserv-panel
-Environment="OCSERV_PANEL_ADDR=127.0.0.1:8080"
-Environment="OCSERV_PANEL_DB_DSN=file:/var/lib/ocserv-panel/ocserv_panel.db"
+
+Environment="OCSERV_PANEL_ADDR=0.0.0.0:8443"
+Environment="OCSERV_PANEL_DB_DSN=file:/var/lib/ocserv-panel/ocserv_panel.db?_journal=WAL&_busy_timeout=5000"
 Environment="OCSERV_PANEL_CONFIG_PATH=/etc/ocserv-panel/config.toml"
 Environment="OCSERV_PANEL_TSDB_PATH=/var/lib/ocserv-panel/metrics"
 Environment="OCSERV_PANEL_MIGRATIONS_DIR=/usr/share/ocserv-panel/migrations"
-
-# Cookie security: set to "true" when TLS is in use (recommended via HAProxy).
-# Set to "false" only for local HTTP testing.
+Environment="OCSERV_PANEL_STATIC_DIR=/usr/share/ocserv-panel/static"
+Environment="OCSERV_PANEL_TLS_CERT=/etc/letsencrypt/live/light-mirror.ru/fullchain.pem"
+Environment="OCSERV_PANEL_TLS_KEY=/etc/letsencrypt/live/light-mirror.ru/privkey.pem"
 Environment="OCSERV_PANEL_COOKIE_SECURE=true"
 
-# Restart policy
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=30s
 TimeoutStopSec=10s
 
-# Filesystem hardening
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/ocserv-panel
-ReadOnlyPaths=/etc/ocserv-panel /etc/ocserv
+ReadWritePaths=/var/lib/ocserv-panel /var/log/ocserv-panel
+ReadOnlyPaths=/etc/ocserv-panel /etc/ocserv /etc/letsencrypt /usr/share/ocserv-panel
 
-# Capabilities
 CapabilityBoundingSet=
 NoNewPrivileges=true
 PrivateDevices=true
+MemoryDenyWriteExecute=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictNamespaces=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
-
-# Network
-IPAddressAllow=127.0.0.1/8 ::1/128
-IPAddressDeny=any
 
 [Install]
 WantedBy=multi-user.target
