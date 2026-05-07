@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
@@ -131,7 +132,7 @@ func (s *SettingsService) GetAllSections(ctx context.Context, principal auth.Pri
 		if loaded, err := config.Load(s.configPath); err == nil {
 			liveCfg = loaded
 		} else {
-			slog.Warn("settings: failed to load TOML config for GetAllSections, using startup snapshot", "path", s.configPath, "error", err)
+			log.Warn().Str("path", s.configPath).Err(err).Msg("settings: failed to load TOML config for GetAllSections, using startup snapshot")
 			configStatus = classifyConfigError(err)
 			configError = err.Error()
 		}
@@ -389,7 +390,7 @@ func (s *SettingsService) RestartStatus(ctx context.Context, principal auth.Prin
 		if loaded, loadErr := config.Load(s.configPath); loadErr == nil {
 			liveCfg = loaded
 		} else {
-			slog.Warn("settings: failed to load TOML config for RestartStatus, using startup snapshot", "path", s.configPath, "error", loadErr)
+			log.Warn().Str("path", s.configPath).Err(loadErr).Msg("settings: failed to load TOML config for RestartStatus, using startup snapshot")
 		}
 	}
 
