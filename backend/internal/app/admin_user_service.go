@@ -364,6 +364,166 @@ func (svc *AdminUserService) ResetAdminPassword(ctx context.Context, principal a
 	return nil
 }
 
+// BulkDeleteAdminUsers deletes multiple admin users in a single authorized operation.
+// Per-item guards mirror DeleteAdminUser: cannot delete self, cannot delete the last owner.
+func (svc *AdminUserService) BulkDeleteAdminUsers(ctx context.Context, principal auth.Principal, ids []int64) BulkResult {
+	actorID := principal.ID
+	result := BulkResult{Total: len(ids), Errors: []BulkError{}}
+
+	if !svc.authorizer.Allowed(principalRoles(principal), rbac.PermissionAdminUsersDelete) {
+		_ = svc.record(ctx, &actorID, "admin.users.bulk_delete", "admin_user", "", audit.OutcomeDenied, "permission denied")
+		result.Failed = result.Total
+		for _, id := range ids {
+			result.Errors = append(result.Errors, BulkError{ID: fmt.Sprint(id), Error: "permission denied"})
+		}
+		return result
+	}
+
+	for _, id := range ids {
+		resourceID := fmt.Sprint(id)
+
+		if principal.ID == id {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "cannot delete self"})
+			_ = svc.record(ctx, &actorID, "admin.users.bulk_delete", "admin_user", resourceID, audit.OutcomeDenied, "cannot delete self")
+			continue
+		}
+
+		target, found, err := svc.store.FindAdminByID(ctx, id)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "internal error"})
+			continue
+		}
+		if !found {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "not found"})
+			continue
+		}
+
+		if isOwner(target) {
+			ownerCount, err := svc.store.CountOwners(ctx)
+			if err != nil {
+				result.Failed++
+				result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "internal error"})
+				continue
+			}
+			if ownerCount <= 1 {
+				result.Failed++
+				result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "cannot delete last owner"})
+				_ = svc.record(ctx, &actorID, "admin.users.bulk_delete", "admin_user", resourceID, audit.OutcomeDenied, "cannot delete last owner")
+				continue
+			}
+		}
+
+		if err := svc.store.DeleteAdmin(ctx, id); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "delete failed"})
+			_ = svc.record(ctx, &actorID, "admin.users.bulk_delete", "admin_user", resourceID, audit.OutcomeFailure, "store error")
+			continue
+		}
+
+		result.Succeeded++
+		_ = svc.record(ctx, &actorID, "admin.users.bulk_delete", "admin_user", resourceID, audit.OutcomeSuccess, "admin user deleted")
+	}
+
+	return result
+}
+
+// BulkDisableAdminUsers disables multiple admin users in a single authorized operation.
+// Per-item guard mirrors DisableAdminUser: cannot disable self.
+func (svc *AdminUserService) BulkDisableAdminUsers(ctx context.Context, principal auth.Principal, ids []int64) BulkResult {
+	actorID := principal.ID
+	result := BulkResult{Total: len(ids), Errors: []BulkError{}}
+
+	if !svc.authorizer.Allowed(principalRoles(principal), rbac.PermissionAdminUsersUpdate) {
+		_ = svc.record(ctx, &actorID, "admin.users.bulk_disable", "admin_user", "", audit.OutcomeDenied, "permission denied")
+		result.Failed = result.Total
+		for _, id := range ids {
+			result.Errors = append(result.Errors, BulkError{ID: fmt.Sprint(id), Error: "permission denied"})
+		}
+		return result
+	}
+
+	for _, id := range ids {
+		resourceID := fmt.Sprint(id)
+
+		if principal.ID == id {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "cannot disable self"})
+			_ = svc.record(ctx, &actorID, "admin.users.bulk_disable", "admin_user", resourceID, audit.OutcomeDenied, "cannot disable self")
+			continue
+		}
+
+		_, found, err := svc.store.FindAdminByID(ctx, id)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "internal error"})
+			continue
+		}
+		if !found {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "not found"})
+			continue
+		}
+
+		if err := svc.store.DisableAdmin(ctx, id); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "disable failed"})
+			_ = svc.record(ctx, &actorID, "admin.users.bulk_disable", "admin_user", resourceID, audit.OutcomeFailure, "store error")
+			continue
+		}
+
+		result.Succeeded++
+		_ = svc.record(ctx, &actorID, "admin.users.bulk_disable", "admin_user", resourceID, audit.OutcomeSuccess, "admin user disabled")
+	}
+
+	return result
+}
+
+// BulkEnableAdminUsers re-enables multiple disabled admin users in a single authorized operation.
+func (svc *AdminUserService) BulkEnableAdminUsers(ctx context.Context, principal auth.Principal, ids []int64) BulkResult {
+	actorID := principal.ID
+	result := BulkResult{Total: len(ids), Errors: []BulkError{}}
+
+	if !svc.authorizer.Allowed(principalRoles(principal), rbac.PermissionAdminUsersUpdate) {
+		_ = svc.record(ctx, &actorID, "admin.users.bulk_enable", "admin_user", "", audit.OutcomeDenied, "permission denied")
+		result.Failed = result.Total
+		for _, id := range ids {
+			result.Errors = append(result.Errors, BulkError{ID: fmt.Sprint(id), Error: "permission denied"})
+		}
+		return result
+	}
+
+	for _, id := range ids {
+		resourceID := fmt.Sprint(id)
+
+		_, found, err := svc.store.FindAdminByID(ctx, id)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "internal error"})
+			continue
+		}
+		if !found {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "not found"})
+			continue
+		}
+
+		if err := svc.store.EnableAdmin(ctx, id); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, BulkError{ID: resourceID, Error: "enable failed"})
+			_ = svc.record(ctx, &actorID, "admin.users.bulk_enable", "admin_user", resourceID, audit.OutcomeFailure, "store error")
+			continue
+		}
+
+		result.Succeeded++
+		_ = svc.record(ctx, &actorID, "admin.users.bulk_enable", "admin_user", resourceID, audit.OutcomeSuccess, "admin user enabled")
+	}
+
+	return result
+}
+
 func (svc *AdminUserService) record(ctx context.Context, actorID *int64, action, resourceType, resourceID string, outcome audit.Outcome, message string) error {
 	return svc.recorder.Record(ctx, audit.Event{
 		ActorID:      actorID,
