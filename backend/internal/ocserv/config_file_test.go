@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -345,5 +346,80 @@ func TestConfigFileManagerDiffWithBackup(t *testing.T) {
 	}
 	if !strings.Contains(diff, "+key = new-value") {
 		t.Errorf("diff missing new value, got:\n%s", diff)
+	}
+}
+
+func TestConfigFileManagerWriteLockContention(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	if err := os.WriteFile(cfgPath, []byte("initial\n"), 0640); err != nil {
+		t.Fatalf("write initial: %v", err)
+	}
+
+	// Acquire the lock externally to simulate contention.
+	lockPath := cfgPath + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0640)
+	if err != nil {
+		t.Fatalf("open lock file: %v", err)
+	}
+	defer lockFile.Close()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("acquire test lock: %v", err)
+	}
+	defer func() {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	}()
+
+	// Now ConfigFileManager.Write should fail with ErrConfigLocked.
+	mgr := NewConfigFileManager(cfgPath, 5)
+	err = mgr.Write("new content\n")
+	if !errors.Is(err, ErrConfigLocked) {
+		t.Fatalf("expected ErrConfigLocked, got %v", err)
+	}
+
+	// Verify the file was not modified.
+	data, _ := os.ReadFile(cfgPath)
+	if string(data) != "initial\n" {
+		t.Errorf("file should not have changed, got %q", string(data))
+	}
+}
+
+func TestConfigFileManagerRollbackLockContention(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ocserv.conf")
+	if err := os.WriteFile(cfgPath, []byte("original\n"), 0640); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+
+	mgr := NewConfigFileManager(cfgPath, 5)
+	// Create a backup first so rollback has something to target.
+	if err := mgr.Write("updated\n"); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// Now hold the lock externally.
+	lockPath := cfgPath + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0640)
+	if err != nil {
+		t.Fatalf("open lock file: %v", err)
+	}
+	defer lockFile.Close()
+
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("acquire test lock: %v", err)
+	}
+	defer func() {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	}()
+
+	// Rollback should fail with ErrConfigLocked.
+	err = mgr.Rollback(1)
+	if !errors.Is(err, ErrConfigLocked) {
+		t.Fatalf("expected ErrConfigLocked, got %v", err)
 	}
 }
