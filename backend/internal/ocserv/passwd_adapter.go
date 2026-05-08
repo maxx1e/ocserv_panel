@@ -23,7 +23,8 @@ var _ PasswdManager = (*OcpasswdAdapter)(nil)
 
 // NewOcpasswdAdapter returns an adapter for ocpasswd user management.
 // binPath is the path to the ocpasswd binary, filePath is the ocpasswd
-// password file, and configPath is the ocserv config file (required by ocpasswd).
+// password file, and configPath is the ocserv config file (retained for
+// potential future use but not currently passed to ocpasswd).
 func NewOcpasswdAdapter(binPath, filePath, configPath string, runner CommandRunner) *OcpasswdAdapter {
 	return &OcpasswdAdapter{
 		binPath:    binPath,
@@ -35,8 +36,9 @@ func NewOcpasswdAdapter(binPath, filePath, configPath string, runner CommandRunn
 
 // CreateUser creates a new password-based user by running ocpasswd.
 // The password is piped via stdin to avoid shell injection.
-func (a *OcpasswdAdapter) CreateUser(ctx context.Context, username, password string) error {
-	return a.runPasswdCommand(ctx, username, password)
+// When group is non-empty, the -g flag is passed to assign the user to that group.
+func (a *OcpasswdAdapter) CreateUser(ctx context.Context, username, password, group string) error {
+	return a.runPasswdCommand(ctx, username, password, group)
 }
 
 // DeleteUser removes a user from the password file using ocpasswd -d.
@@ -49,7 +51,7 @@ func (a *OcpasswdAdapter) DeleteUser(ctx context.Context, username string) error
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	args := []string{"-c", a.configPath, "-d", username}
+	args := []string{"-c", a.filePath, "-d", username}
 	result, err := a.runner.Run(ctx, a.binPath, args, nil)
 	if err != nil {
 		return fmt.Errorf("delete user %s: %w", username, err)
@@ -63,7 +65,7 @@ func (a *OcpasswdAdapter) DeleteUser(ctx context.Context, username string) error
 // UpdatePassword changes a user's password by running ocpasswd.
 // The new password is piped via stdin.
 func (a *OcpasswdAdapter) UpdatePassword(ctx context.Context, username, newPassword string) error {
-	return a.runPasswdCommand(ctx, username, newPassword)
+	return a.runPasswdCommand(ctx, username, newPassword, "")
 }
 
 // ListUsers parses the ocpasswd file and returns all user entries.
@@ -96,7 +98,8 @@ func (a *OcpasswdAdapter) UserExists(ctx context.Context, username string) (bool
 
 // runPasswdCommand runs ocpasswd for create/update operations, piping the
 // password via stdin to avoid it appearing in process arguments.
-func (a *OcpasswdAdapter) runPasswdCommand(ctx context.Context, username, password string) error {
+// When group is non-empty, the -g flag is included before the username.
+func (a *OcpasswdAdapter) runPasswdCommand(ctx context.Context, username, password, group string) error {
 	// Ensure the directory for the password file exists (ocpasswd creates the file but not the directory).
 	dir := filepath.Dir(a.filePath)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -108,7 +111,11 @@ func (a *OcpasswdAdapter) runPasswdCommand(ctx context.Context, username, passwo
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	args := []string{"-c", a.configPath, username}
+	args := []string{"-c", a.filePath}
+	if group != "" {
+		args = append(args, "-g", group)
+	}
+	args = append(args, username)
 	stdin := strings.NewReader(password + "\n" + password + "\n") // ocpasswd asks twice
 	result, err := a.runner.Run(ctx, a.binPath, args, stdin)
 	if err != nil {
@@ -121,7 +128,8 @@ func (a *OcpasswdAdapter) runPasswdCommand(ctx context.Context, username, passwo
 }
 
 // ParsePasswdFile parses the ocpasswd file format: username:group:hashed_password
-// A hash value of "!" indicates a disabled account.
+// A hash value of "!" or a hash prefixed with "!" (e.g., "!$5$hash...") indicates
+// a disabled (locked) account. The "!" prefix is the native ocpasswd -l format.
 // Exported for use in tests.
 func ParsePasswdFile(data []byte) []PasswdUser {
 	var users []PasswdUser
@@ -137,26 +145,61 @@ func ParsePasswdFile(data []byte) []PasswdUser {
 		}
 		username := parts[0]
 		group := parts[1]
-		// A hash field of exactly "!" means the account is disabled.
-		active := len(parts) < 3 || parts[2] != "!"
+		// A hash field of exactly "!" or prefixed with "!" means the account is locked.
+		active := len(parts) < 3 || (parts[2] != "!" && !strings.HasPrefix(parts[2], "!"))
 		users = append(users, PasswdUser{Username: username, Group: group, Active: active})
 	}
 	return users
 }
 
-// LockUser disables a user by setting their hash field to "!" in the password file.
+// LockUser disables a user account using ocpasswd -l, which prefixes the
+// password hash with "!" without destroying it. The original hash is preserved
+// so that UnlockUser can restore access.
 func (a *OcpasswdAdapter) LockUser(ctx context.Context, username string) error {
-	_ = ctx
-	return a.setUserActive(username, false)
+	if _, err := os.Stat(a.filePath); os.IsNotExist(err) {
+		return fmt.Errorf("password file %s: %w", a.filePath, ErrPasswordFileMissing)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	args := []string{"-c", a.filePath, "-l", username}
+	result, err := a.runner.Run(ctx, a.binPath, args, nil)
+	if err != nil {
+		return fmt.Errorf("lock user %s: %w", username, err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("lock user %s: %s", username, strings.TrimSpace(result.Stderr))
+	}
+	return nil
 }
 
-// UnlockUser re-enables a locked user by setting their hash field to "*" (requires password reset).
+// UnlockUser re-enables a locked user account using ocpasswd -u, which removes
+// the "!" prefix from the password hash, restoring the original credentials.
 func (a *OcpasswdAdapter) UnlockUser(ctx context.Context, username string) error {
-	_ = ctx
-	return a.setUserActive(username, true)
+	if _, err := os.Stat(a.filePath); os.IsNotExist(err) {
+		return fmt.Errorf("password file %s: %w", a.filePath, ErrPasswordFileMissing)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	args := []string{"-c", a.filePath, "-u", username}
+	result, err := a.runner.Run(ctx, a.binPath, args, nil)
+	if err != nil {
+		return fmt.Errorf("unlock user %s: %w", username, err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("unlock user %s: %s", username, strings.TrimSpace(result.Stderr))
+	}
+	return nil
 }
 
-func (a *OcpasswdAdapter) setUserActive(username string, active bool) error {
+// UpdateGroup changes a user's group in the password file by directly editing
+// the second colon-separated field. An empty group sets the field to "*" (the
+// ocserv default/no-group marker).
+func (a *OcpasswdAdapter) UpdateGroup(ctx context.Context, username, group string) error {
+	_ = ctx
 	data, err := os.ReadFile(a.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -164,6 +207,12 @@ func (a *OcpasswdAdapter) setUserActive(username string, active bool) error {
 		}
 		return fmt.Errorf("read password file: %w", err)
 	}
+
+	newGroup := group
+	if newGroup == "" {
+		newGroup = "*"
+	}
+
 	lines := strings.Split(string(data), "\n")
 	found := false
 	for i, line := range lines {
@@ -176,19 +225,8 @@ func (a *OcpasswdAdapter) setUserActive(username string, active bool) error {
 			continue
 		}
 		found = true
-		if active {
-			if len(parts) == 3 && parts[2] == "!" {
-				parts[2] = "*"
-				lines[i] = strings.Join(parts, ":")
-			}
-		} else {
-			if len(parts) < 3 {
-				lines[i] = trimmed + ":!"
-			} else {
-				parts[2] = "!"
-				lines[i] = strings.Join(parts, ":")
-			}
-		}
+		parts[1] = newGroup
+		lines[i] = strings.Join(parts, ":")
 		break
 	}
 	if !found {
@@ -196,3 +234,4 @@ func (a *OcpasswdAdapter) setUserActive(username string, active bool) error {
 	}
 	return os.WriteFile(a.filePath, []byte(strings.Join(lines, "\n")), 0600)
 }
+
