@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -359,4 +360,51 @@ func TestValidateContentReportsLineNumbers(t *testing.T) {
 	require.Len(t, issues, 2)
 	assert.Equal(t, 2, issues[0].Line) // tcp-port on line 2
 	assert.Equal(t, 3, issues[1].Line) // route on line 3
+}
+
+func TestValidateContentUnclosedDoubleQuote(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/dev/null")
+	content := "server-cert = \"/etc/ocserv/cert.pem\ntcp-port = 443\n"
+	issues, err := v.ValidateContent(context.Background(), content)
+	require.NoError(t, err)
+	var found bool
+	for _, issue := range issues {
+		if issue.Severity == IssueError && strings.Contains(issue.Message, "unclosed") {
+			found = true
+			assert.Equal(t, 1, issue.Line)
+			break
+		}
+	}
+	assert.True(t, found, "expected error issue for unclosed double quote, got %v", issues)
+}
+
+func TestValidateContentUnclosedSingleQuote(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/dev/null")
+	content := "server-cert = '/etc/ocserv/cert.pem\n"
+	issues, err := v.ValidateContent(context.Background(), content)
+	require.NoError(t, err)
+	var found bool
+	for _, issue := range issues {
+		if issue.Severity == IssueError && strings.Contains(issue.Message, "unclosed") {
+			found = true
+			assert.Equal(t, 1, issue.Line)
+			break
+		}
+	}
+	assert.True(t, found, "expected error issue for unclosed single quote, got %v", issues)
+}
+
+func TestValidateContentBalancedQuotesNoIssue(t *testing.T) {
+	t.Parallel()
+	v := NewConfigValidator("/dev/null")
+	content := "server-cert = \"/etc/ocserv/cert.pem\"\nauth = 'plain[passwd=/etc/ocserv/ocpasswd]'\n"
+	issues, err := v.ValidateContent(context.Background(), content)
+	require.NoError(t, err)
+	for _, issue := range issues {
+		if strings.Contains(issue.Message, "unclosed") {
+			t.Fatalf("unexpected unclosed-quote issue for balanced quotes: %v", issue)
+		}
+	}
 }

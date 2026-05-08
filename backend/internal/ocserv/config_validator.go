@@ -127,6 +127,19 @@ func (v *ConfigValidator) ValidateContent(ctx context.Context, content string) (
 			continue
 		}
 
+		// Check for unclosed quotes in the raw value portion of the line.
+		rawValue := line[strings.Index(line, "=")+1:]
+		if char, unclosed := hasUnclosedQuotes(rawValue); unclosed {
+			issues = append(issues, ConfigIssue{
+				Line:       i + 1,
+				Severity:   IssueError,
+				Key:        key,
+				Message:    fmt.Sprintf("%s has unclosed %c quote", key, char),
+				Suggestion: fmt.Sprintf("Ensure all %c quotes in the value are properly closed.", char),
+			})
+			continue
+		}
+
 		switch key {
 		case "tcp-port", "udp-port":
 			issues = append(issues, v.checkPortValue(key, value, i+1)...)
@@ -288,7 +301,7 @@ func (v *ConfigValidator) checkSocketPath(key, value string) []ConfigIssue {
 			Severity:   IssueWarning,
 			Key:        key,
 			Message:    fmt.Sprintf("%s uses a relative path: %s", key, value),
-			Suggestion: "Use an absolute path like /var/run/ocserv-socket",
+			Suggestion: "Use an absolute path like /var/run/occtl.socket",
 		})
 	}
 	return issues
@@ -321,4 +334,18 @@ func parseConfigLine(line string) (key, value string, ok bool) {
 	// Strip surrounding single or double quotes.
 	value = strings.Trim(value, `"'`)
 	return key, value, true
+}
+
+// hasUnclosedQuotes checks if a raw value string has an odd number of
+// double or single quotes, indicating an unclosed quote.
+func hasUnclosedQuotes(rawValue string) (char byte, unclosed bool) {
+	dq := strings.Count(rawValue, "\"")
+	if dq%2 != 0 {
+		return '"', true
+	}
+	sq := strings.Count(rawValue, "'")
+	if sq%2 != 0 {
+		return '\'', true
+	}
+	return 0, false
 }
