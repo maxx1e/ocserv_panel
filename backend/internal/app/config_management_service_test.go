@@ -337,3 +337,59 @@ func TestConfigServiceValidateContentNoRestartForDNS(t *testing.T) {
 		t.Error("expected RequiresRestart=false for DNS-only change")
 	}
 }
+
+func TestConfigServiceApplyConfigPartialSuccessReloadFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	confPath := filepath.Join(dir, "ocserv.conf")
+	if err := os.WriteFile(confPath, []byte("tcp-port = 443\n"), 0640); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	files := ocserv.NewConfigFileManager(confPath, 10)
+	validator := ocserv.NewConfigValidator(confPath)
+
+	runner := ocserv.NewFakeCommandRunner()
+	// Reload returns non-zero exit — simulates ocserv rejecting the config at runtime.
+	runner.Results["occtl reload"] = ocserv.CommandResult{
+		Stderr:   "error in configuration line 2",
+		ExitCode: 1,
+	}
+	reloader := ocserv.NewConfigReloader(runner, "occtl")
+	inspector := ocserv.NewNetworkInspectorWithProcDir(runner, dir)
+
+	svc := NewConfigManagementService(
+		files,
+		validator,
+		reloader,
+		inspector,
+		ocserv.NewRestartDetector(),
+		audit.NoopRecorder{},
+		rbac.NewDefaultAuthorizer(),
+	)
+
+	newContent := "tcp-port = 8443\n"
+	result, err := svc.ApplyConfig(context.Background(), ownerPrincipal(), newContent)
+	if err != nil {
+		t.Fatalf("expected no error for partial success, got %v", err)
+	}
+	if result.ReloadSuccess {
+		t.Fatal("expected ReloadSuccess=false when occtl reload fails")
+	}
+	if result.ReloadError == "" {
+		t.Fatal("expected ReloadError to contain stderr")
+	}
+	if result.BackupNumber != 1 {
+		t.Errorf("expected BackupNumber=1, got %d", result.BackupNumber)
+	}
+
+	// Verify the file was actually written despite reload failure.
+	data, err := os.ReadFile(confPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if string(data) != newContent {
+		t.Errorf("expected file to be written, got %q", string(data))
+	}
+}
