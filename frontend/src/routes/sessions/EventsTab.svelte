@@ -1,0 +1,90 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import CardTable from '$lib/components/ui/CardTable.svelte';
+  import EmptyState from '$lib/components/ui/EmptyState.svelte';
+  import { Activity } from 'lucide-svelte';
+  import { formatRelativeTime } from '$lib/utils/format';
+  import { getConnectionEvents, ApiError, type ConnectionEvent } from '$lib/api';
+
+  type Props = {
+    refreshSignal: number;
+  };
+
+  let { refreshSignal }: Props = $props();
+
+  let events = $state<ConnectionEvent[]>([]);
+  let loading = $state(true);
+  let error = $state('');
+  let lastFetchedSignal = $state(0);
+
+  async function loadEvents() {
+    loading = events.length === 0;
+    error = '';
+    try {
+      events = await getConnectionEvents();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 503) {
+        error = 'ocserv is not available.';
+      } else {
+        error = caught instanceof Error ? caught.message : 'Failed to load events.';
+      }
+    } finally {
+      loading = false;
+    }
+  }
+
+  onMount(() => { void loadEvents(); });
+
+  $effect(() => {
+    if (refreshSignal > lastFetchedSignal) {
+      lastFetchedSignal = refreshSignal;
+      void loadEvents();
+    }
+  });
+</script>
+
+{#if loading}
+  <div class="flex items-center justify-center py-12">
+    <div class="w-6 h-6 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin"></div>
+  </div>
+{:else if error}
+  <div class="px-4 py-3 rounded-lg text-sm bg-red-50 text-red-800 m-4" role="alert">{error}</div>
+{:else if events.length === 0}
+  <EmptyState
+    icon={Activity}
+    title="No connection events"
+    description="Connection events will appear here when users connect or disconnect."
+  />
+{:else}
+  <CardTable title="Connection Events">
+    <table class="w-full">
+      <thead>
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Time</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Username</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Remote IP</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Event</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Message</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {#each events as event}
+          <tr class="hover:bg-slate-50">
+            <td class="px-4 py-3 text-sm text-slate-700">{formatRelativeTime(event.timestamp)}</td>
+            <td class="px-4 py-3 text-sm text-slate-700 font-medium">{event.username || '—'}</td>
+            <td class="px-4 py-3 text-sm font-mono text-xs text-slate-700">{event.remoteIp || '—'}</td>
+            <td class="px-4 py-3">
+              <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium
+                {event.eventType === 'connect' ? 'bg-green-100 text-green-700' :
+                 event.eventType === 'disconnect' ? 'bg-orange-100 text-orange-700' :
+                 'bg-slate-100 text-slate-700'}">
+                {event.eventType}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-slate-600 max-w-xs truncate">{event.message || '—'}</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </CardTable>
+{/if}
