@@ -27,7 +27,10 @@ func DiscoverVPNInterface(opts ...VPNDiscoveryOption) (string, string, error) {
 	// Strategy 1: Parse ocserv config for the "device" directive.
 	iface, err := discoverFromOcservConfig(cfg)
 	if err == nil && iface != "" {
-		return iface, "ocserv-config", nil
+		resolved := resolveInterfaceName(cfg, iface)
+		if resolved != "" {
+			return resolved, "ocserv-config", nil
+		}
 	}
 
 	// Strategy 2: Scan /sys/class/net/ for VPN interface patterns.
@@ -102,6 +105,29 @@ func discoverFromOcservConfig(cfg vpnDiscoveryConfig) (string, error) {
 	return "", nil
 }
 
+// resolveInterfaceName checks whether baseName exists as an exact interface in
+// sysfs, or whether a numbered instance (e.g., "vpns0") is available.
+// Returns the resolved name or empty string if nothing matches.
+func resolveInterfaceName(cfg vpnDiscoveryConfig, baseName string) string {
+	entries, err := cfg.readDir(cfg.sysNetPath)
+	if err != nil {
+		return ""
+	}
+	// Check if exact name exists.
+	for _, entry := range entries {
+		if entry.Name() == baseName {
+			return baseName
+		}
+	}
+	// Scan for numbered instances (e.g., vpns0, vpns1).
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), baseName) && len(entry.Name()) > len(baseName) {
+			return entry.Name()
+		}
+	}
+	return ""
+}
+
 // discoverFromSysFS scans the given directory for network interfaces that match
 // typical VPN interface name prefixes. If multiple VPN interfaces are found,
 // "tun0" is preferred; otherwise the first match is returned.
@@ -111,7 +137,7 @@ func discoverFromSysFS(cfg vpnDiscoveryConfig) (string, error) {
 		return "", fmt.Errorf("read network interfaces: %w", err)
 	}
 
-	vpnPrefixes := []string{"tun", "tap", "wg"}
+	vpnPrefixes := []string{"vpns", "tun", "tap", "wg"}
 	var found []string
 	for _, entry := range entries {
 		name := entry.Name()

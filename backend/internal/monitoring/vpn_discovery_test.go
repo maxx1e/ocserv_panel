@@ -38,6 +38,9 @@ func TestDiscoverVPNInterfaceFromOcservConfig(t *testing.T) {
 	}
 	iface, source, err := DiscoverVPNInterface(
 		WithFileReader(&fakeFileReaderForDiscovery{files: files}),
+		WithReadDirFunc(func(dirname string) ([]os.DirEntry, error) {
+			return []os.DirEntry{fakeDirEntry{name: "tun0"}}, nil
+		}),
 	)
 	if err != nil {
 		t.Fatalf("DiscoverVPNInterface: %v", err)
@@ -99,7 +102,10 @@ func TestDiscoverVPNInterfacePrefersOcservConfig(t *testing.T) {
 	iface, source, err := DiscoverVPNInterface(
 		WithFileReader(&fakeFileReaderForDiscovery{files: files}),
 		WithReadDirFunc(func(dirname string) ([]os.DirEntry, error) {
-			return []os.DirEntry{fakeDirEntry{name: "tun0"}}, nil
+			return []os.DirEntry{
+				fakeDirEntry{name: "vpn0"},
+				fakeDirEntry{name: "tun0"},
+			}, nil
 		}),
 	)
 	if err != nil {
@@ -133,5 +139,59 @@ func TestDiscoverVPNInterfaceMultipleTunFallsBackToTun0(t *testing.T) {
 	}
 	if source != "sysfs-scan" {
 		t.Fatalf("source = %q, want %q", source, "sysfs-scan")
+	}
+}
+
+func TestDiscoverVPNInterfaceVpnsPrefixFromSysFS(t *testing.T) {
+	t.Parallel()
+
+	iface, source, err := DiscoverVPNInterface(
+		WithOcservConfigPath("/nonexistent"),
+		WithFileReader(&fakeFileReaderForDiscovery{files: map[string]string{}}),
+		WithReadDirFunc(func(dirname string) ([]os.DirEntry, error) {
+			return []os.DirEntry{
+				fakeDirEntry{name: "eth0"},
+				fakeDirEntry{name: "vpns0"},
+				fakeDirEntry{name: "vpns1"},
+				fakeDirEntry{name: "lo"},
+			}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("DiscoverVPNInterface: %v", err)
+	}
+	if iface != "vpns0" {
+		t.Fatalf("iface = %q, want %q", iface, "vpns0")
+	}
+	if source != "sysfs-scan" {
+		t.Fatalf("source = %q, want %q", source, "sysfs-scan")
+	}
+}
+
+func TestDiscoverVPNInterfaceConfigDeviceBaseNameResolvesToNumbered(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{
+		"/etc/ocserv/ocserv.conf": "device = vpns\n",
+	}
+	iface, source, err := DiscoverVPNInterface(
+		WithFileReader(&fakeFileReaderForDiscovery{files: files}),
+		WithReadDirFunc(func(dirname string) ([]os.DirEntry, error) {
+			return []os.DirEntry{
+				fakeDirEntry{name: "eth0"},
+				fakeDirEntry{name: "vpns0"},
+				fakeDirEntry{name: "vpns1"},
+				fakeDirEntry{name: "lo"},
+			}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("DiscoverVPNInterface: %v", err)
+	}
+	if iface != "vpns0" {
+		t.Fatalf("iface = %q, want %q (config base name should resolve to first numbered instance)", iface, "vpns0")
+	}
+	if source != "ocserv-config" {
+		t.Fatalf("source = %q, want %q", source, "ocserv-config")
 	}
 }
