@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-  import { RefreshCw, X, AlertTriangle } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  import { X, AlertTriangle } from 'lucide-svelte';
   import EmptyState from '$lib/components/ui/EmptyState.svelte';
+  import RefreshTimer from './RefreshTimer.svelte';
   import SessionStatusCards from './SessionStatusCards.svelte';
   import SessionTabs from './SessionTabs.svelte';
   import ActiveSessionsTab from './ActiveSessionsTab.svelte';
@@ -10,10 +11,12 @@
   import RoutesTab from './RoutesTab.svelte';
   import BansTab from './BansTab.svelte';
   import DisconnectUserDialog from './DisconnectUserDialog.svelte';
+  import ReadinessDiagnostic from './ReadinessDiagnostic.svelte';
   import {
     getServerStatus,
     getMe,
     getSetupStatus,
+    getOcservReadiness,
     disconnectOcservSession,
     terminateOcservSession,
     disconnectUser,
@@ -21,7 +24,7 @@
     hasOwnerRole,
     ApiError,
     type ServerStatus,
-    type OcservSession,
+    type OcservReadiness,
     type Principal
   } from '$lib/api';
 
@@ -33,6 +36,10 @@
   let setupRequired = $state(false);
   let principal = $state<Principal | null>(null);
 
+  // ── readiness diagnostics ──────────────────────────────────────
+  let readinessData = $state<OcservReadiness | null>(null);
+  let readinessLoading = $state(false);
+
   // ── server status ──────────────────────────────────────────────
   let serverStatus = $state<ServerStatus | null>(null);
   let statusLoading = $state(true);
@@ -42,12 +49,6 @@
   type TabId = 'active' | 'all' | 'events' | 'routes' | 'bans';
   let activeTab = $state<TabId>('active');
   let refreshSignal = $state(0);
-
-  // ── refresh ────────────────────────────────────────────────────
-  let lastRefreshed = $state(new Date());
-  let nowTick = $state(Date.now());
-  let refreshInterval: ReturnType<typeof setInterval> | null = null;
-  let tickInterval: ReturnType<typeof setInterval> | null = null;
 
   // ── banners ────────────────────────────────────────────────────
   let successBanner = $state('');
@@ -65,22 +66,15 @@
 
   // ── derived ────────────────────────────────────────────────────
   const isOwner = $derived(hasOwnerRole(principal));
+  const timerPaused = $derived(pendingSessionAction !== null || disconnectUserTarget !== null);
 
   const tabs = $derived([
-    { id: 'active', label: 'Active Sessions' },
+    { id: 'active', label: 'Active Users' },
     { id: 'all', label: 'All Sessions' },
     { id: 'events', label: 'Events' },
     { id: 'routes', label: 'Routes' },
     { id: 'bans', label: 'Bans', badge: serverStatus?.bannedIps ?? 0 }
   ]);
-
-  const updatedAgoText = $derived((() => {
-    const diffSec = Math.floor((nowTick - lastRefreshed.getTime()) / 1000);
-    if (diffSec < 10) return 'just now';
-    if (diffSec < 60) return `${diffSec}s ago`;
-    const diffMin = Math.floor(diffSec / 60);
-    return `${diffMin}m ago`;
-  })());
 
   // ── lifecycle ──────────────────────────────────────────────────
   onMount(() => {
@@ -89,13 +83,6 @@
       activeTab = hash as TabId;
     }
     void initPage();
-    refreshInterval = setInterval(() => void refreshData(), 30_000);
-    tickInterval = setInterval(() => { nowTick = Date.now(); }, 1000);
-  });
-
-  onDestroy(() => {
-    if (refreshInterval) clearInterval(refreshInterval);
-    if (tickInterval) clearInterval(tickInterval);
   });
 
   // ── data ───────────────────────────────────────────────────────
@@ -112,12 +99,37 @@
       await loadServerStatus();
     } catch (caught) {
       if (caught instanceof ApiError) {
-        if (caught.status === 503) { notConfigured = true; return; }
+        if (caught.status === 503) {
+          notConfigured = true;
+          void loadReadiness();
+          return;
+        }
         if (caught.status === 403) { forbidden = true; return; }
       }
       pageError = caught instanceof Error ? caught.message : 'Unable to load sessions page.';
     } finally {
       pageLoading = false;
+    }
+  }
+
+  async function loadReadiness() {
+    readinessLoading = true;
+    try {
+      readinessData = await getOcservReadiness();
+    } catch {
+      readinessData = null;
+    } finally {
+      readinessLoading = false;
+    }
+  }
+
+  async function handleStartService() {
+    try {
+      await fetch('/api/ocserv/service/start', { method: 'POST', credentials: 'same-origin' });
+      // Retry loading after a short delay
+      setTimeout(() => void initPage(), 2000);
+    } catch {
+      // Errors will show in next readiness check
     }
   }
 
@@ -134,14 +146,8 @@
   }
 
   async function refreshData() {
-    if (pendingSessionAction || disconnectUserTarget) return;
     await loadServerStatus();
     refreshSignal++;
-    lastRefreshed = new Date();
-  }
-
-  async function handleManualRefresh() {
-    await refreshData();
   }
 
   function handleTabChange(tabId: string) {
@@ -150,12 +156,12 @@
   }
 
   // ── session actions (disconnect/terminate by ID) ───────────────
-  function confirmDisconnectSession(session: OcservSession) {
+  function confirmDisconnectSession(session: { id: string; username: string }) {
     pendingSessionAction = { type: 'disconnect', sessionId: session.id, username: session.username };
     sessionActionError = '';
   }
 
-  function confirmTerminateSession(session: OcservSession) {
+  function confirmTerminateSession(session: { id: string; username: string }) {
     pendingSessionAction = { type: 'terminate', sessionId: session.id, username: session.username };
     sessionActionError = '';
   }
@@ -233,10 +239,11 @@
   </div>
 
 {:else if notConfigured}
-  <EmptyState
-    icon={AlertTriangle}
-    title="ocserv is not available"
-    description="ocserv is not available. Is the ocserv service running?"
+  <ReadinessDiagnostic
+    readiness={readinessData}
+    loading={readinessLoading}
+    isOwner={hasOwnerRole(principal)}
+    onStartService={handleStartService}
   />
 
 {:else if forbidden}
@@ -281,18 +288,7 @@
     <!-- Page header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <h1 class="text-2xl font-bold text-slate-800">VPN Sessions</h1>
-      <div class="flex items-center gap-3">
-        <span class="text-sm text-slate-500">Updated {updatedAgoText}</span>
-        <button
-          type="button"
-          onclick={handleManualRefresh}
-          class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-          aria-label="Refresh"
-        >
-          <RefreshCw class="w-4 h-4" />
-          Refresh
-        </button>
-      </div>
+      <RefreshTimer onRefresh={refreshData} paused={timerPaused} />
     </div>
 
     <!-- Status cards -->
