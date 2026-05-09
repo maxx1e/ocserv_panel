@@ -108,10 +108,10 @@ func (r *JournalLogReader) buildArgs(opts ReadOpts) []string {
 	args = append(args, "-n", intToStr(fetchLimit))
 
 	if !opts.From.IsZero() {
-		args = append(args, "--since="+opts.From.Format("2006-01-02 15:04:05"))
+		args = append(args, "--since="+opts.From.UTC().Format("2006-01-02 15:04:05 MST"))
 	}
 	if !opts.To.IsZero() {
-		args = append(args, "--until="+opts.To.Format("2006-01-02 15:04:05"))
+		args = append(args, "--until="+opts.To.UTC().Format("2006-01-02 15:04:05 MST"))
 	}
 
 	return args

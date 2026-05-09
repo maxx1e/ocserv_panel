@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"ocserv_panel/backend/internal/ocserv"
 )
@@ -72,5 +73,102 @@ func TestJournalLogReader_ReadLines_CommandArgs(t *testing.T) {
 	}
 	if !strings.Contains(args, "--no-pager") {
 		t.Errorf("args missing --no-pager: %v", call.Args)
+	}
+}
+
+func TestJournalLogReader_buildArgs_SinceUntilIncludeUTCSuffix(t *testing.T) {
+	runner := ocserv.NewFakeCommandRunner()
+	r := NewJournalLogReader("ocserv", SourceOcserv, runner)
+
+	from := time.Date(2026, 5, 8, 15, 49, 15, 0, time.UTC)
+	to := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+
+	args := r.buildArgs(ReadOpts{
+		Limit: 50,
+		From:  from,
+		To:    to,
+	})
+
+	joined := strings.Join(args, " ")
+	wantSince := "--since=2026-05-08 15:49:15 UTC"
+	wantUntil := "--until=2026-05-09 12:00:00 UTC"
+
+	if !strings.Contains(joined, wantSince) {
+		t.Errorf("args = %q, want to contain %q", joined, wantSince)
+	}
+	if !strings.Contains(joined, wantUntil) {
+		t.Errorf("args = %q, want to contain %q", joined, wantUntil)
+	}
+}
+
+func TestJournalLogReader_buildArgs_NonUTCTimeConvertedToUTC(t *testing.T) {
+	runner := ocserv.NewFakeCommandRunner()
+	r := NewJournalLogReader("ocserv", SourceOcserv, runner)
+
+	// Simulate a time in +04:00 timezone
+	loc := time.FixedZone("TEST+4", 4*3600)
+	// 15:49:15 in +04:00 is 11:49:15 UTC
+	from := time.Date(2026, 5, 8, 15, 49, 15, 0, loc)
+
+	args := r.buildArgs(ReadOpts{
+		Limit: 50,
+		From:  from,
+	})
+
+	joined := strings.Join(args, " ")
+	wantSince := "--since=2026-05-08 11:49:15 UTC"
+
+	if !strings.Contains(joined, wantSince) {
+		t.Errorf("args = %q, want to contain %q (non-UTC time should be converted to UTC)", joined, wantSince)
+	}
+}
+
+func TestJournalLogReader_buildArgs_ZeroTimeOmitted(t *testing.T) {
+	runner := ocserv.NewFakeCommandRunner()
+	r := NewJournalLogReader("ocserv", SourceOcserv, runner)
+
+	args := r.buildArgs(ReadOpts{
+		Limit: 50,
+	})
+
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--since") {
+		t.Errorf("args should not contain --since when From is zero, got: %q", joined)
+	}
+	if strings.Contains(joined, "--until") {
+		t.Errorf("args should not contain --until when To is zero, got: %q", joined)
+	}
+}
+
+func TestJournalLogReader_buildArgs_UTCTimestampFormat(t *testing.T) {
+	runner := ocserv.NewFakeCommandRunner()
+	runner.Results["journalctl"] = ocserv.CommandResult{Stdout: "", ExitCode: 0}
+	r := NewJournalLogReader("ocserv", SourceOcserv, runner)
+
+	from := time.Date(2026, 1, 15, 8, 30, 0, 0, time.UTC)
+	to := time.Date(2026, 1, 15, 20, 45, 59, 0, time.UTC)
+
+	_, _ = r.ReadLines(context.Background(), ReadOpts{Limit: 10, From: from, To: to})
+
+	if len(runner.Calls) == 0 {
+		t.Fatal("no calls recorded")
+	}
+
+	call := runner.Calls[len(runner.Calls)-1]
+	foundSince := false
+	foundUntil := false
+	for _, arg := range call.Args {
+		if arg == "--since=2026-01-15 08:30:00 UTC" {
+			foundSince = true
+		}
+		if arg == "--until=2026-01-15 20:45:59 UTC" {
+			foundUntil = true
+		}
+	}
+	if !foundSince {
+		t.Errorf("expected --since=2026-01-15 08:30:00 UTC in args %v", call.Args)
+	}
+	if !foundUntil {
+		t.Errorf("expected --until=2026-01-15 20:45:59 UTC in args %v", call.Args)
 	}
 }
