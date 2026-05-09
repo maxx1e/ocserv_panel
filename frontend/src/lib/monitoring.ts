@@ -7,7 +7,8 @@ import type {
 } from './api';
 
 const UNAVAILABLE_VALUE = '--';
-const BYTE_UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB'] as const;
+const BYTE_UNITS_SI = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
+const BYTE_UNITS_IEC = ['B', 'KiB', 'MiB', 'GiB', 'TiB'] as const;
 
 // ---------------------------------------------------------------------------
 // Chart color definitions
@@ -113,33 +114,34 @@ export function formatMetricValue(metric: string, value: number | undefined | nu
   }
 
   if (isByteMetric(metric)) {
-    return formatBytes(value);
+    return `${formatBytes(value, 'iec')}/s`;
   }
 
   return formatNumber(value);
 }
 
-export function formatBytes(value: number | undefined | null): string {
+export function formatBytes(value: number | undefined | null, style: 'iec' | 'si' = 'si'): string {
   if (!isFiniteValue(value)) return UNAVAILABLE_VALUE;
 
   const sign = value < 0 ? '-' : '';
   let scaled = Math.abs(value);
   let unitIndex = 0;
+  const units = style === 'iec' ? BYTE_UNITS_IEC : BYTE_UNITS_SI;
 
-  while (scaled >= 1024 && unitIndex < BYTE_UNITS.length - 1) {
+  while (scaled >= 1024 && unitIndex < units.length - 1) {
     scaled /= 1024;
     unitIndex += 1;
   }
 
   if (unitIndex === 0) {
-    return `${sign}${Math.round(scaled).toLocaleString()} ${BYTE_UNITS[unitIndex]}`;
+    return `${sign}${Math.round(scaled).toLocaleString()} ${units[unitIndex]}`;
   }
 
-  return `${sign}${scaled.toFixed(1)} ${BYTE_UNITS[unitIndex]}`;
+  return `${sign}${scaled.toFixed(1)} ${units[unitIndex]}`;
 }
 
 export function isUtilizationMetric(metric: string): boolean {
-  return metric.endsWith('_utilization') || metric.includes('cpu') || metric.includes('memory');
+  return metric.endsWith('_utilization');
 }
 
 export function isByteMetric(metric: string): boolean {
@@ -164,7 +166,7 @@ export function formatAxisValue(metric: string, value: number): string {
     return `${Math.round(value)}%`;
   }
   if (isByteMetric(metric)) {
-    return formatBytesCompact(value);
+    return `${formatBytesCompact(value)}/s`;
   }
   // count / session metrics
   if (Math.abs(value) >= 10000) {
