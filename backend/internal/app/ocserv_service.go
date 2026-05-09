@@ -176,7 +176,8 @@ func (s *OcservService) ListOcservUsers(ctx context.Context, principal auth.Prin
 }
 
 // CreateOcservUser creates a new ocserv password-based user.
-func (s *OcservService) CreateOcservUser(ctx context.Context, principal auth.Principal, username, password string) error {
+// When group is non-empty, the user is assigned to that group.
+func (s *OcservService) CreateOcservUser(ctx context.Context, principal auth.Principal, username, password, group string) error {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersCreate, "ocserv.users.create"); err != nil {
 		return err
 	}
@@ -186,12 +187,19 @@ func (s *OcservService) CreateOcservUser(ctx context.Context, principal auth.Pri
 	if err := ocserv.ValidatePassword(password); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
+	if err := ocserv.ValidateGroup(group); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
+	}
 	actorID := principal.ID
-	if err := s.users.CreateUser(ctx, username, password); err != nil {
-		_ = s.record(ctx, &actorID, "ocserv.users.create", "ocserv_user", username, audit.OutcomeFailure, err.Error(), nil)
+	metadata := map[string]string{}
+	if group != "" {
+		metadata["group"] = group
+	}
+	if err := s.users.CreateUser(ctx, username, password, group); err != nil {
+		_ = s.record(ctx, &actorID, "ocserv.users.create", "ocserv_user", username, audit.OutcomeFailure, err.Error(), metadata)
 		return fmt.Errorf("create ocserv user %s: %w", username, err)
 	}
-	_ = s.record(ctx, &actorID, "ocserv.users.create", "ocserv_user", username, audit.OutcomeSuccess, "ocserv user created", nil)
+	_ = s.record(ctx, &actorID, "ocserv.users.create", "ocserv_user", username, audit.OutcomeSuccess, "ocserv user created", metadata)
 	return nil
 }
 
@@ -229,6 +237,28 @@ func (s *OcservService) UpdateOcservUserPassword(ctx context.Context, principal 
 		return fmt.Errorf("update ocserv user password %s: %w", username, err)
 	}
 	_ = s.record(ctx, &actorID, "ocserv.users.update_password", "ocserv_user", username, audit.OutcomeSuccess, "ocserv user password updated", nil)
+	return nil
+}
+
+// UpdateOcservUserGroup updates an ocserv user's group assignment.
+// An empty group removes the user from their current group.
+func (s *OcservService) UpdateOcservUserGroup(ctx context.Context, principal auth.Principal, username, group string) error {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.update_group"); err != nil {
+		return err
+	}
+	if err := ocserv.ValidateUsername(username); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
+	}
+	if err := ocserv.ValidateGroup(group); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
+	}
+	actorID := principal.ID
+	metadata := map[string]string{"group": group}
+	if err := s.users.UpdateGroup(ctx, username, group); err != nil {
+		_ = s.record(ctx, &actorID, "ocserv.users.update_group", "ocserv_user", username, audit.OutcomeFailure, err.Error(), metadata)
+		return fmt.Errorf("update ocserv user group %s: %w", username, err)
+	}
+	_ = s.record(ctx, &actorID, "ocserv.users.update_group", "ocserv_user", username, audit.OutcomeSuccess, "ocserv user group updated", metadata)
 	return nil
 }
 
@@ -369,6 +399,142 @@ func (s *OcservService) BulkUnlockOcservUsers(ctx context.Context, principal aut
 	}
 
 	return result
+}
+
+// GetServerStatus returns the ocserv server status from `occtl show status`.
+func (s *OcservService) GetServerStatus(ctx context.Context, principal auth.Principal) (*ocserv.ServerStatus, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservRead, "ocserv.server.status"); err != nil {
+		return nil, err
+	}
+	status, err := s.sessions.GetServerStatus(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get server status: %w", err)
+	}
+	return status, nil
+}
+
+// ListConnectedUsers returns connected users from `occtl show users`.
+func (s *OcservService) ListConnectedUsers(ctx context.Context, principal auth.Principal) ([]ocserv.ConnectedUser, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.users.connected"); err != nil {
+		return nil, err
+	}
+	users, err := s.sessions.ListConnectedUsers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list connected users: %w", err)
+	}
+	return users, nil
+}
+
+// GetUserConnections returns detailed connections for a single user.
+func (s *OcservService) GetUserConnections(ctx context.Context, principal auth.Principal, username string) ([]ocserv.UserConnection, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.users.connections"); err != nil {
+		return nil, err
+	}
+	if err := ocserv.ValidateUsername(username); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
+	}
+	conns, err := s.sessions.GetUserDetails(ctx, username)
+	if err != nil {
+		return nil, fmt.Errorf("get user connections %s: %w", username, err)
+	}
+	return conns, nil
+}
+
+// GetConnectionByID returns connection details for a specific connection ID.
+func (s *OcservService) GetConnectionByID(ctx context.Context, principal auth.Principal, id int) (*ocserv.UserConnection, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.connections.detail"); err != nil {
+		return nil, err
+	}
+	if id <= 0 {
+		return nil, fmt.Errorf("%w: connection ID must be positive", ErrInvalidInput)
+	}
+	conn, err := s.sessions.GetConnectionByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get connection by id %d: %w", id, err)
+	}
+	return conn, nil
+}
+
+// ListEvents returns connection events from `occtl show events`.
+func (s *OcservService) ListEvents(ctx context.Context, principal auth.Principal) ([]ocserv.ConnectionEvent, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.events.list"); err != nil {
+		return nil, err
+	}
+	events, err := s.sessions.ListEvents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list events: %w", err)
+	}
+	return events, nil
+}
+
+// ListRoutes returns user-provided routes from `occtl show iroutes`.
+func (s *OcservService) ListRoutes(ctx context.Context, principal auth.Principal) ([]ocserv.UserRoute, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.routes.list"); err != nil {
+		return nil, err
+	}
+	routes, err := s.sessions.ListRoutes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list routes: %w", err)
+	}
+	return routes, nil
+}
+
+// ListBannedIPs returns banned IPs from `occtl show ip bans`.
+func (s *OcservService) ListBannedIPs(ctx context.Context, principal auth.Principal) ([]ocserv.BannedIP, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.bans.list"); err != nil {
+		return nil, err
+	}
+	bans, err := s.sessions.ListBannedIPs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list banned ips: %w", err)
+	}
+	return bans, nil
+}
+
+// ListBanPoints returns ban point entries from `occtl show ip ban points`.
+func (s *OcservService) ListBanPoints(ctx context.Context, principal auth.Principal) ([]ocserv.BanPointEntry, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.bans.points"); err != nil {
+		return nil, err
+	}
+	points, err := s.sessions.ListBanPoints(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list ban points: %w", err)
+	}
+	return points, nil
+}
+
+// DisconnectUser disconnects all sessions for a given username.
+func (s *OcservService) DisconnectUser(ctx context.Context, principal auth.Principal, username string) error {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsDisconnect, "ocserv.user.disconnect"); err != nil {
+		return err
+	}
+	if err := ocserv.ValidateUsername(username); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
+	}
+	actorID := principal.ID
+	if err := s.sessions.DisconnectUser(ctx, username); err != nil {
+		_ = s.record(ctx, &actorID, "ocserv.user.disconnect", "ocserv_user", username, audit.OutcomeFailure, err.Error(), nil)
+		return fmt.Errorf("disconnect user %s: %w", username, err)
+	}
+	_ = s.record(ctx, &actorID, "ocserv.user.disconnect", "ocserv_user", username, audit.OutcomeSuccess, "user disconnected", nil)
+	return nil
+}
+
+// UnbanIP removes an IP from the ban list.
+func (s *OcservService) UnbanIP(ctx context.Context, principal auth.Principal, ip string) error {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservBanManage, "ocserv.ban.unban"); err != nil {
+		return err
+	}
+	if err := ocserv.ValidateIPAddress(ip); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
+	}
+	actorID := principal.ID
+	if err := s.sessions.UnbanIP(ctx, ip); err != nil {
+		_ = s.record(ctx, &actorID, "ocserv.ban.unban", "ocserv_ban", ip, audit.OutcomeFailure, err.Error(), nil)
+		return fmt.Errorf("unban ip %s: %w", ip, err)
+	}
+	_ = s.record(ctx, &actorID, "ocserv.ban.unban", "ocserv_ban", ip, audit.OutcomeSuccess, "IP unbanned", nil)
+	return nil
 }
 
 // ConfigIssues returns ocserv configuration validation issues.

@@ -242,6 +242,17 @@ func NewAppRouter(
 	mux.HandleFunc("PUT /api/ocserv/users/{username}/group", appHandler.handleOcservUserUpdateGroup)
 	mux.HandleFunc("/api/ocserv/users/{username}", appHandler.handleOcservUserDelete)
 	mux.HandleFunc("/api/ocserv/config/issues", appHandler.handleOcservConfigIssues)
+	// Sessions page extended API
+	mux.HandleFunc("GET /api/ocserv/server/status", appHandler.handleOcservServerStatus)
+	mux.HandleFunc("GET /api/ocserv/users/connected", appHandler.handleOcservConnectedUsers)
+	mux.HandleFunc("GET /api/ocserv/users/{username}/connections", appHandler.handleOcservUserConnections)
+	mux.HandleFunc("GET /api/ocserv/events", appHandler.handleOcservEvents)
+	mux.HandleFunc("GET /api/ocserv/routes", appHandler.handleOcservRoutes)
+	mux.HandleFunc("GET /api/ocserv/connections/{id}", appHandler.handleOcservConnectionDetail)
+	mux.HandleFunc("GET /api/ocserv/bans", appHandler.handleOcservBans)
+	mux.HandleFunc("GET /api/ocserv/bans/points", appHandler.handleOcservBanPoints)
+	mux.HandleFunc("POST /api/ocserv/users/{username}/disconnect", appHandler.handleOcservUserDisconnect)
+	mux.HandleFunc("POST /api/ocserv/bans/{ip}/unban", appHandler.handleOcservUnbanIP)
 	// health and log endpoints
 	mux.HandleFunc("/api/health/system", appHandler.handleSystemHealth)
 	mux.HandleFunc("/api/logs/tail", appHandler.handleLogTail)

@@ -290,3 +290,194 @@ func newTestHarnessWithSessions(t *testing.T, sessions []ocserv.Session) *testHa
 	fakeManager.Sessions = sessions
 	return h
 }
+
+// --- handleOcservServerStatus tests ---
+
+func TestOcservServerStatusRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/server/status", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+func TestOcservServerStatusSuccess(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.ocservFake.ServerStatusResult = &ocserv.ServerStatus{
+		Status:         "online",
+		ActiveSessions: 5,
+		ServerPID:      1234,
+	}
+	h.createOwner(t, "admin", "password123")
+	token := h.login(t, "admin", "password123")
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/server/status", nil, token)
+	assertStatus(t, rec, http.StatusOK)
+	assertJSONField(t, rec, "status", "online")
+}
+
+// --- handleOcservConnectedUsers tests ---
+
+func TestOcservConnectedUsersRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/users/connected", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+func TestOcservConnectedUsersSuccess(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.ocservFake.ConnectedUsersResult = []ocserv.ConnectedUser{
+		{ID: "123", Username: "user1", Status: "connected"},
+	}
+	h.createOwner(t, "admin", "password123")
+	token := h.login(t, "admin", "password123")
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/users/connected", nil, token)
+	assertStatus(t, rec, http.StatusOK)
+}
+
+// --- handleOcservUserConnections tests ---
+
+func TestOcservUserConnectionsRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/users/testuser/connections", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+// --- handleOcservEvents tests ---
+
+func TestOcservEventsRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/events", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+// --- handleOcservRoutes tests ---
+
+func TestOcservRoutesRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/routes", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+// --- handleOcservBans tests ---
+
+func TestOcservBansRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/bans", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+// --- handleOcservBanPoints tests ---
+
+func TestOcservBanPointsRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/bans/points", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+// --- handleOcservUserDisconnect tests ---
+
+func TestOcservUserDisconnectRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/ocserv/users/testuser/disconnect", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+func TestOcservUserDisconnectSuccess(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.ocservFake.DisconnectUserErr = nil
+	h.createOwner(t, "admin", "password123")
+	token := h.login(t, "admin", "password123")
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/ocserv/users/testuser/disconnect", nil, token)
+	assertStatus(t, rec, http.StatusNoContent)
+}
+
+// --- handleOcservUnbanIP tests ---
+
+func TestOcservUnbanIPRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/ocserv/bans/10.0.0.1/unban", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+func TestOcservUnbanIPSuccess(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.ocservFake.UnbanIPErr = nil
+	h.createOwner(t, "admin", "password123")
+	token := h.login(t, "admin", "password123")
+	rec := serveAPI(t, h.router, http.MethodPost, "/api/ocserv/bans/10.0.0.1/unban", nil, token)
+	assertStatus(t, rec, http.StatusNoContent)
+}
+
+// --- handleOcservConnectionDetail tests ---
+
+func TestOcservConnectionDetailRequiresAuth(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/connections/3549163", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+func TestOcservConnectionDetailInvalidID(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-pass")
+	cookie := h.login(t, "owner", "owner-pass")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/connections/abc", nil, cookie)
+	assertStatus(t, rec, http.StatusBadRequest)
+}
+
+func TestOcservConnectionDetailNegativeID(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-pass")
+	cookie := h.login(t, "owner", "owner-pass")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/connections/-1", nil, cookie)
+	assertStatus(t, rec, http.StatusBadRequest)
+}
+
+func TestOcservConnectionDetailSuccess(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.ocservFake.ConnectionByIDResult[3549163] = &ocserv.UserConnection{
+		ID:       "3549163",
+		Username: "maxxie",
+		IPv4:     "10.10.10.208",
+		Device:   "vpns0",
+		Hostname: "LemonGrass",
+	}
+	h.createOwner(t, "owner", "owner-pass")
+	cookie := h.login(t, "owner", "owner-pass")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/connections/3549163", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+	assertMapField(t, body, "username", "maxxie")
+	assertMapField(t, body, "ipv4", "10.10.10.208")
+	assertMapField(t, body, "hostname", "LemonGrass")
+}
+
+func TestOcservConnectionDetailNotFound(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-pass")
+	cookie := h.login(t, "owner", "owner-pass")
+
+	// FakeManager returns ErrSessionNotFound for unknown IDs
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/ocserv/connections/9999999", nil, cookie)
+	assertStatus(t, rec, http.StatusNotFound)
+}
