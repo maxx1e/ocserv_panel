@@ -34,7 +34,15 @@ func ParsePanelLine(raw string) (LogLine, error) {
 	if v, ok := fields["component"].(string); ok {
 		line.Component = v
 	}
-	if v, ok := fields["time"].(string); ok {
+	switch v := fields["time"].(type) {
+	case float64:
+		// zerolog default: Unix timestamp in milliseconds.
+		if v > 0 {
+			sec := int64(v) / 1000
+			msec := int64(v) % 1000
+			line.Timestamp = time.Unix(sec, msec*int64(time.Millisecond)).UTC()
+		}
+	case string:
 		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
 			line.Timestamp = t
 		} else if t, err := time.Parse(time.RFC3339, v); err == nil {
