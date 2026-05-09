@@ -978,6 +978,10 @@ export function getUserConnections(username: string): Promise<UserConnection[]> 
   return apiFetch<UserConnection[]>(`/api/ocserv/users/${encodeURIComponent(username)}/connections`);
 }
 
+export function getConnectionById(id: number): Promise<UserConnection> {
+  return apiFetch<UserConnection>(`/api/ocserv/connections/${id}`);
+}
+
 export function getConnectionEvents(): Promise<ConnectionEvent[]> {
   return apiFetch<ConnectionEvent[]>('/api/ocserv/events');
 }
