@@ -19,12 +19,14 @@
 
   import {
     getDashboardSummary,
+    getDashboardActiveSessions,
     getMe,
     getMonitoringOverview,
     getSetupStatus,
     getSystemHealth,
     getLogTail,
     principalFromAuth,
+    type ActiveUserSessionsResult,
     type DashboardSummary,
     type MonitoringOverview,
     type MonitoringSeries,
@@ -33,6 +35,7 @@
     type SystemHealth,
     type LogTailResult
   } from '$lib/api';
+  import DonutChart from '$lib/components/ui/DonutChart.svelte';
   import { formatBytes, formatMetricValue, latestPoint, metricByName, seriesByMetric } from '$lib/monitoring';
 
   type ChartDefinition = {
@@ -131,6 +134,21 @@
 
   const pagedAudit = $derived(paginate(recentAudit, auditPage, 10));
 
+  let activeUserSessions = $state<ActiveUserSessionsResult | null>(null);
+
+  const DONUT_COLORS = [
+    '#6366f1', '#10b981', '#f59e0b', '#ec4899',
+    '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6',
+  ];
+
+  const donutSegments = $derived(
+    (activeUserSessions?.users ?? []).map((u, i) => ({
+      label: u.username,
+      value: u.sessionCount,
+      color: DONUT_COLORS[i % DONUT_COLORS.length],
+    }))
+  );
+
   const vpnServerItems = $derived<HealthItem[]>(
     healthError ? [{ label: 'Health check unavailable', status: 'unknown' as HealthItem['status'], detail: healthError }] :
     !health ? [] : (() => {
@@ -217,6 +235,7 @@
     refreshInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         void reloadMonitoring();
+        void loadActiveSessions();
       }
     }, 15_000);
 
@@ -246,6 +265,21 @@
 
       principal = principalFromAuth(await getMe());
       summary = await getDashboardSummary();
+
+      // Update refresh interval if backend provides one
+      const backendInterval = summary?.dashboardRefreshInterval;
+      if (backendInterval && backendInterval > 0) {
+        const ms = backendInterval * 1000;
+        if (refreshInterval) clearInterval(refreshInterval);
+        refreshInterval = setInterval(() => {
+          if (document.visibilityState === 'visible') {
+            void reloadMonitoring();
+            void loadActiveSessions();
+          }
+        }, ms);
+      }
+
+      void loadActiveSessions();
       void reloadMonitoring(monitoringWindow);
     } catch (caught) {
       error = caught instanceof Error ? caught.message : 'Unable to load dashboard state.';
@@ -333,6 +367,14 @@
     }
   }
 
+  async function loadActiveSessions() {
+    try {
+      activeUserSessions = await getDashboardActiveSessions();
+    } catch {
+      activeUserSessions = null;
+    }
+  }
+
   async function loadLogTab(source: 'ocserv' | 'panel') {
     logLoading = true;
     logError = '';
@@ -410,8 +452,18 @@
     />
   </div>
 
-  <!-- Active sessions + Storage metrics -->
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+  <!-- Active sessions + Donut + Storage -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div>
+      <Card.Root>
+        <Card.Header>
+          <Card.Title>Sessions by User</Card.Title>
+        </Card.Header>
+        <Card.Content>
+          <DonutChart segments={donutSegments} height={180} />
+        </Card.Content>
+      </Card.Root>
+    </div>
     <CardStats
       title="Active sessions"
       value={String(summary.activeSessionCount ?? 0)}
@@ -546,12 +598,14 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
         <CardStats
           title="Total sessions"
-          value={formatMetricValue('totalSessions', summary.analytics?.totalSessions)}
+          value={String(summary.analytics?.totalSessions ?? 0)}
+          subtitle={summary.analytics?.sampleSessions ? `incl. ${summary.analytics.sampleSessions} samples` : undefined}
           icon={Users}
         />
         <CardStats
-          title="Sample sessions"
-          value={formatMetricValue('sampleSessions', summary.analytics?.sampleSessions)}
+          title="Recorded sessions"
+          value={String((summary.analytics?.totalSessions ?? 0) - (summary.analytics?.sampleSessions ?? 0))}
+          subtitle="Excluding sample data"
           icon={Database}
         />
         <CardStats
