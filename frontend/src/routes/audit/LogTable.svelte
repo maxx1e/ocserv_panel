@@ -50,6 +50,7 @@
     <div class="flex flex-col items-center justify-center py-12 text-center">
       <p class="text-sm text-slate-500 dark:text-slate-400">No log entries match your filters.</p>
       <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">Try adjusting the search, level, or time range.</p>
+      <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">If you expect logs here, try selecting "All time" in the time range filter.</p>
     </div>
   {:else}
     <!-- Log lines -->

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { FileText, Shield } from 'lucide-svelte';
+  import { FileText, Shield, WifiOff, RefreshCw } from 'lucide-svelte';
   import EmptyState from '$lib/components/ui/EmptyState.svelte';
   import {
     getMe,
@@ -27,6 +27,7 @@
   let error = $state('');
   let forbidden = $state(false);
   let setupRequired = $state(false);
+  let backendUnreachable = $state(false);
   let principal = $state<Principal | null>(null);
 
   // Log data
@@ -70,6 +71,7 @@
     loading = true;
     error = '';
     forbidden = false;
+    backendUnreachable = false;
 
     try {
       const setup = await getSetupStatus();
@@ -90,6 +92,10 @@
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 403) {
         forbidden = true;
+        return;
+      }
+      if (caught instanceof ApiError && caught.status === 0) {
+        backendUnreachable = true;
         return;
       }
       error = caught instanceof Error ? caught.message : 'Unable to load audit page.';
@@ -124,7 +130,9 @@
       hasMore = result.hasMore;
     } catch (caught) {
       if (caught instanceof ApiError) {
-        if (caught.status === 503) {
+        if (caught.status === 0) {
+          logError = 'Backend unreachable. Check that the panel service is running and accessible.';
+        } else if (caught.status === 503) {
           // Source unavailable — the banner handles this via source metadata.
           // Only show error text if sources haven't been loaded yet.
           if (!activeSource) {
@@ -273,6 +281,26 @@
     <a class="inline-block mt-4 px-4 py-2 bg-slate-700 text-white text-sm font-medium rounded-md hover:bg-slate-800 transition-colors" href="/login">
       Go to login
     </a>
+  </div>
+
+<!-- Backend unreachable -->
+{:else if backendUnreachable}
+  <div class="flex flex-col items-center justify-center py-16 text-center">
+    <div class="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-4">
+      <WifiOff class="w-6 h-6 text-red-500 dark:text-red-400" />
+    </div>
+    <h3 class="text-lg font-semibold text-slate-800 dark:text-slate-100">Cannot connect to backend</h3>
+    <p class="text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-sm">
+      The request timed out or the network is unreachable. Verify that the panel backend service is running.
+    </p>
+    <button
+      type="button"
+      onclick={() => initialize()}
+      class="inline-flex items-center gap-2 mt-5 px-4 py-2 bg-slate-700 text-white text-sm font-medium rounded-md hover:bg-slate-800 dark:bg-slate-600 dark:hover:bg-slate-500 transition-colors"
+    >
+      <RefreshCw class="w-4 h-4" />
+      Retry connection
+    </button>
   </div>
 
 <!-- Main content -->
