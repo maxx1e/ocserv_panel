@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import CardTable from '$lib/components/ui/CardTable.svelte';
+  import PaginatedTable from '$lib/components/ui/PaginatedTable.svelte';
   import EmptyState from '$lib/components/ui/EmptyState.svelte';
   import { Activity } from 'lucide-svelte';
   import { formatRelativeTime } from '$lib/utils/format';
+  import { paginate } from '$lib/utils/pagination';
   import { getConnectionEvents, ApiError, type ConnectionEvent } from '$lib/api';
 
   type Props = {
@@ -12,10 +14,25 @@
 
   let { refreshSignal }: Props = $props();
 
+  const PAGE_SIZE = 20;
+
   let events = $state<ConnectionEvent[]>([]);
   let loading = $state(true);
   let error = $state('');
+  let page = $state(1);
   let lastFetchedSignal = $state(0);
+
+  const sortedEvents = $derived((() => {
+    const copy = [...events];
+    copy.sort((a, b) => {
+      const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return tb - ta; // newest first
+    });
+    return copy;
+  })());
+
+  const pagedEvents = $derived(paginate(sortedEvents, page, PAGE_SIZE));
 
   async function loadEvents() {
     loading = events.length === 0;
@@ -56,35 +73,41 @@
     description="Connection events will appear here when users connect or disconnect."
   />
 {:else}
-  <CardTable title="Connection Events">
-    <table class="w-full">
-      <thead>
-        <tr>
-          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Time</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Username</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Remote IP</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Event</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Message</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-100">
-        {#each events as event}
-          <tr class="hover:bg-slate-50">
-            <td class="px-4 py-3 text-sm text-slate-700">{formatRelativeTime(event.timestamp)}</td>
-            <td class="px-4 py-3 text-sm text-slate-700 font-medium">{event.username || '—'}</td>
-            <td class="px-4 py-3 text-sm font-mono text-xs text-slate-700">{event.remoteIp || '—'}</td>
-            <td class="px-4 py-3">
-              <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium
-                {event.eventType === 'connect' ? 'bg-green-100 text-green-700' :
-                 event.eventType === 'disconnect' ? 'bg-orange-100 text-orange-700' :
-                 'bg-slate-100 text-slate-700'}">
-                {event.eventType}
-              </span>
-            </td>
-            <td class="px-4 py-3 text-sm text-slate-600 max-w-xs truncate">{event.message || '—'}</td>
+  <CardTable title="Connection Events ({events.length})">
+    <PaginatedTable
+      totalPages={pagedEvents.totalPages}
+      currentPage={pagedEvents.page}
+      onPageChange={(p) => (page = p)}
+    >
+      <table class="w-full">
+        <thead>
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Time</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Username</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Remote IP</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Event</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Message</th>
           </tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {#each pagedEvents.items as event}
+            <tr class="hover:bg-slate-50">
+              <td class="px-4 py-3 text-sm text-slate-700">{formatRelativeTime(event.timestamp)}</td>
+              <td class="px-4 py-3 text-sm text-slate-700 font-medium">{event.username || '—'}</td>
+              <td class="px-4 py-3 text-sm font-mono text-xs text-slate-700">{event.remoteIp || '—'}</td>
+              <td class="px-4 py-3">
+                <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium
+                  {event.eventType === 'connect' ? 'bg-green-100 text-green-700' :
+                   event.eventType === 'disconnect' ? 'bg-orange-100 text-orange-700' :
+                   'bg-slate-100 text-slate-700'}">
+                  {event.eventType}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-sm text-slate-600 max-w-xs truncate">{event.message || '—'}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </PaginatedTable>
   </CardTable>
 {/if}
