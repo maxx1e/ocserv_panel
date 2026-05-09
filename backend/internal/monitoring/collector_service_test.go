@@ -249,6 +249,272 @@ func TestCollectorService_RunCollectsImmediatelyAndStopsOnCancel(t *testing.T) {
 	}
 }
 
+func TestCollectorService_VPNRediscovery(t *testing.T) {
+	store := metrics.NewMemoryStore()
+	logger := &fakeLogger{}
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+
+	service := NewCollectorService(
+		store,
+		[]Collector{},
+		50*time.Millisecond,
+		logger,
+		func() time.Time { return now },
+	)
+
+	var mu sync.Mutex
+	callCount := 0
+	discoverer := func() (string, string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		callCount++
+		if callCount <= 2 {
+			return "", "", nil
+		}
+		return "vpns0", "sysfs-scan", nil
+	}
+
+	fakeReader := &fakeFileReaderForVPN{
+		files: map[string]string{
+			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
+			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
+		},
+	}
+
+	service.SetVPNDiscoverer(
+		discoverer,
+		fakeReader,
+		metrics.MetricVPNInterfaceRXBytes,
+		metrics.MetricVPNInterfaceTXBytes,
+	)
+
+	// Override the vpnRediscoveryInterval by running maybeDiscoverVPN manually
+	// in a goroutine loop with short sleeps to keep the test fast.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		// Simulate periodic VPN discovery at a fast rate.
+		ticker := time.NewTicker(30 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				close(done)
+				return
+			case <-ticker.C:
+				service.maybeDiscoverVPN()
+			}
+		}
+	}()
+
+	<-done
+
+	if !service.HasVPNCollector() {
+		t.Fatal("expected HasVPNCollector() to be true after discovery")
+	}
+
+	mu.Lock()
+	finalCount := callCount
+	mu.Unlock()
+	if finalCount < 3 {
+		t.Fatalf("discoverer called %d times, expected at least 3", finalCount)
+	}
+}
+
+func TestCollectorService_VPNRediscoverySkipsWhenAlreadyPresent(t *testing.T) {
+	store := metrics.NewMemoryStore()
+	logger := &fakeLogger{}
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+
+	service := NewCollectorService(
+		store,
+		[]Collector{},
+		50*time.Millisecond,
+		logger,
+		func() time.Time { return now },
+	)
+
+	var mu sync.Mutex
+	callCount := 0
+	discoverer := func() (string, string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		callCount++
+		return "vpns0", "sysfs-scan", nil
+	}
+
+	fakeReader := &fakeFileReaderForVPN{
+		files: map[string]string{
+			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
+			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
+		},
+	}
+
+	service.SetVPNDiscoverer(
+		discoverer,
+		fakeReader,
+		metrics.MetricVPNInterfaceRXBytes,
+		metrics.MetricVPNInterfaceTXBytes,
+	)
+
+	// Call maybeDiscoverVPN multiple times.
+	for i := 0; i < 5; i++ {
+		service.maybeDiscoverVPN()
+	}
+
+	if !service.HasVPNCollector() {
+		t.Fatal("expected HasVPNCollector() to be true")
+	}
+
+	mu.Lock()
+	finalCount := callCount
+	mu.Unlock()
+	if finalCount != 1 {
+		t.Fatalf("discoverer called %d times, expected exactly 1", finalCount)
+	}
+}
+
+func TestCollectorService_MarkVPNPresentPreventsDiscovery(t *testing.T) {
+	store := metrics.NewMemoryStore()
+	logger := &fakeLogger{}
+
+	service := NewCollectorService(
+		store,
+		[]Collector{},
+		50*time.Millisecond,
+		logger,
+		func() time.Time { return time.Now() },
+	)
+
+	var mu sync.Mutex
+	callCount := 0
+	discoverer := func() (string, string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		callCount++
+		return "vpns0", "sysfs-scan", nil
+	}
+
+	fakeReader := &fakeFileReaderForVPN{
+		files: map[string]string{
+			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
+			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
+		},
+	}
+
+	service.SetVPNDiscoverer(
+		discoverer,
+		fakeReader,
+		metrics.MetricVPNInterfaceRXBytes,
+		metrics.MetricVPNInterfaceTXBytes,
+	)
+
+	// Mark VPN as already present (simulating startup discovery).
+	service.MarkVPNPresent()
+
+	// Call maybeDiscoverVPN — should be a no-op.
+	for i := 0; i < 3; i++ {
+		service.maybeDiscoverVPN()
+	}
+
+	mu.Lock()
+	finalCount := callCount
+	mu.Unlock()
+	if finalCount != 0 {
+		t.Fatalf("discoverer called %d times, expected 0 (should be skipped)", finalCount)
+	}
+}
+
+func TestCollectorService_CollectOnceThreadSafeWithDiscovery(t *testing.T) {
+	store := metrics.NewMemoryStore()
+	logger := &fakeLogger{}
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+
+	collector := &countingCollector{}
+	service := NewCollectorService(
+		store,
+		[]Collector{collector},
+		50*time.Millisecond,
+		logger,
+		func() time.Time { return now },
+	)
+
+	// Run CollectOnce concurrently with maybeDiscoverVPN to verify no race.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	fakeReader := &fakeFileReaderForVPN{
+		files: map[string]string{
+			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
+			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
+		},
+	}
+
+	callNum := 0
+	service.SetVPNDiscoverer(
+		func() (string, string, error) {
+			callNum++
+			if callNum > 3 {
+				return "vpns0", "sysfs-scan", nil
+			}
+			return "", "", nil
+		},
+		fakeReader,
+		metrics.MetricVPNInterfaceRXBytes,
+		metrics.MetricVPNInterfaceTXBytes,
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				service.CollectOnce(ctx)
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				service.maybeDiscoverVPN()
+				time.Sleep(15 * time.Millisecond)
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	if collector.count() == 0 {
+		t.Fatal("expected at least one collect call")
+	}
+}
+
+// fakeFileReaderForVPN is a test double that returns pre-configured file contents.
+type fakeFileReaderForVPN struct {
+	files map[string]string
+}
+
+func (r *fakeFileReaderForVPN) ReadFile(path string) ([]byte, error) {
+	data, ok := r.files[path]
+	if !ok {
+		return nil, fmt.Errorf("file not found: %s", path)
+	}
+	return []byte(data), nil
+}
+
 type fakeCollector struct {
 	result CollectResult
 }
