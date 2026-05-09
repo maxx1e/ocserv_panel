@@ -153,23 +153,54 @@ export class ApiError extends Error {
 
 type RequestOptions = Omit<RequestInit, 'body' | 'credentials'> & {
   body?: unknown;
+  timeout?: number; // ms, default 15000
 };
 
 async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const headers = new Headers(options.headers);
+  const { timeout = 15000, ...rest } = options;
+  const headers = new Headers(rest.headers);
   let body: BodyInit | undefined;
 
-  if (options.body !== undefined) {
+  if (rest.body !== undefined) {
     headers.set('content-type', 'application/json');
-    body = JSON.stringify(options.body);
+    body = JSON.stringify(rest.body);
   }
 
-  const response = await fetch(path, {
-    ...options,
-    headers,
-    body,
-    credentials: 'same-origin'
-  });
+  // Set up abort signal with timeout. Use AbortSignal.timeout when available,
+  // otherwise fall back to AbortController + setTimeout.
+  let signal: AbortSignal;
+  let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+  if (typeof AbortSignal.timeout === 'function') {
+    signal = AbortSignal.timeout(timeout);
+  } else {
+    const controller = new AbortController();
+    signal = controller.signal;
+    fallbackTimer = setTimeout(() => controller.abort(), timeout);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...rest,
+      headers,
+      body,
+      credentials: 'same-origin',
+      signal
+    });
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError('Request timed out — the backend may be unreachable.', 0);
+    }
+    // Newer browsers throw a TimeoutError for AbortSignal.timeout
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      throw new ApiError('Request timed out — the backend may be unreachable.', 0);
+    }
+    throw new ApiError('Network error — unable to reach the backend.', 0);
+  } finally {
+    if (fallbackTimer !== undefined) {
+      clearTimeout(fallbackTimer);
+    }
+  }
 
   if (!response.ok) {
     const structuredError = await safeStructuredError(response);
@@ -919,6 +950,21 @@ export type BanPointEntry = {
 };
 
 // ─── Sessions Page API (Phase 2) ───────────────────────────────────────────
+
+export type OcservReadiness = {
+  binaryPresent: boolean;
+  binaryVersion: string;
+  configPresent: boolean;
+  configValid: boolean;
+  serviceRunning: boolean;
+  socketPresent: boolean;
+  occtlPresent: boolean;
+  ocpasswdPresent: boolean;
+};
+
+export function getOcservReadiness(): Promise<OcservReadiness> {
+  return apiFetch<OcservReadiness>('/api/ocserv/readiness');
+}
 
 export function getServerStatus(): Promise<ServerStatus> {
   return apiFetch<ServerStatus>('/api/ocserv/server/status');
