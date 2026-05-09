@@ -308,11 +308,17 @@
           onDisconnectUser={confirmDisconnectUser}
         />
       {:else if activeTab === 'all'}
-        <AllSessionsTab {refreshSignal} />
+        <AllSessionsTab
+          {refreshSignal}
+          {isOwner}
+          onDisconnectSession={confirmDisconnectSession}
+          onTerminateSession={confirmTerminateSession}
+          onDisconnectUser={confirmDisconnectUser}
+        />
       {:else if activeTab === 'events'}
         <EventsTab {refreshSignal} />
       {:else if activeTab === 'routes'}
-        <RoutesTab {refreshSignal} />
+        <RoutesTab {refreshSignal} {isOwner} />
       {:else if activeTab === 'bans'}
         <BansTab {refreshSignal} {isOwner} />
       {/if}
