@@ -33,6 +33,9 @@
   let unbanError = $state('');
   let successBanner = $state('');
 
+  // Derived: set of currently banned IPs for badge lookup
+  const bannedSet = $derived(new Set(bans.map(b => b.ip)));
+
   async function loadBans() {
     loading = bans.length === 0 && points.length === 0;
     error = '';
@@ -157,6 +160,10 @@
                 <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">IP Address</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Points</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Since</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Status</th>
+                {#if isOwner}
+                  <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Action</th>
+                {/if}
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
@@ -165,6 +172,26 @@
                   <td class="px-4 py-3 text-sm font-mono text-slate-700">{entry.ip}</td>
                   <td class="px-4 py-3 text-sm text-slate-700">{entry.points}</td>
                   <td class="px-4 py-3 text-sm text-slate-700">{formatRelativeTime(entry.since)}</td>
+                  <td class="px-4 py-3">
+                    {#if bannedSet.has(entry.ip)}
+                      <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">Banned</span>
+                    {:else}
+                      <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">Warning</span>
+                    {/if}
+                  </td>
+                  {#if isOwner}
+                    <td class="px-4 py-3">
+                      {#if bannedSet.has(entry.ip)}
+                        <button
+                          type="button"
+                          onclick={() => confirmUnban(entry.ip)}
+                          class="px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+                        >
+                          Unban
+                        </button>
+                      {/if}
+                    </td>
+                  {/if}
                 </tr>
               {/each}
             </tbody>
