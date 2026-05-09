@@ -51,14 +51,16 @@ type App struct {
 	authorizer        rbac.Authorizer
 	loginLimiter      *auth.RateLimiter
 	cookieSecure      bool
+	refreshInterval   int
 	now               func() time.Time
 }
 
 // AppOptions configures NewAppRouter.
 type AppOptions struct {
-	CookieSecure bool
-	LoginLimiter *auth.RateLimiter
-	Now          func() time.Time
+	CookieSecure    bool
+	LoginLimiter    *auth.RateLimiter
+	Now             func() time.Time
+	RefreshInterval int
 }
 
 type apiError struct {
@@ -107,16 +109,17 @@ type logoutResponse struct {
 }
 
 type dashboardSummaryResponse struct {
-	BackendStatus      string                   `json:"backendStatus"`
-	OcservStatus       string                   `json:"ocservStatus"`
-	ActiveSessionCount int                      `json:"activeSessionCount"`
-	RecentAudit        []auditEventResponse     `json:"recentAudit"`
-	Analytics          analyticsSummaryResponse `json:"analytics"`
-	SampleData         bool                     `json:"sampleData"`
-	Ocserv             ocservStatusResponse     `json:"ocserv"`
-	SetupRequired      bool                     `json:"setupRequired"`
-	AdminCount         int64                    `json:"adminCount"`
-	History            analyticsSummaryResponse `json:"history"`
+	BackendStatus            string                   `json:"backendStatus"`
+	OcservStatus             string                   `json:"ocservStatus"`
+	ActiveSessionCount       int                      `json:"activeSessionCount"`
+	RecentAudit              []auditEventResponse     `json:"recentAudit"`
+	Analytics                analyticsSummaryResponse `json:"analytics"`
+	SampleData               bool                     `json:"sampleData"`
+	Ocserv                   ocservStatusResponse     `json:"ocserv"`
+	SetupRequired            bool                     `json:"setupRequired"`
+	AdminCount               int64                    `json:"adminCount"`
+	History                  analyticsSummaryResponse `json:"history"`
+	DashboardRefreshInterval int                      `json:"dashboardRefreshInterval"`
 }
 
 type ocservStatusResponse struct {
@@ -204,6 +207,7 @@ func NewAppRouter(
 		authorizer:        authorizer,
 		loginLimiter:      opts.LoginLimiter,
 		cookieSecure:      opts.CookieSecure,
+		refreshInterval:   opts.RefreshInterval,
 		now:               now,
 	}
 
@@ -434,7 +438,11 @@ func (a *App) handleDashboardSummary(w http.ResponseWriter, r *http.Request) {
 		a.writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, dashboardSummaryToResponse(summary))
+	refreshInterval := a.refreshInterval
+	if refreshInterval < 5 {
+		refreshInterval = 15
+	}
+	writeJSON(w, http.StatusOK, dashboardSummaryToResponse(summary, refreshInterval))
 }
 
 func (a *App) handleHistoryAnalytics(w http.ResponseWriter, r *http.Request) {
@@ -712,7 +720,7 @@ func principalToSessionResponse(principal auth.Principal, expiresAt time.Time) s
 	}
 }
 
-func dashboardSummaryToResponse(summary app.DashboardSummary) dashboardSummaryResponse {
+func dashboardSummaryToResponse(summary app.DashboardSummary, refreshInterval int) dashboardSummaryResponse {
 	return dashboardSummaryResponse{
 		BackendStatus:      summary.BackendStatus,
 		OcservStatus:       summary.Ocserv.Status,
@@ -725,9 +733,10 @@ func dashboardSummaryToResponse(summary app.DashboardSummary) dashboardSummaryRe
 			Configured: summary.Ocserv.Configured,
 			Message:    summary.Ocserv.Message,
 		},
-		SetupRequired: summary.SetupRequired,
-		AdminCount:    summary.AdminCount,
-		History:       analyticsSummaryToResponse(summary.History),
+		SetupRequired:            summary.SetupRequired,
+		AdminCount:               summary.AdminCount,
+		History:                  analyticsSummaryToResponse(summary.History),
+		DashboardRefreshInterval: refreshInterval,
 	}
 }
 

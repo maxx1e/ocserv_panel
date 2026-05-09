@@ -165,8 +165,6 @@ func main() {
 		rbac.NewDefaultAuthorizer(),
 	)
 
-	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker)
-
 	adminUserService := app.NewAdminUserService(persistence, recorder, rbac.NewDefaultAuthorizer(), auth.HashPassword)
 
 	// Create housekeeping scheduler
@@ -188,6 +186,7 @@ func main() {
 		}
 	}()
 	monitoringService := app.NewMonitoringService(metricStore, rbac.NewDefaultAuthorizer(), nil, recorder)
+	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker, metricStore)
 	collectors := configuredCollectors(monitoring.OSReader{})
 
 	// Auto-discover VPN interface for interface-level metrics.
@@ -240,7 +239,7 @@ func main() {
 			adminUserService,
 			auditLogService,
 			rbac.NewDefaultAuthorizer(),
-			server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter},
+			server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter, RefreshInterval: cfg.Monitoring.DashboardRefreshInterval},
 			staticDir,
 		),
 		ReadHeaderTimeout: 5 * time.Second,

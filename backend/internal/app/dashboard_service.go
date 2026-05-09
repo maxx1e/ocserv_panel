@@ -7,6 +7,7 @@ import (
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
+	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/ocserv"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
@@ -14,11 +15,12 @@ import (
 
 // DashboardService returns local dashboard and historical analytics data.
 type DashboardService struct {
-	store      dashboardStore
-	recorder   audit.Recorder
-	authorizer rbac.Authorizer
-	readiness  *ocserv.ReadinessChecker
-	now        func() time.Time
+	store       dashboardStore
+	recorder    audit.Recorder
+	authorizer  rbac.Authorizer
+	readiness   *ocserv.ReadinessChecker
+	metricStore metrics.Store
+	now         func() time.Time
 }
 
 type dashboardStore interface {
@@ -64,11 +66,16 @@ type PurgeHistoryResult struct {
 
 // NewDashboardService returns a dashboard service using local SQLite data only.
 // readiness may be nil; in that case, ocserv status is reported as not_configured.
-func NewDashboardService(s *store.Store, recorder audit.Recorder, authorizer rbac.Authorizer, readiness *ocserv.ReadinessChecker) *DashboardService {
+// An optional metrics.Store can be passed to populate active session counts from TSDB.
+func NewDashboardService(s *store.Store, recorder audit.Recorder, authorizer rbac.Authorizer, readiness *ocserv.ReadinessChecker, metricStores ...metrics.Store) *DashboardService {
 	if recorder == nil {
 		recorder = audit.NoopRecorder{}
 	}
-	return &DashboardService{store: s, recorder: recorder, authorizer: authorizer, readiness: readiness, now: func() time.Time { return time.Now().UTC() }}
+	var ms metrics.Store
+	if len(metricStores) > 0 {
+		ms = metricStores[0]
+	}
+	return &DashboardService{store: s, recorder: recorder, authorizer: authorizer, readiness: readiness, metricStore: ms, now: func() time.Time { return time.Now().UTC() }}
 }
 
 // Summary returns local no-op ocserv status and SQLite-backed counts.
@@ -133,7 +140,7 @@ func (s *DashboardService) Summary(ctx context.Context, principal auth.Principal
 	}
 	return DashboardSummary{
 		BackendStatus:      "ok",
-		ActiveSessionCount: 0,
+		ActiveSessionCount: s.latestSessionCount(ctx),
 		RecentAudit:        recentAudit,
 		Analytics:          history,
 		SampleData:         history.SampleSessions > 0,
@@ -142,6 +149,27 @@ func (s *DashboardService) Summary(ctx context.Context, principal auth.Principal
 		AdminCount:         adminCount,
 		History:            history,
 	}, nil
+}
+
+// latestSessionCount queries the TSDB metric store for the most recent
+// active_sessions data point. Returns 0 if no metric store is configured or
+// no data is available.
+func (s *DashboardService) latestSessionCount(ctx context.Context) int {
+	if s.metricStore == nil {
+		return 0
+	}
+	now := s.now()
+	series, err := s.metricStore.QueryRange(ctx, metrics.Query{
+		Metric: metrics.MetricActiveSessions,
+		Labels: map[string]string{},
+		Start:  now.Add(-2 * time.Minute),
+		End:    now,
+		Step:   15 * time.Second,
+	})
+	if err != nil || len(series.Points) == 0 {
+		return 0
+	}
+	return int(series.Points[len(series.Points)-1].Value)
 }
 
 // buildOcservStatus returns the OcservStatusSummary based on the readiness checker.
