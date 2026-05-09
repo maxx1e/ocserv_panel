@@ -586,6 +586,23 @@ func (a *App) handleOcservConnectedUsers(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleDashboardActiveSessions returns per-user session counts for the donut chart.
+func (a *App) handleDashboardActiveSessions(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	principal, ok := a.authenticate(w, r)
+	if !ok {
+		return
+	}
+	result, err := a.ocservService.ActiveUserSessions(r.Context(), principal)
+	if err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // handleOcservUserConnections returns connections for a specific user.
 func (a *App) handleOcservUserConnections(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodGet) {

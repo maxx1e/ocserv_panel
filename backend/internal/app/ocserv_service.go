@@ -537,6 +537,44 @@ func (s *OcservService) UnbanIP(ctx context.Context, principal auth.Principal, i
 	return nil
 }
 
+// UserSessionCount represents one user's active session count for the donut chart.
+type UserSessionCount struct {
+	Username     string `json:"username"`
+	SessionCount int    `json:"sessionCount"`
+}
+
+// ActiveUserSessionsResult is the response for the active sessions donut endpoint.
+type ActiveUserSessionsResult struct {
+	Users []UserSessionCount `json:"users"`
+	Total int                `json:"total"`
+}
+
+// ActiveUserSessions returns per-user session counts for the dashboard donut chart.
+func (s *OcservService) ActiveUserSessions(ctx context.Context, principal auth.Principal) (ActiveUserSessionsResult, error) {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservRead, "ocserv.active_user_sessions"); err != nil {
+		return ActiveUserSessionsResult{}, err
+	}
+
+	users, err := s.sessions.ListConnectedUsers(ctx)
+	if err != nil {
+		return ActiveUserSessionsResult{}, fmt.Errorf("list connected users: %w", err)
+	}
+
+	counts := make(map[string]int)
+	for _, u := range users {
+		counts[u.Username]++
+	}
+
+	result := make([]UserSessionCount, 0, len(counts))
+	total := 0
+	for username, count := range counts {
+		result = append(result, UserSessionCount{Username: username, SessionCount: count})
+		total += count
+	}
+
+	return ActiveUserSessionsResult{Users: result, Total: total}, nil
+}
+
 // ConfigIssues returns ocserv configuration validation issues.
 func (s *OcservService) ConfigIssues(ctx context.Context, principal auth.Principal) ([]ocserv.ConfigIssue, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.issues"); err != nil {

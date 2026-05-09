@@ -221,6 +221,7 @@ func NewAppRouter(
 	mux.HandleFunc("/api/auth/logout", appHandler.handleLogout)
 	mux.HandleFunc("/api/auth/me", appHandler.handleMe)
 	mux.HandleFunc("/api/dashboard/summary", appHandler.handleDashboardSummary)
+	mux.HandleFunc("GET /api/dashboard/active-sessions", appHandler.handleDashboardActiveSessions)
 	mux.HandleFunc("/api/history/analytics", appHandler.handleHistoryAnalytics)
 	mux.HandleFunc("/api/history/purge", appHandler.handleHistoryPurge)
 	mux.HandleFunc("/api/monitoring/catalog", appHandler.handleMonitoringCatalog)
