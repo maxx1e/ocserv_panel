@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/monitoring"
 )
@@ -69,7 +70,7 @@ func TestConfiguredCollectors(t *testing.T) {
 		t.Setenv("OCSERV_PANEL_NET_IFACE", "")
 		t.Setenv("OCSERV_PANEL_VPN_IFACE", "")
 
-		collectors := configuredCollectors(fakeFileReader{})
+		collectors := configuredCollectors(fakeFileReader{}, config.MonitoringConfig{})
 		if len(collectors) < 2 {
 			t.Fatalf("len(configuredCollectors()) = %d, want at least 2", len(collectors))
 		}
@@ -85,15 +86,31 @@ func TestConfiguredCollectors(t *testing.T) {
 			"/sys/class/net/vpns0/statistics/tx_bytes": []byte("40\n"),
 		}
 
-		collectors := configuredCollectors(reader)
+		collectors := configuredCollectors(reader, config.MonitoringConfig{})
 		if len(collectors) != 4 {
 			t.Fatalf("len(configuredCollectors()) = %d, want 4", len(collectors))
 		}
 
-		assertCollectorHasSample(t, collectors, metrics.MetricNetInterfaceRXBytes, "eth0")
-		assertCollectorHasSample(t, collectors, metrics.MetricNetInterfaceTXBytes, "eth0")
-		assertCollectorHasSample(t, collectors, metrics.MetricVPNInterfaceRXBytes, "vpns0")
-		assertCollectorHasSample(t, collectors, metrics.MetricVPNInterfaceTXBytes, "vpns0")
+		// Rate-based InterfaceCollector requires two samples to produce output.
+		// Prime all collectors, then collect again to get rate-based samples.
+		prime := time.Unix(100, 0).UTC()
+		for _, c := range collectors {
+			c.Collect(context.Background(), prime)
+		}
+
+		collect := prime.Add(time.Second)
+		var allSamples []metrics.Sample
+		for _, c := range collectors {
+			result := c.Collect(context.Background(), collect)
+			if result.Status == monitoring.CollectStatusAvailable {
+				allSamples = append(allSamples, result.Samples...)
+			}
+		}
+
+		assertHasSampleForInterface(t, allSamples, metrics.MetricNetInterfaceRXBytes, "eth0")
+		assertHasSampleForInterface(t, allSamples, metrics.MetricNetInterfaceTXBytes, "eth0")
+		assertHasSampleForInterface(t, allSamples, metrics.MetricVPNInterfaceRXBytes, "vpns0")
+		assertHasSampleForInterface(t, allSamples, metrics.MetricVPNInterfaceTXBytes, "vpns0")
 	})
 }
 
@@ -159,33 +176,25 @@ func (r fakeFileReader) ReadFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-func assertCollectorHasSample(
+func assertHasSampleForInterface(
 	t *testing.T,
-	collectors []monitoring.Collector,
+	samples []metrics.Sample,
 	name metrics.MetricName,
 	iface string,
 ) {
 	t.Helper()
 
-	for _, collector := range collectors {
-		result := collector.Collect(context.Background(), time.Unix(100, 0).UTC())
-		if result.Status != monitoring.CollectStatusAvailable {
+	for _, sample := range samples {
+		if sample.Name != name {
 			continue
 		}
-
-		for _, sample := range result.Samples {
-			if sample.Name != name {
-				continue
-			}
-			if sample.Labels["interface"] != iface {
-				t.Fatalf("sample %q interface label = %q, want %q", name, sample.Labels["interface"], iface)
-			}
-
-			return
+		if sample.Labels["interface"] != iface {
+			t.Fatalf("sample %q interface label = %q, want %q", name, sample.Labels["interface"], iface)
 		}
+		return
 	}
 
-	t.Fatalf("configured collectors did not emit sample %q for interface %q", name, iface)
+	t.Fatalf("collected samples did not include %q for interface %q", name, iface)
 }
 
 func stringPtr(value string) *string {

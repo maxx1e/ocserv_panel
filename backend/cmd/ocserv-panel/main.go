@@ -187,38 +187,44 @@ func main() {
 	}()
 	monitoringService := app.NewMonitoringService(metricStore, rbac.NewDefaultAuthorizer(), nil, recorder)
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker, metricStore)
-	collectors := configuredCollectors(monitoring.OSReader{})
+	collectors := configuredCollectors(monitoring.OSReader{}, cfg.Monitoring)
 
-	// Auto-discover VPN interface for interface-level metrics.
-	// Skip discovery if OCSERV_PANEL_VPN_IFACE is explicitly set.
-	if strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")) == "" {
-		vpnIface, vpnSource, err := monitoring.DiscoverVPNInterface()
-		if err != nil {
-			log.Warn().Err(err).Msg("vpn interface discovery failed")
-		} else if vpnIface != "" {
-			log.Info().Str("interface", vpnIface).Str("source", vpnSource).Msg("vpn interface discovered")
-			collectors = append(collectors, monitoring.NewInterfaceCollector(
-				monitoring.OSReader{},
-				vpnIface,
-				metrics.MetricVPNInterfaceRXBytes,
-				metrics.MetricVPNInterfaceTXBytes,
-			))
-			monitoringService.SetMetricState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
-			monitoringService.SetMetricState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
-		} else {
-			log.Info().Msg("no vpn interface discovered; vpn metrics will remain unavailable")
-		}
-	} else {
-		log.Info().Msg("vpn interface set via environment variable; skipping auto-discovery")
+	// Add session collector using the ocserv session manager.
+	sessionCollector := monitoring.NewSessionCollector(sessionManager)
+	collectors = append(collectors, sessionCollector)
+	monitoringService.SetMetricState(metrics.MetricActiveSessions, metrics.StateCollecting, "")
+	monitoringService.SetMetricState(metrics.MetricConcurrentSessions, metrics.StateCollecting, "")
+
+	// Use config-based collector interval with fallback.
+	collectorInterval := time.Duration(cfg.Monitoring.CollectorInterval) * time.Second
+	if collectorInterval <= 0 {
+		collectorInterval = 15 * time.Second
 	}
+
+	// Check if VPN is already configured (from config or env).
+	vpnConfigured := strings.TrimSpace(cfg.Monitoring.VPNInterface) != "" || strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")) != ""
 
 	collectorService := monitoring.NewCollectorService(
 		metricStore,
 		collectors,
-		15*time.Second,
+		collectorInterval,
 		zerologAdapter{},
 		nil,
 	)
+
+	if vpnConfigured {
+		collectorService.MarkVPNPresent()
+		monitoringService.SetMetricState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
+		monitoringService.SetMetricState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
+	} else {
+		// Enable periodic re-discovery of VPN interface.
+		collectorService.SetVPNDiscoverer(
+			func() (string, string, error) { return monitoring.DiscoverVPNInterface() },
+			monitoring.OSReader{},
+			metrics.MetricVPNInterfaceRXBytes,
+			metrics.MetricVPNInterfaceTXBytes,
+		)
+	}
 	go collectorService.Run(ctx)
 
 	loginLimiter := auth.NewRateLimiter(5, time.Minute)
@@ -320,37 +326,45 @@ func openMetricStore() metrics.Store {
 	return metrics.NewMemoryStore()
 }
 
-func configuredCollectors(reader monitoring.FileReader) []monitoring.Collector {
+func configuredCollectors(reader monitoring.FileReader, monCfg config.MonitoringConfig) []monitoring.Collector {
 	collectors := []monitoring.Collector{
 		monitoring.NewCPUCollector(reader),
 		monitoring.NewMemoryCollector(reader),
 	}
 
-	if iface := strings.TrimSpace(os.Getenv("OCSERV_PANEL_NET_IFACE")); iface != "" {
+	// Network interface: config > env > auto-discovery
+	netIface := strings.TrimSpace(monCfg.NetworkInterface)
+	if netIface == "" {
+		netIface = strings.TrimSpace(os.Getenv("OCSERV_PANEL_NET_IFACE"))
+	}
+	if netIface == "" {
+		if discovered, err := monitoring.DiscoverDefaultInterface(); err != nil {
+			log.Warn().Err(err).Msg("default interface discovery failed")
+		} else if discovered != "" {
+			log.Info().Str("interface", discovered).Msg("default interface discovered")
+			netIface = discovered
+		} else {
+			log.Info().Msg("no default interface discovered; network interface metrics will remain unavailable")
+		}
+	}
+	if netIface != "" {
 		collectors = append(collectors, monitoring.NewInterfaceCollector(
 			reader,
-			iface,
+			netIface,
 			metrics.MetricNetInterfaceRXBytes,
 			metrics.MetricNetInterfaceTXBytes,
 		))
-	} else if defaultIface, err := monitoring.DiscoverDefaultInterface(); err != nil {
-		log.Warn().Err(err).Msg("default interface discovery failed")
-	} else if defaultIface != "" {
-		log.Info().Str("interface", defaultIface).Msg("default interface discovered")
-		collectors = append(collectors, monitoring.NewInterfaceCollector(
-			reader,
-			defaultIface,
-			metrics.MetricNetInterfaceRXBytes,
-			metrics.MetricNetInterfaceTXBytes,
-		))
-	} else {
-		log.Info().Msg("no default interface discovered; network interface metrics will remain unavailable")
 	}
 
-	if iface := strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")); iface != "" {
+	// VPN interface: config > env > (auto-discovery handled later via re-discovery)
+	vpnIface := strings.TrimSpace(monCfg.VPNInterface)
+	if vpnIface == "" {
+		vpnIface = strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE"))
+	}
+	if vpnIface != "" {
 		collectors = append(collectors, monitoring.NewInterfaceCollector(
 			reader,
-			iface,
+			vpnIface,
 			metrics.MetricVPNInterfaceRXBytes,
 			metrics.MetricVPNInterfaceTXBytes,
 		))
