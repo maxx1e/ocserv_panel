@@ -147,10 +147,15 @@ func (c *MemoryCollector) Collect(ctx context.Context, now time.Time) CollectRes
 }
 
 type InterfaceCollector struct {
+	mu       sync.Mutex
 	reader   FileReader
 	iface    string
 	rxMetric metrics.MetricName
 	txMetric metrics.MetricName
+	prevRX   uint64
+	prevTX   uint64
+	prevTime time.Time
+	hasPrev  bool
 }
 
 var _ Collector = (*InterfaceCollector)(nil)
@@ -187,6 +192,38 @@ func (c *InterfaceCollector) Collect(ctx context.Context, now time.Time) Collect
 		return unavailable(err.Error())
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.hasPrev {
+		c.prevRX = rxBytes
+		c.prevTX = txBytes
+		c.prevTime = now
+		c.hasPrev = true
+		return unavailable("rate calculation requires a previous sample")
+	}
+
+	// Detect counter wrap: new value less than previous means the kernel
+	// counter wrapped around. Reset baseline and skip this sample.
+	if rxBytes < c.prevRX || txBytes < c.prevTX {
+		c.prevRX = rxBytes
+		c.prevTX = txBytes
+		c.prevTime = now
+		return unavailable("counter wrap detected, resetting baseline")
+	}
+
+	elapsed := now.Sub(c.prevTime).Seconds()
+	if elapsed <= 0 {
+		return unavailable("elapsed time must be positive")
+	}
+
+	rxRate := float64(rxBytes-c.prevRX) / elapsed
+	txRate := float64(txBytes-c.prevTX) / elapsed
+
+	c.prevRX = rxBytes
+	c.prevTX = txBytes
+	c.prevTime = now
+
 	labels := map[string]string{"interface": c.iface}
 
 	return available([]metrics.Sample{
@@ -194,13 +231,13 @@ func (c *InterfaceCollector) Collect(ctx context.Context, now time.Time) Collect
 			Name:      c.rxMetric,
 			Labels:    labels,
 			Timestamp: now,
-			Value:     float64(rxBytes),
+			Value:     rxRate,
 		},
 		{
 			Name:      c.txMetric,
 			Labels:    labels,
 			Timestamp: now,
-			Value:     float64(txBytes),
+			Value:     txRate,
 		},
 	})
 }

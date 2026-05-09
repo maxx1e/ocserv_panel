@@ -240,8 +240,8 @@ func TestInterfaceCollector(t *testing.T) {
 	collector := NewInterfaceCollector(
 		&fakeFileReader{
 			files: map[string][]string{
-				"/sys/class/net/eth0/statistics/rx_bytes": {"123\n"},
-				"/sys/class/net/eth0/statistics/tx_bytes": {"456\n"},
+				"/sys/class/net/eth0/statistics/rx_bytes": {"1000\n", "2000\n"},
+				"/sys/class/net/eth0/statistics/tx_bytes": {"5000\n", "8000\n"},
 			},
 		},
 		"eth0",
@@ -249,16 +249,29 @@ func TestInterfaceCollector(t *testing.T) {
 		metrics.MetricNetInterfaceTXBytes,
 	)
 
-	result := collector.Collect(context.Background(), now)
-	if result.Status != CollectStatusAvailable {
-		t.Fatalf("status = %q, want %q", result.Status, CollectStatusAvailable)
+	// First call stores baseline and returns unavailable.
+	first := collector.Collect(context.Background(), now)
+	if first.Status != CollectStatusUnavailable {
+		t.Fatalf("first status = %q, want %q", first.Status, CollectStatusUnavailable)
 	}
-	if len(result.Samples) != 2 {
-		t.Fatalf("samples length = %d, want 2", len(result.Samples))
+	if len(first.Samples) != 0 {
+		t.Fatalf("first samples length = %d, want 0", len(first.Samples))
+	}
+	if first.Message == "" {
+		t.Fatal("first message is empty")
 	}
 
-	assertInterfaceSample(t, result.Samples[0], metrics.MetricNetInterfaceRXBytes, now, 123, "eth0")
-	assertInterfaceSample(t, result.Samples[1], metrics.MetricNetInterfaceTXBytes, now, 456, "eth0")
+	// Second call computes rate: (2000-1000)/10 = 100 rx, (8000-5000)/10 = 300 tx
+	second := collector.Collect(context.Background(), now.Add(10*time.Second))
+	if second.Status != CollectStatusAvailable {
+		t.Fatalf("second status = %q, want %q", second.Status, CollectStatusAvailable)
+	}
+	if len(second.Samples) != 2 {
+		t.Fatalf("second samples length = %d, want 2", len(second.Samples))
+	}
+
+	assertInterfaceSample(t, second.Samples[0], metrics.MetricNetInterfaceRXBytes, now.Add(10*time.Second), 100, "eth0")
+	assertInterfaceSample(t, second.Samples[1], metrics.MetricNetInterfaceTXBytes, now.Add(10*time.Second), 300, "eth0")
 }
 
 func TestInterfaceCollector_UnavailableInputs(t *testing.T) {
@@ -343,6 +356,88 @@ func TestInterfaceCollector_ContextCanceledAfterRXSkipsTX(t *testing.T) {
 	}
 
 	assertReadPaths(t, reader.reads, []string{"/sys/class/net/eth0/statistics/rx_bytes"})
+}
+
+func TestInterfaceCollector_RateBasedOutput(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC)
+	collector := NewInterfaceCollector(
+		&fakeFileReader{
+			files: map[string][]string{
+				"/sys/class/net/eth0/statistics/rx_bytes": {"10000\n", "25000\n"},
+				"/sys/class/net/eth0/statistics/tx_bytes": {"50000\n", "80000\n"},
+			},
+		},
+		"eth0",
+		metrics.MetricNetInterfaceRXBytes,
+		metrics.MetricNetInterfaceTXBytes,
+	)
+
+	// First call: establish baseline, returns unavailable.
+	first := collector.Collect(context.Background(), now)
+	if first.Status != CollectStatusUnavailable {
+		t.Fatalf("first status = %q, want %q", first.Status, CollectStatusUnavailable)
+	}
+
+	// Second call: 15 seconds later.
+	// RX rate = (25000 - 10000) / 15 = 1000
+	// TX rate = (80000 - 50000) / 15 = 2000
+	second := collector.Collect(context.Background(), now.Add(15*time.Second))
+	if second.Status != CollectStatusAvailable {
+		t.Fatalf("second status = %q, want %q; message = %q", second.Status, CollectStatusAvailable, second.Message)
+	}
+	if len(second.Samples) != 2 {
+		t.Fatalf("second samples length = %d, want 2", len(second.Samples))
+	}
+
+	assertInterfaceSample(t, second.Samples[0], metrics.MetricNetInterfaceRXBytes, now.Add(15*time.Second), 1000, "eth0")
+	assertInterfaceSample(t, second.Samples[1], metrics.MetricNetInterfaceTXBytes, now.Add(15*time.Second), 2000, "eth0")
+}
+
+func TestInterfaceCollector_CounterWrapReturnsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC)
+	collector := NewInterfaceCollector(
+		&fakeFileReader{
+			files: map[string][]string{
+				// First read: high values. Second read: lower values (wrap). Third: normal increase from second.
+				"/sys/class/net/eth0/statistics/rx_bytes": {"9000000000\n", "1000\n", "2000\n"},
+				"/sys/class/net/eth0/statistics/tx_bytes": {"8000000000\n", "500\n", "1500\n"},
+			},
+		},
+		"eth0",
+		metrics.MetricNetInterfaceRXBytes,
+		metrics.MetricNetInterfaceTXBytes,
+	)
+
+	// First call: baseline stored.
+	first := collector.Collect(context.Background(), now)
+	if first.Status != CollectStatusUnavailable {
+		t.Fatalf("first status = %q, want %q", first.Status, CollectStatusUnavailable)
+	}
+
+	// Second call: counter wrapped (1000 < 9000000000), returns unavailable and resets baseline.
+	second := collector.Collect(context.Background(), now.Add(10*time.Second))
+	if second.Status != CollectStatusUnavailable {
+		t.Fatalf("second status = %q, want %q", second.Status, CollectStatusUnavailable)
+	}
+	if len(second.Samples) != 0 {
+		t.Fatalf("second samples length = %d, want 0", len(second.Samples))
+	}
+
+	// Third call: normal increase from the new baseline (2000-1000)/10 = 100, (1500-500)/10 = 100.
+	third := collector.Collect(context.Background(), now.Add(20*time.Second))
+	if third.Status != CollectStatusAvailable {
+		t.Fatalf("third status = %q, want %q; message = %q", third.Status, CollectStatusAvailable, third.Message)
+	}
+	if len(third.Samples) != 2 {
+		t.Fatalf("third samples length = %d, want 2", len(third.Samples))
+	}
+
+	assertInterfaceSample(t, third.Samples[0], metrics.MetricNetInterfaceRXBytes, now.Add(20*time.Second), 100, "eth0")
+	assertInterfaceSample(t, third.Samples[1], metrics.MetricNetInterfaceTXBytes, now.Add(20*time.Second), 100, "eth0")
 }
 
 func TestCollectors_ContextCancellationUnavailable(t *testing.T) {
