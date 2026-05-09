@@ -73,10 +73,13 @@ type DatabaseConfig struct {
 
 // MonitoringConfig holds monitoring endpoint settings.
 type MonitoringConfig struct {
-	HealthEndpoint           bool `toml:"health_endpoint"`
-	MetricsEndpoint          bool `toml:"metrics_endpoint"`
-	DashboardRefreshInterval int  `toml:"dashboard_refresh_interval"`
-	LogFileReadEnabled       bool `toml:"log_file_read_enabled"`
+	HealthEndpoint           bool   `toml:"health_endpoint"`
+	MetricsEndpoint          bool   `toml:"metrics_endpoint"`
+	DashboardRefreshInterval int    `toml:"dashboard_refresh_interval"`
+	LogFileReadEnabled       bool   `toml:"log_file_read_enabled"`
+	NetworkInterface         string `toml:"network_interface"`
+	VPNInterface             string `toml:"vpn_interface"`
+	CollectorInterval        int    `toml:"collector_interval"`
 }
 
 // Config is the top-level TOML configuration structure.
@@ -141,6 +144,9 @@ func Defaults() Config {
 			MetricsEndpoint:          false,
 			DashboardRefreshInterval: 15,
 			LogFileReadEnabled:       true,
+			NetworkInterface:         "",
+			VPNInterface:             "",
+			CollectorInterval:        15,
 		},
 	}
 }

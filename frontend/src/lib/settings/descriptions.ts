@@ -73,6 +73,10 @@ export const settingDescriptions: Record<string, string> = {
   'monitoring.health_endpoint': 'Enable the /health HTTP endpoint for uptime checks.',
   'monitoring.metrics_endpoint': 'Enable the /metrics HTTP endpoint for monitoring dashboards.',
   'monitoring.dashboard_refresh_interval': 'How often (in seconds) the dashboard auto-refreshes its data.',
+  'monitoring.log_file_read_enabled': 'Allow the panel to read log files for display in the dashboard.',
+  'monitoring.network_interface': 'Network interface for bandwidth metrics. Leave empty for auto-discovery.',
+  'monitoring.vpn_interface': 'VPN interface for VPN bandwidth metrics. Leave empty for auto-discovery (reads ocserv config).',
+  'monitoring.collector_interval': 'How often (in seconds) the backend collects system and VPN metrics.',
 
   // Backup & Restore
   'backup.schedule': 'How often automatic database backups are created.',

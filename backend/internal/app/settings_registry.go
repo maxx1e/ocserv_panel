@@ -59,7 +59,7 @@ func AllSettingDefs() []SettingDef {
 		{Key: "installation.data_dir", Label: "Data Directory", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/var/lib/ocserv-panel", SortOrder: 2},
 		{Key: "installation.log_dir", Label: "Log Directory", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/var/log/ocserv-panel", SortOrder: 3},
 		{Key: "installation.ocserv_config_path", Label: "ocserv Config Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/etc/ocserv/ocserv.conf", SortOrder: 4},
-		{Key: "installation.ocserv_socket_path", Label: "ocserv Socket Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/var/run/ocserv-socket", SortOrder: 5},
+		{Key: "installation.ocserv_socket_path", Label: "occtl Socket Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "", SortOrder: 5},
 		{Key: "installation.ocserv_bin_path", Label: "ocserv Binary Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/usr/local/sbin/ocserv", SortOrder: 6},
 		{Key: "installation.occtl_bin_path", Label: "occtl Binary Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/usr/local/bin/occtl", SortOrder: 7},
 		{Key: "installation.ocpasswd_bin_path", Label: "ocpasswd Binary Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/usr/local/bin/ocpasswd", SortOrder: 8},
@@ -125,6 +125,9 @@ func AllSettingDefs() []SettingDef {
 		{Key: "monitoring.metrics_endpoint", Label: "Metrics Endpoint", Section: "monitoring", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "false", SortOrder: 2},
 		{Key: "monitoring.dashboard_refresh_interval", Label: "Dashboard Refresh Interval (s)", Section: "monitoring", Type: SettingTypeNumber, Source: SettingSourceConfig, RequiresRestart: true, Default: "15", Validation: "min:5", SortOrder: 3},
 		{Key: "monitoring.log_file_read_enabled", Label: "Enable Log File Reading", Section: "monitoring", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: false, Default: "true", SortOrder: 4},
+		{Key: "monitoring.network_interface", Label: "Network Interface", Section: "monitoring", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "", SortOrder: 5},
+		{Key: "monitoring.vpn_interface", Label: "VPN Interface", Section: "monitoring", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "", SortOrder: 6},
+		{Key: "monitoring.collector_interval", Label: "Collector Interval (s)", Section: "monitoring", Type: SettingTypeNumber, Source: SettingSourceConfig, RequiresRestart: true, Default: "15", Validation: "min:5", SortOrder: 7},
 
 		// Backup & Restore
 		{Key: "backup.schedule", Label: "Auto-Backup Schedule", Section: "backup", Type: SettingTypeSelect, Source: SettingSourceDatabase, RequiresRestart: false, Default: "disabled", Options: []string{"disabled", "daily", "weekly", "monthly"}, SortOrder: 1},

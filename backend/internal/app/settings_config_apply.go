@@ -166,6 +166,19 @@ func applySettingToConfig(cfg *config.Config, key, value string) error {
 			return fmt.Errorf("%w: monitoring.log_file_read_enabled must be true or false", ErrInvalidInput)
 		}
 		cfg.Monitoring.LogFileReadEnabled = b
+	case "monitoring.network_interface":
+		cfg.Monitoring.NetworkInterface = value
+	case "monitoring.vpn_interface":
+		cfg.Monitoring.VPNInterface = value
+	case "monitoring.collector_interval":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("%w: monitoring.collector_interval must be an integer", ErrInvalidInput)
+		}
+		if n < 5 {
+			return fmt.Errorf("%w: monitoring.collector_interval must be at least 5", ErrInvalidInput)
+		}
+		cfg.Monitoring.CollectorInterval = n
 
 	default:
 		return fmt.Errorf("%w: %s is not a config-source setting", ErrInvalidInput, key)
@@ -257,6 +270,12 @@ func configValueForKey(cfg config.Config, key string) string {
 		return strconv.Itoa(cfg.Monitoring.DashboardRefreshInterval)
 	case "monitoring.log_file_read_enabled":
 		return strconv.FormatBool(cfg.Monitoring.LogFileReadEnabled)
+	case "monitoring.network_interface":
+		return cfg.Monitoring.NetworkInterface
+	case "monitoring.vpn_interface":
+		return cfg.Monitoring.VPNInterface
+	case "monitoring.collector_interval":
+		return strconv.Itoa(cfg.Monitoring.CollectorInterval)
 	default:
 		return ""
 	}
