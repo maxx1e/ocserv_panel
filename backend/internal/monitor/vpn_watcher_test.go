@@ -222,6 +222,53 @@ func TestVPNWatcher_NotifySessionChangeSendsSignal(t *testing.T) {
 	}
 }
 
+func TestVPNWatcher_FallbackTickerTriggersSync(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeCollectorService{}
+	cat := DefaultCatalog()
+
+	discoverer := func() ([]string, error) {
+		return []string{"vpns0"}, nil
+	}
+
+	watcher := NewVPNWatcher(
+		svc,
+		cat,
+		discoverer,
+		&fakeFileReaderForVPN{files: map[string]string{
+			"/sys/class/net/vpns0/statistics/rx_bytes": "0",
+			"/sys/class/net/vpns0/statistics/tx_bytes": "0",
+		}},
+		MetricVPNInterfaceRXBytes,
+		MetricVPNInterfaceTXBytes,
+		&fakeLogger{},
+	)
+	watcher.tickInterval = 10 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	go watcher.Run(ctx)
+
+	// Wait for at least one tick to fire and trigger discovery.
+	deadline := time.Now().Add(400 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(svc.addedIfaces()) >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if len(svc.addedIfaces()) < 1 {
+		t.Fatal("fallback ticker did not trigger discovery — no collector was added")
+	}
+	def, _ := cat.Find(MetricVPNInterfaceRXBytes)
+	if def.State != StateCollecting {
+		t.Fatalf("rx metric state = %v, want StateCollecting after ticker-triggered discovery", def.State)
+	}
+}
+
 func TestVPNWatcher_DiscoveryErrorLogsWarn(t *testing.T) {
 	t.Parallel()
 
