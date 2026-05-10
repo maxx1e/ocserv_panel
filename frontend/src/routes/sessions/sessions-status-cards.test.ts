@@ -15,7 +15,7 @@ function formatUptime(upSince: string | undefined): string {
 }
 
 function formatDuration(seconds: number | undefined): string {
-  if (!seconds) return '—';
+  if (seconds === undefined || seconds === null) return '—';
   if (seconds >= 3600) {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -79,8 +79,8 @@ describe('formatDuration', () => {
     expect(formatDuration(undefined)).toBe('—');
   });
 
-  it('returns — for zero', () => {
-    expect(formatDuration(0)).toBe('—');
+  it('formats 0 seconds as 0s', () => {
+    expect(formatDuration(0)).toBe('0s');
   });
 
   it('formats seconds when < 60', () => {

@@ -27,7 +27,7 @@
   }
 
   function formatDuration(seconds: number | undefined): string {
-    if (!seconds) return '—';
+    if (seconds === undefined || seconds === null) return '—';
     if (seconds >= 3600) {
       const h = Math.floor(seconds / 3600);
       const m = Math.floor((seconds % 3600) / 60);
