@@ -63,7 +63,7 @@ func TestOcservServiceBulkDeletePartialSuccess(t *testing.T) {
 	_ = passwd.CreateUser(ctx, "alice", "pass")
 
 	svc := newBulkTestService(t, passwd)
-	// "!invalid!" fails ocserv.ValidateUsername.
+	// "!invalid!" fails validation.Username.
 	result := svc.BulkDeleteOcservUsers(ctx, ownerPrincipal(), []string{"alice", "!invalid!"})
 
 	if result.Total != 2 {
