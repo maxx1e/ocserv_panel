@@ -68,7 +68,6 @@ func TestTSDBPathFromEnv(t *testing.T) {
 func TestConfiguredCollectors(t *testing.T) {
 	t.Run("includes host collectors and auto-discovered interface by default", func(t *testing.T) {
 		t.Setenv("OCSERV_PANEL_NET_IFACE", "")
-		t.Setenv("OCSERV_PANEL_VPN_IFACE", "")
 
 		collectors := configuredCollectors(fakeFileReader{}, config.MonitoringConfig{})
 		if len(collectors) < 2 {
@@ -76,19 +75,17 @@ func TestConfiguredCollectors(t *testing.T) {
 		}
 	})
 
-	t.Run("adds configured network and vpn interface collectors", func(t *testing.T) {
+	t.Run("adds configured network interface collector", func(t *testing.T) {
 		t.Setenv("OCSERV_PANEL_NET_IFACE", "eth0")
-		t.Setenv("OCSERV_PANEL_VPN_IFACE", "vpns0")
 		reader := fakeFileReader{
-			"/sys/class/net/eth0/statistics/rx_bytes":  []byte("10\n"),
-			"/sys/class/net/eth0/statistics/tx_bytes":  []byte("20\n"),
-			"/sys/class/net/vpns0/statistics/rx_bytes": []byte("30\n"),
-			"/sys/class/net/vpns0/statistics/tx_bytes": []byte("40\n"),
+			"/sys/class/net/eth0/statistics/rx_bytes": []byte("10\n"),
+			"/sys/class/net/eth0/statistics/tx_bytes": []byte("20\n"),
 		}
 
 		collectors := configuredCollectors(reader, config.MonitoringConfig{})
-		if len(collectors) != 4 {
-			t.Fatalf("len(configuredCollectors()) = %d, want 4", len(collectors))
+		// CPU + memory + network interface = 3 collectors; VPN is managed by VPNWatcher.
+		if len(collectors) != 3 {
+			t.Fatalf("len(configuredCollectors()) = %d, want 3", len(collectors))
 		}
 
 		// Rate-based InterfaceCollector requires two samples to produce output.
@@ -109,8 +106,27 @@ func TestConfiguredCollectors(t *testing.T) {
 
 		assertHasSampleForInterface(t, allSamples, monitor.MetricNetInterfaceRXBytes, "eth0")
 		assertHasSampleForInterface(t, allSamples, monitor.MetricNetInterfaceTXBytes, "eth0")
-		assertHasSampleForInterface(t, allSamples, monitor.MetricVPNInterfaceRXBytes, "vpns0")
-		assertHasSampleForInterface(t, allSamples, monitor.MetricVPNInterfaceTXBytes, "vpns0")
+	})
+
+	t.Run("does not add vpn interface collector (managed by VPNWatcher)", func(t *testing.T) {
+		t.Setenv("OCSERV_PANEL_NET_IFACE", "")
+		reader := fakeFileReader{}
+
+		collectors := configuredCollectors(reader, config.MonitoringConfig{VPNInterface: "vpns0"})
+		// CPU + memory = 2 collectors; VPN is never added by configuredCollectors.
+		for _, c := range collectors {
+			prime := time.Unix(100, 0).UTC()
+			c.Collect(context.Background(), prime)
+			result := c.Collect(context.Background(), prime.Add(time.Second))
+			if result.Status != monitor.CollectStatusAvailable {
+				continue
+			}
+			for _, s := range result.Samples {
+				if s.Name == monitor.MetricVPNInterfaceRXBytes || s.Name == monitor.MetricVPNInterfaceTXBytes {
+					t.Fatalf("configuredCollectors must not produce VPN metric %q; VPNWatcher manages those", s.Name)
+				}
+			}
+		}
 	})
 }
 

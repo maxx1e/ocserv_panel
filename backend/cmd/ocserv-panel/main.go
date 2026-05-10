@@ -196,20 +196,11 @@ func main() {
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker, metricStore)
 	collectors := configuredCollectors(monitor.OSReader{}, cfg.Monitoring)
 
-	// Add session collector using the ocserv session manager.
-	sessionCollector := monitor.NewSessionCollector(sessionManager)
-	collectors = append(collectors, sessionCollector)
-	metricCatalog.SetState(monitor.MetricActiveSessions, monitor.StateCollecting, "")
-	metricCatalog.SetState(monitor.MetricConcurrentSessions, monitor.StateCollecting, "")
-
 	// Use config-based collector interval with fallback.
 	collectorInterval := time.Duration(cfg.Monitoring.CollectorInterval) * time.Second
 	if collectorInterval <= 0 {
 		collectorInterval = 15 * time.Second
 	}
-
-	// Check if VPN is already configured (from config or env).
-	vpnConfigured := strings.TrimSpace(cfg.Monitoring.VPNInterface) != "" || strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")) != ""
 
 	collectorService := monitor.NewCollectorService(
 		metricStore,
@@ -219,11 +210,22 @@ func main() {
 		nil,
 	)
 
-	if vpnConfigured {
-		metricCatalog.SetState(monitor.MetricVPNInterfaceRXBytes, monitor.StateCollecting, "")
-		metricCatalog.SetState(monitor.MetricVPNInterfaceTXBytes, monitor.StateCollecting, "")
-	}
-	// VPN re-discovery for dynamic interfaces will be handled by VPNWatcher (Task 4/6).
+	vpnWatcher := monitor.NewVPNWatcher(
+		collectorService,
+		metricCatalog,
+		func() ([]string, error) { return monitor.DiscoverAllVPNInterfaces() },
+		monitor.OSReader{},
+		monitor.MetricVPNInterfaceRXBytes,
+		monitor.MetricVPNInterfaceTXBytes,
+		zerologAdapter{},
+	)
+
+	sessionCollector := monitor.NewSessionCollectorWithNotifier(sessionManager, vpnWatcher)
+	collectorService.AddCollector(sessionCollector)
+	metricCatalog.SetState(monitor.MetricActiveSessions, monitor.StateCollecting, "")
+	metricCatalog.SetState(monitor.MetricConcurrentSessions, monitor.StateCollecting, "")
+
+	go vpnWatcher.Run(ctx)
 	go collectorService.Run(ctx)
 
 	loginLimiter := auth.NewRateLimiter(5, time.Minute)
@@ -357,20 +359,6 @@ func configuredCollectors(reader monitor.FileReader, monCfg config.MonitoringCon
 			netIface,
 			monitor.MetricNetInterfaceRXBytes,
 			monitor.MetricNetInterfaceTXBytes,
-		))
-	}
-
-	// VPN interface: config > env > (auto-discovery handled later via re-discovery)
-	vpnIface := strings.TrimSpace(monCfg.VPNInterface)
-	if vpnIface == "" {
-		vpnIface = strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE"))
-	}
-	if vpnIface != "" {
-		collectors = append(collectors, monitor.NewInterfaceCollector(
-			reader,
-			vpnIface,
-			monitor.MetricVPNInterfaceRXBytes,
-			monitor.MetricVPNInterfaceTXBytes,
 		))
 	}
 
