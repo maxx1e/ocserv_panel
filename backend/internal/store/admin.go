@@ -1,29 +1,15 @@
-// Package store contains SQLite-backed persistence repositories.
 package store
 
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"ocserv_panel/backend/internal/rbac"
-	"ocserv_panel/backend/internal/sanitize"
 )
-
-// ErrFirstOwnerExists is returned when bootstrap owner creation is no longer allowed.
-var ErrFirstOwnerExists = errors.New("admin user already exists")
-
-// ErrDuplicateUsername is returned when attempting to create an admin with a username that already exists.
-var ErrDuplicateUsername = errors.New("username already exists")
-
-// Store provides SQLite persistence operations.
-type Store struct {
-	DB *sql.DB
-}
 
 // Admin is a persisted administrator account with RBAC roles.
 type Admin struct {
@@ -45,44 +31,6 @@ type Session struct {
 	TokenHash string
 	ExpiresAt time.Time
 	RevokedAt *time.Time
-}
-
-// AuditEvent is a persisted audit event. Outcome is a string to keep store independent of audit.
-type AuditEvent struct {
-	ID               int64
-	ActorAdminUserID *int64
-	Action           string
-	ResourceType     string
-	ResourceID       string
-	Outcome          string
-	Message          string
-	Metadata         map[string]string
-	CreatedAt        time.Time
-}
-
-// HistoricalSession is an ingested or sample ocserv session history row.
-type HistoricalSession struct {
-	ID              int64
-	Username        string
-	ConnectedAt     time.Time
-	DisconnectedAt  time.Time
-	DurationSeconds int64
-	BytesIn         int64
-	BytesOut        int64
-	Source          string
-}
-
-// AnalyticsSummary summarizes persisted historical session analytics.
-type AnalyticsSummary struct {
-	TotalSessions  int64
-	SampleSessions int64
-	TotalBytesIn   int64
-	TotalBytesOut  int64
-}
-
-// New returns a Store using database.
-func New(db *sql.DB) *Store {
-	return &Store{DB: db}
 }
 
 // AdminCount returns the number of persisted admin users.
@@ -188,201 +136,6 @@ func (s *Store) RevokeSessionByTokenHash(ctx context.Context, tokenHash string, 
 		return fmt.Errorf("revoke admin session: %w", err)
 	}
 	return nil
-}
-
-// RecentAuditEvents returns recent audit events in newest-first order.
-func (s *Store) RecentAuditEvents(ctx context.Context, limit int) ([]AuditEvent, error) {
-	if limit <= 0 {
-		return []AuditEvent{}, nil
-	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, actor_admin_user_id, action, resource_type, resource_id, outcome, message, metadata_json, created_at FROM audit_log ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query recent audit events: %w", err)
-	}
-	defer rows.Close()
-
-	events := make([]AuditEvent, 0)
-	for rows.Next() {
-		event, err := scanAuditEvent(rows)
-		if err != nil {
-			return nil, err
-		}
-		events = append(events, event)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate recent audit events: %w", err)
-	}
-	return events, nil
-}
-
-// RecordAudit persists an audit event with JSON metadata.
-func (s *Store) RecordAudit(ctx context.Context, event AuditEvent) error {
-	metadata := sanitize.Metadata(event.Metadata)
-	metadataJSON, err := json.Marshal(metadata)
-	if err != nil {
-		return fmt.Errorf("marshal audit metadata: %w", err)
-	}
-	createdAt := event.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = time.Now().UTC()
-	}
-
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO audit_log (actor_admin_user_id, action, resource_type, resource_id, outcome, message, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, event.ActorAdminUserID, event.Action, event.ResourceType, event.ResourceID, event.Outcome, event.Message, string(metadataJSON), formatTime(createdAt)); err != nil {
-		return fmt.Errorf("insert audit event: %w", err)
-	}
-	return nil
-}
-
-// HistoricalSessions returns historical session rows in newest-first order.
-func (s *Store) HistoricalSessions(ctx context.Context, limit int) ([]HistoricalSession, error) {
-	if limit <= 0 {
-		return []HistoricalSession{}, nil
-	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source FROM historical_sessions ORDER BY disconnected_at DESC, id DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query historical sessions: %w", err)
-	}
-	defer rows.Close()
-
-	sessions := make([]HistoricalSession, 0)
-	for rows.Next() {
-		var session HistoricalSession
-		var connectedAt, disconnectedAt string
-		if err := rows.Scan(&session.ID, &session.Username, &connectedAt, &disconnectedAt, &session.DurationSeconds, &session.BytesIn, &session.BytesOut, &session.Source); err != nil {
-			return nil, fmt.Errorf("scan historical session: %w", err)
-		}
-		parsedConnectedAt, err := parseTime(connectedAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse historical connected_at: %w", err)
-		}
-		parsedDisconnectedAt, err := parseTime(disconnectedAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse historical disconnected_at: %w", err)
-		}
-		session.ConnectedAt = parsedConnectedAt
-		session.DisconnectedAt = parsedDisconnectedAt
-		sessions = append(sessions, session)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate historical sessions: %w", err)
-	}
-	return sessions, nil
-}
-
-// AnalyticsSummary returns aggregate counters for historical session analytics.
-func (s *Store) AnalyticsSummary(ctx context.Context) (AnalyticsSummary, error) {
-	var summary AnalyticsSummary
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN source = 'sample' THEN 1 ELSE 0 END), 0), COALESCE(SUM(bytes_in), 0), COALESCE(SUM(bytes_out), 0) FROM historical_sessions`).Scan(&summary.TotalSessions, &summary.SampleSessions, &summary.TotalBytesIn, &summary.TotalBytesOut); err != nil {
-		return AnalyticsSummary{}, fmt.Errorf("query analytics summary: %w", err)
-	}
-	return summary, nil
-}
-
-// GetSetting returns the value for a setting key, or empty string if not set.
-func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
-	var value string
-	err := s.DB.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = ?`, key).Scan(&value)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("get setting %q: %w", key, err)
-	}
-	return value, nil
-}
-
-// SetSetting upserts a setting key with the given value.
-func (s *Store) SetSetting(ctx context.Context, key string, value string) error {
-	now := time.Now().UTC()
-	result, err := s.DB.ExecContext(ctx,
-		`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		key, value, formatTime(now))
-	if err != nil {
-		return fmt.Errorf("set setting %q: %w", key, err)
-	}
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return fmt.Errorf("set setting %q: no rows affected", key)
-	}
-	return nil
-}
-
-// PurgeHistoricalBefore deletes historical sessions disconnected before cutoff.
-func (s *Store) PurgeHistoricalBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	cutoffStr := cutoff.UTC().Format(time.RFC3339)
-	result, err := s.DB.ExecContext(ctx,
-		`DELETE FROM historical_sessions WHERE disconnected_at < ?`, cutoffStr)
-	if err != nil {
-		return 0, fmt.Errorf("purge historical sessions: %w", err)
-	}
-	deleted, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("read purged historical session count: %w", err)
-	}
-	return deleted, nil
-}
-
-func (s *Store) findAdmin(ctx context.Context, query string, args ...any) (Admin, bool, error) {
-	var admin Admin
-	var disabledAt sql.NullString
-	var createdAt, updatedAt string
-	err := s.DB.QueryRowContext(ctx, query, args...).Scan(
-		&admin.ID,
-		&admin.Username,
-		&admin.PasswordHash,
-		&admin.DisplayName,
-		&admin.Email,
-		&disabledAt,
-		&createdAt,
-		&updatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Admin{}, false, nil
-		}
-		return Admin{}, false, fmt.Errorf("query admin user: %w", err)
-	}
-	parsedCreatedAt, err := parseTime(createdAt)
-	if err != nil {
-		return Admin{}, false, fmt.Errorf("parse admin created_at: %w", err)
-	}
-	admin.CreatedAt = parsedCreatedAt
-	parsedUpdatedAt, err := parseTime(updatedAt)
-	if err != nil {
-		return Admin{}, false, fmt.Errorf("parse admin updated_at: %w", err)
-	}
-	admin.UpdatedAt = parsedUpdatedAt
-	if disabledAt.Valid {
-		parsedDisabledAt, err := parseTime(disabledAt.String)
-		if err != nil {
-			return Admin{}, false, fmt.Errorf("parse admin disabled_at: %w", err)
-		}
-		admin.DisabledAt = &parsedDisabledAt
-	}
-	return admin, true, nil
-}
-
-func (s *Store) withRoles(ctx context.Context, admin Admin) (Admin, bool, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT r.name FROM roles r JOIN admin_user_roles aur ON aur.role_id = r.id WHERE aur.admin_user_id = ? ORDER BY r.name`, admin.ID)
-	if err != nil {
-		return Admin{}, false, fmt.Errorf("query admin roles: %w", err)
-	}
-	defer rows.Close()
-
-	roles := make([]rbac.Role, 0)
-	for rows.Next() {
-		var role string
-		if err := rows.Scan(&role); err != nil {
-			return Admin{}, false, fmt.Errorf("scan admin role: %w", err)
-		}
-		roles = append(roles, rbac.Role(role))
-	}
-	if err := rows.Err(); err != nil {
-		return Admin{}, false, fmt.Errorf("iterate admin roles: %w", err)
-	}
-	admin.Roles = roles
-	return admin, true, nil
 }
 
 // ListAdmins returns all admin users with their roles, ordered by ID.
@@ -606,30 +359,66 @@ func (s *Store) CountOwners(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-func scanAuditEvent(rows *sql.Rows) (AuditEvent, error) {
-	var event AuditEvent
-	var actorID sql.NullInt64
-	var resourceID sql.NullString
-	var metadataJSON string
-	var createdAt string
-	if err := rows.Scan(&event.ID, &actorID, &event.Action, &event.ResourceType, &resourceID, &event.Outcome, &event.Message, &metadataJSON, &createdAt); err != nil {
-		return AuditEvent{}, fmt.Errorf("scan audit event: %w", err)
-	}
-	if actorID.Valid {
-		event.ActorAdminUserID = &actorID.Int64
-	}
-	if resourceID.Valid {
-		event.ResourceID = resourceID.String
-	}
-	if err := json.Unmarshal([]byte(metadataJSON), &event.Metadata); err != nil {
-		return AuditEvent{}, fmt.Errorf("unmarshal audit metadata: %w", err)
+func (s *Store) findAdmin(ctx context.Context, query string, args ...any) (Admin, bool, error) {
+	var admin Admin
+	var disabledAt sql.NullString
+	var createdAt, updatedAt string
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(
+		&admin.ID,
+		&admin.Username,
+		&admin.PasswordHash,
+		&admin.DisplayName,
+		&admin.Email,
+		&disabledAt,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Admin{}, false, nil
+		}
+		return Admin{}, false, fmt.Errorf("query admin user: %w", err)
 	}
 	parsedCreatedAt, err := parseTime(createdAt)
 	if err != nil {
-		return AuditEvent{}, fmt.Errorf("parse audit created_at: %w", err)
+		return Admin{}, false, fmt.Errorf("parse admin created_at: %w", err)
 	}
-	event.CreatedAt = parsedCreatedAt
-	return event, nil
+	admin.CreatedAt = parsedCreatedAt
+	parsedUpdatedAt, err := parseTime(updatedAt)
+	if err != nil {
+		return Admin{}, false, fmt.Errorf("parse admin updated_at: %w", err)
+	}
+	admin.UpdatedAt = parsedUpdatedAt
+	if disabledAt.Valid {
+		parsedDisabledAt, err := parseTime(disabledAt.String)
+		if err != nil {
+			return Admin{}, false, fmt.Errorf("parse admin disabled_at: %w", err)
+		}
+		admin.DisabledAt = &parsedDisabledAt
+	}
+	return admin, true, nil
+}
+
+func (s *Store) withRoles(ctx context.Context, admin Admin) (Admin, bool, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT r.name FROM roles r JOIN admin_user_roles aur ON aur.role_id = r.id WHERE aur.admin_user_id = ? ORDER BY r.name`, admin.ID)
+	if err != nil {
+		return Admin{}, false, fmt.Errorf("query admin roles: %w", err)
+	}
+	defer rows.Close()
+
+	roles := make([]rbac.Role, 0)
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return Admin{}, false, fmt.Errorf("scan admin role: %w", err)
+		}
+		roles = append(roles, rbac.Role(role))
+	}
+	if err := rows.Err(); err != nil {
+		return Admin{}, false, fmt.Errorf("iterate admin roles: %w", err)
+	}
+	admin.Roles = roles
+	return admin, true, nil
 }
 
 func formatTime(t time.Time) string {
