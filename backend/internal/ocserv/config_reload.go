@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"ocserv_panel/backend/internal/ocserv/cmd"
 )
 
 const reloadTimeout = 10 * time.Second
@@ -18,13 +20,13 @@ type ReloadResult struct {
 // It isolates the command execution behind the CommandRunner interface so
 // tests can use FakeCommandRunner without a running ocserv instance.
 type ConfigReloader struct {
-	runner   CommandRunner
+	runner   cmd.CommandRunner
 	occtlBin string
 }
 
 // NewConfigReloader returns a ConfigReloader that calls occtlBin for reload
 // operations using the provided runner.
-func NewConfigReloader(runner CommandRunner, occtlBin string) *ConfigReloader {
+func NewConfigReloader(runner cmd.CommandRunner, occtlBin string) *ConfigReloader {
 	return &ConfigReloader{runner: runner, occtlBin: occtlBin}
 }
 

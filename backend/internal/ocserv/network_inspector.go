@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"ocserv_panel/backend/internal/ocserv/cmd"
 )
 
 // PrerequisiteCheck describes the result of a single host-level prerequisite check.
@@ -28,21 +30,21 @@ type NetworkPrerequisites struct {
 // required for ocserv to function correctly (IP forwarding, firewall rules, etc.).
 // It never modifies system state.
 type NetworkInspector struct {
-	runner     CommandRunner
+	runner     cmd.CommandRunner
 	procDir    string
 	configPath string
 }
 
 // NewNetworkInspectorWithProcDir returns a NetworkInspector that reads kernel
 // parameters from procDir instead of /proc/sys. Used in tests.
-func NewNetworkInspectorWithProcDir(runner CommandRunner, procDir string) *NetworkInspector {
+func NewNetworkInspectorWithProcDir(runner cmd.CommandRunner, procDir string) *NetworkInspector {
 	return &NetworkInspector{runner: runner, procDir: procDir, configPath: ""}
 }
 
 // NewNetworkInspectorWithConfig returns a NetworkInspector that reads kernel
 // parameters from procDir and parses the ocserv config at configPath to check
 // whether listener ports are allowed through the firewall.
-func NewNetworkInspectorWithConfig(runner CommandRunner, procDir, configPath string) *NetworkInspector {
+func NewNetworkInspectorWithConfig(runner cmd.CommandRunner, procDir, configPath string) *NetworkInspector {
 	return &NetworkInspector{runner: runner, procDir: procDir, configPath: configPath}
 }
 

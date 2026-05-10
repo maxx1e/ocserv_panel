@@ -5,19 +5,21 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"ocserv_panel/backend/internal/ocserv/cmd"
 )
 
 // SystemdManager manages a systemd service via systemctl commands.
 type SystemdManager struct {
 	unitName string
-	runner   CommandRunner
+	runner   cmd.CommandRunner
 }
 
 // Compile-time interface satisfaction check.
 var _ ServiceManager = (*SystemdManager)(nil)
 
 // NewSystemdManager returns a SystemdManager for the given unit name.
-func NewSystemdManager(unitName string, runner CommandRunner) *SystemdManager {
+func NewSystemdManager(unitName string, runner cmd.CommandRunner) *SystemdManager {
 	return &SystemdManager{unitName: unitName, runner: runner}
 }
 

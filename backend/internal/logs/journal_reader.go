@@ -6,18 +6,18 @@ import (
 	"strings"
 	"time"
 
-	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/ocserv/cmd"
 )
 
 // JournalLogReader reads log lines from systemd journal via journalctl.
 type JournalLogReader struct {
 	unit       string
 	sourceType SourceType
-	runner     ocserv.CommandRunner
+	runner     cmd.CommandRunner
 }
 
 // NewJournalLogReader creates a JournalLogReader for the given systemd unit.
-func NewJournalLogReader(unit string, sourceType SourceType, runner ocserv.CommandRunner) *JournalLogReader {
+func NewJournalLogReader(unit string, sourceType SourceType, runner cmd.CommandRunner) *JournalLogReader {
 	return &JournalLogReader{unit: unit, sourceType: sourceType, runner: runner}
 }
 

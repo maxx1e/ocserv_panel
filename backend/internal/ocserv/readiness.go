@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"ocserv_panel/backend/internal/ocserv/cmd"
 )
 
 // OcservReadiness describes the installation and runtime state of ocserv.
@@ -36,7 +38,7 @@ type ReadinessConfig struct {
 // ReadinessChecker probes the system for ocserv installation and runtime state.
 type ReadinessChecker struct {
 	cfgFn  func() ReadinessConfig
-	runner CommandRunner
+	runner cmd.CommandRunner
 	svc    ServiceManager
 }
 
@@ -48,7 +50,7 @@ var _ interface {
 // NewReadinessChecker returns a ReadinessChecker that calls cfgFn on every
 // Check invocation, so path changes written to the TOML config are picked up
 // without a process restart.
-func NewReadinessChecker(cfgFn func() ReadinessConfig, runner CommandRunner, svc ServiceManager) *ReadinessChecker {
+func NewReadinessChecker(cfgFn func() ReadinessConfig, runner cmd.CommandRunner, svc ServiceManager) *ReadinessChecker {
 	return &ReadinessChecker{cfgFn: cfgFn, runner: runner, svc: svc}
 }
 

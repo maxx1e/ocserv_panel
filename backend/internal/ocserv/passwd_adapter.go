@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"ocserv_panel/backend/internal/ocserv/cmd"
 )
 
 // OcpasswdAdapter implements PasswdManager using the ocpasswd command and
@@ -15,7 +17,7 @@ type OcpasswdAdapter struct {
 	binPath    string
 	filePath   string
 	configPath string
-	runner     CommandRunner
+	runner     cmd.CommandRunner
 }
 
 // Compile-time interface satisfaction check.
@@ -25,7 +27,7 @@ var _ PasswdManager = (*OcpasswdAdapter)(nil)
 // binPath is the path to the ocpasswd binary, filePath is the ocpasswd
 // password file, and configPath is the ocserv config file (retained for
 // potential future use but not currently passed to ocpasswd).
-func NewOcpasswdAdapter(binPath, filePath, configPath string, runner CommandRunner) *OcpasswdAdapter {
+func NewOcpasswdAdapter(binPath, filePath, configPath string, runner cmd.CommandRunner) *OcpasswdAdapter {
 	return &OcpasswdAdapter{
 		binPath:    binPath,
 		filePath:   filePath,

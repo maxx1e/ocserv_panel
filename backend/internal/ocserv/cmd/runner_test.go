@@ -1,16 +1,18 @@
-package ocserv
+package cmd_test
 
 import (
 	"context"
 	"io"
 	"strings"
 	"testing"
+
+	"ocserv_panel/backend/internal/ocserv/cmd"
 )
 
 func TestFakeCommandRunner_DefaultSuccess(t *testing.T) {
 	t.Parallel()
 
-	f := NewFakeCommandRunner()
+	f := cmd.NewFakeCommandRunner()
 	result, err := f.Run(context.Background(), "occtl", []string{"show", "users"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -26,8 +28,8 @@ func TestFakeCommandRunner_DefaultSuccess(t *testing.T) {
 func TestFakeCommandRunner_ExactMatch(t *testing.T) {
 	t.Parallel()
 
-	f := NewFakeCommandRunner()
-	f.Results["occtl show users"] = CommandResult{
+	f := cmd.NewFakeCommandRunner()
+	f.Results["occtl show users"] = cmd.CommandResult{
 		Stdout:   "user1\nuser2\n",
 		ExitCode: 0,
 	}
@@ -44,8 +46,8 @@ func TestFakeCommandRunner_ExactMatch(t *testing.T) {
 func TestFakeCommandRunner_NameFallback(t *testing.T) {
 	t.Parallel()
 
-	f := NewFakeCommandRunner()
-	f.Results["occtl"] = CommandResult{
+	f := cmd.NewFakeCommandRunner()
+	f.Results["occtl"] = cmd.CommandResult{
 		Stdout:   "fallback-output\n",
 		ExitCode: 0,
 	}
@@ -62,7 +64,7 @@ func TestFakeCommandRunner_NameFallback(t *testing.T) {
 func TestFakeCommandRunner_RecordsCalls(t *testing.T) {
 	t.Parallel()
 
-	f := NewFakeCommandRunner()
+	f := cmd.NewFakeCommandRunner()
 	_, _ = f.Run(context.Background(), "ocpasswd", []string{"-c", "config", "user1"}, strings.NewReader("password"))
 	_, _ = f.Run(context.Background(), "systemctl", []string{"restart", "ocserv"}, nil)
 
@@ -87,7 +89,7 @@ func TestFakeCommandRunner_RecordsCalls(t *testing.T) {
 func TestFakeCommandRunner_WithErr(t *testing.T) {
 	t.Parallel()
 
-	f := NewFakeCommandRunner()
+	f := cmd.NewFakeCommandRunner()
 	f.Err = io.ErrUnexpectedEOF
 
 	_, err := f.Run(context.Background(), "occtl", []string{"show", "users"}, nil)
@@ -98,6 +100,6 @@ func TestFakeCommandRunner_WithErr(t *testing.T) {
 
 func TestFakeCommandRunner_ImplementsCommandRunner(t *testing.T) {
 	// Compile-time check is in runner.go; this verifies at test time too.
-	var cr CommandRunner = NewFakeCommandRunner()
+	var cr cmd.CommandRunner = cmd.NewFakeCommandRunner()
 	_ = cr
 }

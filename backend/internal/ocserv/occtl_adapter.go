@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"ocserv_panel/backend/internal/ocserv/cmd"
 	"ocserv_panel/backend/internal/validation"
 )
 
@@ -37,7 +38,7 @@ func validateSessionID(id string) error {
 type OcctlAdapter struct {
 	occtlPath  string
 	socketPath string
-	runner     CommandRunner
+	runner     cmd.CommandRunner
 }
 
 // Compile-time interface satisfaction check.
@@ -45,7 +46,7 @@ var _ Manager = (*OcctlAdapter)(nil)
 
 // NewOcctlAdapter returns an adapter that calls occtl for session and user management.
 // socketPath may be empty to use the occtl default.
-func NewOcctlAdapter(occtlPath, socketPath string, runner CommandRunner) *OcctlAdapter {
+func NewOcctlAdapter(occtlPath, socketPath string, runner cmd.CommandRunner) *OcctlAdapter {
 	return &OcctlAdapter{
 		occtlPath:  occtlPath,
 		socketPath: socketPath,

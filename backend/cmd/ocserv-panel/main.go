@@ -25,6 +25,7 @@ import (
 	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/monitoring"
 	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/ocserv/cmd"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/server"
 	"ocserv_panel/backend/internal/store"
@@ -103,7 +104,7 @@ func main() {
 	settingsService := app.NewSettingsService(&cfg, configPath, persistence, recorder, rbac.NewDefaultAuthorizer())
 
 	// Build ocserv integration components from config.
-	runner := ocserv.NewOSCommandRunner()
+	runner := cmd.NewOSCommandRunner()
 	svcManager := ocserv.NewSystemdManager(cfg.Service.SystemdUnitName, runner)
 	readinessChecker := ocserv.NewReadinessChecker(
 		func() ocserv.ReadinessConfig {
