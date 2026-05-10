@@ -539,3 +539,25 @@ func equalFloat64s(got []float64, want []float64) bool {
 
 	return true
 }
+
+func TestDefaultCatalog_VPNMetricsStartUnavailable(t *testing.T) {
+	t.Parallel()
+
+	cat := DefaultCatalog()
+
+	rx, ok := cat.Find(MetricVPNInterfaceRXBytes)
+	if !ok {
+		t.Fatal("MetricVPNInterfaceRXBytes not in catalog")
+	}
+	if rx.State != StateUnavailable {
+		t.Fatalf("rx state = %q, want unavailable at startup", rx.State)
+	}
+
+	tx, ok := cat.Find(MetricVPNInterfaceTXBytes)
+	if !ok {
+		t.Fatal("MetricVPNInterfaceTXBytes not in catalog")
+	}
+	if tx.State != StateUnavailable {
+		t.Fatalf("tx state = %q, want unavailable at startup", tx.State)
+	}
+}

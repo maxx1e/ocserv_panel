@@ -76,8 +76,8 @@ func DefaultCatalog() *Catalog {
 		collectingMetric(MetricHostMemoryUtilization, "host memory utilization"),
 		collectingMetric(MetricNetInterfaceRXBytes, "network interface received bytes"),
 		collectingMetric(MetricNetInterfaceTXBytes, "network interface transmitted bytes"),
-		collectingMetric(MetricVPNInterfaceRXBytes, "VPN interface received bytes"),
-		collectingMetric(MetricVPNInterfaceTXBytes, "VPN interface transmitted bytes"),
+		unavailableWithReason(MetricVPNInterfaceRXBytes, "VPN interface received bytes", "waiting for VPN interface"),
+		unavailableWithReason(MetricVPNInterfaceTXBytes, "VPN interface transmitted bytes", "waiting for VPN interface"),
 		unavailableMetric(MetricUserRXBytes, "user received bytes"),
 		unavailableMetric(MetricUserTXBytes, "user transmitted bytes"),
 		collectingMetric(MetricActiveSessions, "active sessions"),
@@ -198,6 +198,15 @@ func unavailableMetric(name MetricName, description string) MetricDefinition {
 		Description: description,
 		State:       StateUnavailable,
 		Reason:      "ocserv collection is not implemented yet",
+	}
+}
+
+func unavailableWithReason(name MetricName, description, reason string) MetricDefinition {
+	return MetricDefinition{
+		Name:        name,
+		Description: description,
+		State:       StateUnavailable,
+		Reason:      reason,
 	}
 }
 
