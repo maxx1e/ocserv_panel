@@ -220,22 +220,10 @@ func main() {
 	)
 
 	if vpnConfigured {
-		vpnIface := strings.TrimSpace(cfg.Monitoring.VPNInterface)
-		if vpnIface == "" {
-			vpnIface = strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE"))
-		}
-		collectorService.MarkVPNPresent(vpnIface)
 		metricCatalog.SetState(monitor.MetricVPNInterfaceRXBytes, monitor.StateCollecting, "")
 		metricCatalog.SetState(monitor.MetricVPNInterfaceTXBytes, monitor.StateCollecting, "")
-	} else {
-		// Enable periodic re-discovery of VPN interface.
-		collectorService.SetVPNDiscoverer(
-			func() ([]string, error) { return monitor.DiscoverAllVPNInterfaces() },
-			monitor.OSReader{},
-			monitor.MetricVPNInterfaceRXBytes,
-			monitor.MetricVPNInterfaceTXBytes,
-		)
 	}
+	// VPN re-discovery for dynamic interfaces will be handled by VPNWatcher (Task 4/6).
 	go collectorService.Run(ctx)
 
 	loginLimiter := auth.NewRateLimiter(5, time.Minute)

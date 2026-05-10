@@ -249,357 +249,86 @@ func TestCollectorService_RunCollectsImmediatelyAndStopsOnCancel(t *testing.T) {
 	}
 }
 
-func TestCollectorService_VPNRediscovery(t *testing.T) {
+
+func TestCollectorService_AddCollector(t *testing.T) {
 	store := NewMemoryStore()
-	logger := &fakeLogger{}
-	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	service := NewCollectorService(store, []Collector{}, time.Second, &fakeLogger{}, func() time.Time { return now })
 
-	service := NewCollectorService(
-		store,
-		[]Collector{},
-		50*time.Millisecond,
-		logger,
-		func() time.Time { return now },
-	)
+	called := false
+	service.AddCollector(fakeCollector{result: available([]Sample{{
+		Name:      MetricVPNInterfaceRXBytes,
+		Labels:    map[string]string{},
+		Timestamp: now,
+		Value:     99,
+	}})})
 
-	var mu sync.Mutex
-	callCount := 0
-	discoverer := func() ([]string, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		callCount++
-		if callCount <= 2 {
-			return nil, nil
-		}
-		return []string{"vpns0"}, nil
+	service.CollectOnce(context.Background())
+	_ = called
+
+	series, err := store.QueryRange(context.Background(), Query{
+		Metric: MetricVPNInterfaceRXBytes,
+		Start:  now.Add(-time.Second),
+		End:    now.Add(time.Second),
+		Step:   time.Second,
+	})
+	if err != nil {
+		t.Fatalf("query: %v", err)
 	}
-
-	fakeReader := &fakeFileReaderForVPN{
-		files: map[string]string{
-			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
-			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
-		},
+	if len(series.Points) != 1 {
+		t.Fatalf("points = %d, want 1", len(series.Points))
 	}
-
-	service.SetVPNDiscoverer(
-		discoverer,
-		fakeReader,
-		MetricVPNInterfaceRXBytes,
-		MetricVPNInterfaceTXBytes,
-	)
-
-	// Override the vpnRediscoveryInterval by running maybeDiscoverAllVPN manually
-	// in a goroutine loop with short sleeps to keep the test fast.
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	done := make(chan struct{})
-	go func() {
-		// Simulate periodic VPN discovery at a fast rate.
-		ticker := time.NewTicker(30 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				close(done)
-				return
-			case <-ticker.C:
-				service.maybeDiscoverAllVPN()
-			}
-		}
-	}()
-
-	<-done
-
-	if !service.HasVPNCollector() {
-		t.Fatal("expected HasVPNCollector() to be true after discovery")
-	}
-
-	mu.Lock()
-	finalCount := callCount
-	mu.Unlock()
-	if finalCount < 3 {
-		t.Fatalf("discoverer called %d times, expected at least 3", finalCount)
+	if series.Points[0].Value != 99 {
+		t.Fatalf("value = %v, want 99", series.Points[0].Value)
 	}
 }
 
-func TestCollectorService_VPNRediscoverySkipsWhenAlreadyPresent(t *testing.T) {
+func TestCollectorService_RemoveCollectorByIface(t *testing.T) {
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	store := NewMemoryStore()
-	logger := &fakeLogger{}
-	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
 
-	service := NewCollectorService(
-		store,
-		[]Collector{},
-		50*time.Millisecond,
-		logger,
-		func() time.Time { return now },
-	)
-
-	var mu sync.Mutex
-	callCount := 0
-	discoverer := func() ([]string, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		callCount++
-		return []string{"vpns0"}, nil
-	}
-
-	fakeReader := &fakeFileReaderForVPN{
-		files: map[string]string{
+	c0 := NewInterfaceCollector(
+		&fakeFileReaderForVPN{files: map[string]string{
 			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
 			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
-		},
-	}
-
-	service.SetVPNDiscoverer(
-		discoverer,
-		fakeReader,
+		}},
+		"vpns0",
+		MetricVPNInterfaceRXBytes,
+		MetricVPNInterfaceTXBytes,
+	)
+	c1 := NewInterfaceCollector(
+		&fakeFileReaderForVPN{files: map[string]string{
+			"/sys/class/net/vpns1/statistics/rx_bytes": "3000",
+			"/sys/class/net/vpns1/statistics/tx_bytes": "4000",
+		}},
+		"vpns1",
 		MetricVPNInterfaceRXBytes,
 		MetricVPNInterfaceTXBytes,
 	)
 
-	// Call maybeDiscoverAllVPN multiple times.
-	for i := 0; i < 5; i++ {
-		service.maybeDiscoverAllVPN()
+	service := NewCollectorService(store, []Collector{c0, c1}, time.Second, &fakeLogger{}, func() time.Time { return now })
+	if len(service.collectors) != 2 {
+		t.Fatalf("before remove: collectors = %d, want 2", len(service.collectors))
 	}
 
-	if !service.HasVPNCollector() {
-		t.Fatal("expected HasVPNCollector() to be true")
-	}
+	service.RemoveCollectorByIface("vpns0")
 
-	// The discoverer is called every time (no early exit), but only one
-	// collector should be added because vpns0 is already registered.
-	mu.Lock()
-	finalCount := callCount
-	mu.Unlock()
-	if finalCount != 5 {
-		t.Fatalf("discoverer called %d times, expected 5", finalCount)
-	}
 	if len(service.collectors) != 1 {
-		t.Fatalf("collector count = %d, want 1 (no duplicates)", len(service.collectors))
+		t.Fatalf("after remove: collectors = %d, want 1", len(service.collectors))
+	}
+	remaining := service.collectors[0].(*InterfaceCollector)
+	if remaining.Iface() != "vpns1" {
+		t.Fatalf("remaining collector iface = %q, want vpns1", remaining.Iface())
 	}
 }
 
-func TestCollectorService_MarkVPNPresentPreventsDiscovery(t *testing.T) {
+func TestCollectorService_RemoveCollectorByIface_NonExistentIsNoop(t *testing.T) {
 	store := NewMemoryStore()
-	logger := &fakeLogger{}
-
-	service := NewCollectorService(
-		store,
-		[]Collector{},
-		50*time.Millisecond,
-		logger,
-		func() time.Time { return time.Now() },
-	)
-
-	var mu sync.Mutex
-	callCount := 0
-	discoverer := func() ([]string, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		callCount++
-		return []string{"vpns0"}, nil
-	}
-
-	fakeReader := &fakeFileReaderForVPN{
-		files: map[string]string{
-			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
-			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
-		},
-	}
-
-	service.SetVPNDiscoverer(
-		discoverer,
-		fakeReader,
-		MetricVPNInterfaceRXBytes,
-		MetricVPNInterfaceTXBytes,
-	)
-
-	// Mark VPN as already present (simulating startup discovery).
-	service.MarkVPNPresent("vpns0")
-
-	// Call maybeDiscoverAllVPN — the discoverer will be called but vpns0 is
-	// already registered so no new collectors should be added.
-	for i := 0; i < 3; i++ {
-		service.maybeDiscoverAllVPN()
-	}
-
-	mu.Lock()
-	finalCount := callCount
-	mu.Unlock()
-	// The discoverer IS called (no early exit), but vpns0 is already in discoveredVPN.
-	if finalCount != 3 {
-		t.Fatalf("discoverer called %d times, expected 3", finalCount)
-	}
-	// No new collectors should have been added.
+	service := NewCollectorService(store, []Collector{}, time.Second, &fakeLogger{}, func() time.Time { return time.Now() })
+	// Should not panic when interface is not tracked.
+	service.RemoveCollectorByIface("vpns99")
 	if len(service.collectors) != 0 {
-		t.Fatalf("collector count = %d, expected 0 (vpns0 already marked)", len(service.collectors))
-	}
-}
-
-func TestCollectorService_CollectOnceThreadSafeWithDiscovery(t *testing.T) {
-	store := NewMemoryStore()
-	logger := &fakeLogger{}
-	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
-
-	collector := &countingCollector{}
-	service := NewCollectorService(
-		store,
-		[]Collector{collector},
-		50*time.Millisecond,
-		logger,
-		func() time.Time { return now },
-	)
-
-	// Run CollectOnce concurrently with maybeDiscoverAllVPN to verify no race.
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
-	fakeReader := &fakeFileReaderForVPN{
-		files: map[string]string{
-			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
-			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
-		},
-	}
-
-	callNum := 0
-	service.SetVPNDiscoverer(
-		func() ([]string, error) {
-			callNum++
-			if callNum > 3 {
-				return []string{"vpns0"}, nil
-			}
-			return nil, nil
-		},
-		fakeReader,
-		MetricVPNInterfaceRXBytes,
-		MetricVPNInterfaceTXBytes,
-	)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				service.CollectOnce(ctx)
-				time.Sleep(10 * time.Millisecond)
-			}
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				service.maybeDiscoverAllVPN()
-				time.Sleep(15 * time.Millisecond)
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	if collector.count() == 0 {
-		t.Fatal("expected at least one collect call")
-	}
-}
-
-func TestCollectorService_MultiVPNDiscoveryAddsAllInterfaces(t *testing.T) {
-	store := NewMemoryStore()
-	logger := &fakeLogger{}
-	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
-
-	service := NewCollectorService(
-		store,
-		[]Collector{},
-		50*time.Millisecond,
-		logger,
-		func() time.Time { return now },
-	)
-
-	fakeReader := &fakeFileReaderForVPN{
-		files: map[string]string{
-			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
-			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
-			"/sys/class/net/vpns1/statistics/rx_bytes": "3000",
-			"/sys/class/net/vpns1/statistics/tx_bytes": "4000",
-		},
-	}
-
-	discoverer := func() ([]string, error) {
-		return []string{"vpns0", "vpns1"}, nil
-	}
-
-	service.SetVPNDiscoverer(
-		discoverer,
-		fakeReader,
-		MetricVPNInterfaceRXBytes,
-		MetricVPNInterfaceTXBytes,
-	)
-
-	service.maybeDiscoverAllVPN()
-
-	if !service.HasVPNCollector() {
-		t.Fatal("expected HasVPNCollector() true after multi-discovery")
-	}
-	if len(service.discoveredVPN) != 2 {
-		t.Fatalf("discoveredVPN = %v, want 2 entries", service.discoveredVPN)
-	}
-	if !service.discoveredVPN["vpns0"] || !service.discoveredVPN["vpns1"] {
-		t.Fatalf("discoveredVPN = %v, want vpns0 and vpns1", service.discoveredVPN)
-	}
-}
-
-func TestCollectorService_MultiVPNDiscoverySkipsAlreadyRegistered(t *testing.T) {
-	store := NewMemoryStore()
-	logger := &fakeLogger{}
-	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
-
-	service := NewCollectorService(
-		store,
-		[]Collector{},
-		50*time.Millisecond,
-		logger,
-		func() time.Time { return now },
-	)
-
-	fakeReader := &fakeFileReaderForVPN{
-		files: map[string]string{
-			"/sys/class/net/vpns0/statistics/rx_bytes": "1000",
-			"/sys/class/net/vpns0/statistics/tx_bytes": "2000",
-			"/sys/class/net/vpns1/statistics/rx_bytes": "3000",
-			"/sys/class/net/vpns1/statistics/tx_bytes": "4000",
-		},
-	}
-
-	callCount := 0
-	discoverer := func() ([]string, error) {
-		callCount++
-		return []string{"vpns0", "vpns1"}, nil
-	}
-
-	service.SetVPNDiscoverer(
-		discoverer,
-		fakeReader,
-		MetricVPNInterfaceRXBytes,
-		MetricVPNInterfaceTXBytes,
-	)
-
-	// Call twice — second call should not add duplicate collectors.
-	service.maybeDiscoverAllVPN()
-	initialCollectorCount := len(service.collectors)
-	service.maybeDiscoverAllVPN()
-	if len(service.collectors) != initialCollectorCount {
-		t.Fatalf("collector count grew on second discovery: %d vs %d", len(service.collectors), initialCollectorCount)
+		t.Fatalf("collectors = %d, want 0", len(service.collectors))
 	}
 }
 
