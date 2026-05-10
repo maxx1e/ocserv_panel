@@ -239,9 +239,9 @@ func NewAppRouter(
 	mux.HandleFunc("GET /api/dashboard/active-sessions", appHandler.handleDashboardActiveSessions)
 	mux.HandleFunc("/api/history/analytics", appHandler.handleHistoryAnalytics)
 	mux.HandleFunc("/api/history/purge", appHandler.handleHistoryPurge)
-	mux.HandleFunc("/api/monitoring/catalog", appHandler.handleMonitoringCatalog)
-	mux.HandleFunc("/api/monitoring/overview", appHandler.handleMonitoringOverview)
-	mux.HandleFunc("/api/monitoring/series", appHandler.handleMonitoringSeries)
+	mux.Handle("/api/monitoring/catalog", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringCatalog)))
+	mux.Handle("/api/monitoring/overview", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringOverview)))
+	mux.Handle("/api/monitoring/series", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringSeries)))
 	mux.HandleFunc("/api/settings/restart-status", appHandler.handleRestartStatus)
 	mux.HandleFunc("/api/settings/restart", appHandler.handleRestart)
 	mux.HandleFunc("/api/settings", appHandler.handleSettingsSectionsGet)
@@ -501,27 +501,11 @@ func (a *App) handleMonitoringCatalog(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodGet) {
 		return
 	}
-	principal, ok := a.authenticate(w, r)
-	if !ok {
-		return
-	}
-	if !a.authorizer.Allowed(principalRoles(principal), rbac.PermissionReadDashboard) {
-		writeError(w, http.StatusForbidden, "permission denied")
-		return
-	}
 	writeJSON(w, http.StatusOK, a.catalogList())
 }
 
 func (a *App) handleMonitoringOverview(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodGet) {
-		return
-	}
-	principal, ok := a.authenticate(w, r)
-	if !ok {
-		return
-	}
-	if !a.authorizer.Allowed(principalRoles(principal), rbac.PermissionReadDashboard) {
-		writeError(w, http.StatusForbidden, "permission denied")
 		return
 	}
 
@@ -560,14 +544,6 @@ func (a *App) handleMonitoringOverview(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleMonitoringSeries(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodGet) {
-		return
-	}
-	principal, ok := a.authenticate(w, r)
-	if !ok {
-		return
-	}
-	if !a.authorizer.Allowed(principalRoles(principal), rbac.PermissionReadDashboard) {
-		writeError(w, http.StatusForbidden, "permission denied")
 		return
 	}
 
