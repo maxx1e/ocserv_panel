@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/vpn/sessions"
 )
 
 // --- handleOcservSessionDetail tests ---
@@ -35,7 +35,7 @@ func TestOcservSessionDetailViewerCanRead(t *testing.T) {
 }
 
 func TestOcservSessionDetailReturnsDetail(t *testing.T) {
-	h := newTestHarnessWithSessionDetail(t, "sess-abc", &ocserv.SessionDetail{
+	h := newTestHarnessWithSessionDetail(t, "sess-abc", &sessions.SessionDetail{
 		ID:             "sess-abc",
 		Username:       "alice",
 		RemoteAddress:  "1.2.3.4",
@@ -91,7 +91,7 @@ func TestOcservSessionDetailReturnsDetail(t *testing.T) {
 }
 
 func TestOcservSessionDetailReturnsEmptySlicesForNilCollections(t *testing.T) {
-	h := newTestHarnessWithSessionDetail(t, "sess-nil", &ocserv.SessionDetail{
+	h := newTestHarnessWithSessionDetail(t, "sess-nil", &sessions.SessionDetail{
 		ID:       "sess-nil",
 		Username: "bob",
 		Routes:   nil,
@@ -218,17 +218,16 @@ func TestOcservSessionTerminateRejectsNonPOST(t *testing.T) {
 // --- List sessions includes enriched fields ---
 
 func TestOcservSessionsListIncludesEnrichedFields(t *testing.T) {
-	h := newTestHarnessWithSessions(t, []ocserv.Session{
+	h := newTestHarnessWithSessions(t, []sessions.Session{
 		{
-			ID:             "s1",
-			Username:       "carol",
-			RemoteAddress:  "5.6.7.8",
-			VPNAddress:     "10.8.0.5",
-			RxBytes:        512,
-			TxBytes:        1024,
-			UserAgent:      "AnyConnect/4.0",
-			Device:         "phone",
-			ReconnectCount: 1,
+			ID:            "s1",
+			Username:      "carol",
+			RemoteAddress: "5.6.7.8",
+			VPNAddress:    "10.8.0.5",
+			RxBytes:       512,
+			TxBytes:       1024,
+			UserAgent:     "AnyConnect/4.0",
+			Device:        "phone",
 		},
 	})
 	h.createOwner(t, "owner", "owner-pass")
@@ -250,13 +249,12 @@ func TestOcservSessionsListIncludesEnrichedFields(t *testing.T) {
 	assertMapField(t, s, "txBytes", float64(1024))
 	assertMapField(t, s, "userAgent", "AnyConnect/4.0")
 	assertMapField(t, s, "device", "phone")
-	assertMapField(t, s, "reconnectCount", float64(1))
 }
 
 // --- Test harness helpers for ocserv handlers ---
 
 // newTestHarnessWithSessionDetail wires a FakeManager that returns the given detail for the given ID.
-func newTestHarnessWithSessionDetail(t *testing.T, id string, detail *ocserv.SessionDetail) *testHarness {
+func newTestHarnessWithSessionDetail(t *testing.T, id string, detail *sessions.SessionDetail) *testHarness {
 	t.Helper()
 	h := newTestHarness(t)
 	fakeManager := h.fakeManager(t)
@@ -283,7 +281,7 @@ func newTestHarnessWithTerminateOK(t *testing.T) *testHarness {
 }
 
 // newTestHarnessWithSessions wires a FakeManager with the given sessions.
-func newTestHarnessWithSessions(t *testing.T, sessions []ocserv.Session) *testHarness {
+func newTestHarnessWithSessions(t *testing.T, sessions []sessions.Session) *testHarness {
 	t.Helper()
 	h := newTestHarness(t)
 	fakeManager := h.fakeManager(t)
@@ -303,7 +301,7 @@ func TestOcservServerStatusRequiresAuth(t *testing.T) {
 func TestOcservServerStatusSuccess(t *testing.T) {
 	t.Parallel()
 	h := newTestHarness(t)
-	h.ocservFake.ServerStatusResult = &ocserv.ServerStatus{
+	h.ocservFake.ServerStatusResult = &sessions.ServerStatus{
 		Status:         "online",
 		ActiveSessions: 5,
 		ServerPID:      1234,
@@ -327,7 +325,7 @@ func TestOcservConnectedUsersRequiresAuth(t *testing.T) {
 func TestOcservConnectedUsersSuccess(t *testing.T) {
 	t.Parallel()
 	h := newTestHarness(t)
-	h.ocservFake.ConnectedUsersResult = []ocserv.ConnectedUser{
+	h.ocservFake.ConnectedUsersResult = []sessions.ConnectedUser{
 		{ID: "123", Username: "user1", Status: "connected"},
 	}
 	h.createOwner(t, "admin", "password123")
@@ -451,7 +449,7 @@ func TestOcservConnectionDetailNegativeID(t *testing.T) {
 func TestOcservConnectionDetailSuccess(t *testing.T) {
 	t.Parallel()
 	h := newTestHarness(t)
-	h.ocservFake.ConnectionByIDResult[3549163] = &ocserv.UserConnection{
+	h.ocservFake.ConnectionByIDResult[3549163] = &sessions.UserConnection{
 		ID:       "3549163",
 		Username: "maxxie",
 		IPv4:     "10.10.10.208",

@@ -5,8 +5,10 @@ import (
 	"strconv"
 	"time"
 
-	"ocserv_panel/backend/internal/ocserv"
-	"ocserv_panel/backend/internal/ocserv/service"
+	"ocserv_panel/backend/internal/vpn/sessions"
+	"ocserv_panel/backend/internal/vpn/users"
+	"ocserv_panel/backend/internal/vpn/health"
+	"ocserv_panel/backend/internal/vpn/service"
 )
 
 // ocserv API response types
@@ -28,16 +30,22 @@ type ocservServiceStatusResponse struct {
 }
 
 type ocservSessionResponse struct {
-	ID             string `json:"id"`
-	Username       string `json:"username"`
-	RemoteAddress  string `json:"remoteAddress"`
-	ConnectedAt    string `json:"connectedAt,omitempty"`
-	VPNAddress     string `json:"vpnAddress"`
-	RxBytes        int64  `json:"rxBytes"`
-	TxBytes        int64  `json:"txBytes"`
-	UserAgent      string `json:"userAgent"`
-	Device         string `json:"device"`
-	ReconnectCount int    `json:"reconnectCount"`
+	ID            string `json:"id"`
+	FullSession   string `json:"fullSession"`
+	Username      string `json:"username"`
+	RemoteAddress string `json:"remoteAddress"`
+	Location      string `json:"location"`
+	ConnectedAt   string `json:"connectedAt,omitempty"`
+	VPNAddress    string `json:"vpnAddress"`
+	RxBytes       int64  `json:"rxBytes"`
+	TxBytes       int64  `json:"txBytes"`
+	UserAgent     string `json:"userAgent"`
+	Device        string `json:"device"`
+	State         string `json:"state"`
+	Groupname     string `json:"groupname"`
+	Vhost         string `json:"vhost"`
+	SessionIsOpen bool   `json:"sessionIsOpen"`
+	InUse         bool   `json:"inUse"`
 }
 
 type ocservSessionDetailResponse struct {
@@ -56,6 +64,9 @@ type ocservSessionDetailResponse struct {
 	Routes         []string `json:"routes"`
 	DNS            []string `json:"dns"`
 	ReconnectCount int      `json:"reconnectCount"`
+	State          string   `json:"state"`
+	Groupname      string   `json:"groupname"`
+	Vhost          string   `json:"vhost"`
 }
 
 type ocservUserResponse struct {
@@ -98,16 +109,29 @@ type serverStatusResponse struct {
 }
 
 type connectedUserResponse struct {
-	ID           string `json:"id"`
-	Username     string `json:"username"`
-	Vhost        string `json:"vhost"`
-	RemoteIP     string `json:"remoteIp"`
-	VpnIP        string `json:"vpnIp"`
-	Device       string `json:"device"`
-	Since        string `json:"since"`
-	DurationSecs int64  `json:"durationSeconds"`
-	DTLSCipher   string `json:"dtlsCipher"`
-	Status       string `json:"status"`
+	ID            string `json:"id"`
+	Username      string `json:"username"`
+	Groupname     string `json:"groupname"`
+	Vhost         string `json:"vhost"`
+	RemoteIP      string `json:"remoteIp"`
+	Location      string `json:"location"`
+	VpnIP         string `json:"vpnIp"`
+	Device        string `json:"device"`
+	MTU           int    `json:"mtu"`
+	LocalDeviceIP string `json:"localDeviceIp"`
+	PtPIPv4       string `json:"ptpIpv4"`
+	UserAgent     string `json:"userAgent"`
+	RxBytes       int64  `json:"rxBytes"`
+	TxBytes       int64  `json:"txBytes"`
+	Hostname      string `json:"hostname"`
+	Since         string `json:"since"`
+	DurationSecs  int64  `json:"durationSeconds"`
+	ConnectedAt   string `json:"connectedAt,omitempty"`
+	SessionID     string `json:"sessionId"`
+	FullSession   string `json:"fullSession"`
+	TLSCipher     string `json:"tlsCipher"`
+	DTLSCipher    string `json:"dtlsCipher"`
+	Status        string `json:"status"`
 }
 
 type userConnectionResponse struct {
@@ -785,7 +809,7 @@ func (a *App) handleOcservUnbanIP(w http.ResponseWriter, r *http.Request) {
 
 // mapping helpers
 
-func ocservReadinessToResponse(r *ocserv.OcservReadiness) ocservReadinessResponse {
+func ocservReadinessToResponse(r *health.OcservReadiness) ocservReadinessResponse {
 	if r == nil {
 		return ocservReadinessResponse{}
 	}
@@ -801,26 +825,32 @@ func ocservReadinessToResponse(r *ocserv.OcservReadiness) ocservReadinessRespons
 	}
 }
 
-func ocservSessionToResponse(s ocserv.Session) ocservSessionResponse {
+func ocservSessionToResponse(s sessions.Session) ocservSessionResponse {
 	connectedAt := ""
 	if !s.ConnectedAt.IsZero() {
 		connectedAt = s.ConnectedAt.UTC().Format(time.RFC3339)
 	}
 	return ocservSessionResponse{
-		ID:             s.ID,
-		Username:       s.Username,
-		RemoteAddress:  s.RemoteAddress,
-		ConnectedAt:    connectedAt,
-		VPNAddress:     s.VPNAddress,
-		RxBytes:        s.RxBytes,
-		TxBytes:        s.TxBytes,
-		UserAgent:      s.UserAgent,
-		Device:         s.Device,
-		ReconnectCount: s.ReconnectCount,
+		ID:            s.ID,
+		FullSession:   s.FullSession,
+		Username:      s.Username,
+		RemoteAddress: s.RemoteAddress,
+		Location:      s.Location,
+		ConnectedAt:   connectedAt,
+		VPNAddress:    s.VPNAddress,
+		RxBytes:       s.RxBytes,
+		TxBytes:       s.TxBytes,
+		UserAgent:     s.UserAgent,
+		Device:        s.Device,
+		State:         s.State,
+		Groupname:     s.Groupname,
+		Vhost:         s.Vhost,
+		SessionIsOpen: s.SessionIsOpen,
+		InUse:         s.InUse,
 	}
 }
 
-func ocservSessionDetailToResponse(d *ocserv.SessionDetail) ocservSessionDetailResponse {
+func ocservSessionDetailToResponse(d *sessions.SessionDetail) ocservSessionDetailResponse {
 	if d == nil {
 		return ocservSessionDetailResponse{
 			Routes: []string{},
@@ -855,10 +885,13 @@ func ocservSessionDetailToResponse(d *ocserv.SessionDetail) ocservSessionDetailR
 		Routes:         routes,
 		DNS:            dns,
 		ReconnectCount: d.ReconnectCount,
+		State:          d.State,
+		Groupname:      d.Groupname,
+		Vhost:          d.Vhost,
 	}
 }
 
-func ocservUserToResponse(u ocserv.PasswdUser) ocservUserResponse {
+func ocservUserToResponse(u users.PasswdUser) ocservUserResponse {
 	return ocservUserResponse{
 		Username: u.Username,
 		Group:    u.Group,
@@ -892,7 +925,7 @@ func serviceStatusMessage(s service.ServiceStatus) string {
 	}
 }
 
-func serverStatusToResponse(s *ocserv.ServerStatus) serverStatusResponse {
+func serverStatusToResponse(s *sessions.ServerStatus) serverStatusResponse {
 	if s == nil {
 		return serverStatusResponse{}
 	}
@@ -931,22 +964,39 @@ func serverStatusToResponse(s *ocserv.ServerStatus) serverStatusResponse {
 	}
 }
 
-func connectedUserToResponse(u ocserv.ConnectedUser) connectedUserResponse {
+func connectedUserToResponse(u sessions.ConnectedUser) connectedUserResponse {
+	connectedAt := ""
+	if !u.ConnectedAt.IsZero() {
+		connectedAt = u.ConnectedAt.UTC().Format(time.RFC3339)
+	}
 	return connectedUserResponse{
-		ID:           u.ID,
-		Username:     u.Username,
-		Vhost:        u.Vhost,
-		RemoteIP:     u.RemoteIP,
-		VpnIP:        u.VpnIP,
-		Device:       u.Device,
-		Since:        u.Since,
-		DurationSecs: int64(u.Duration.Seconds()),
-		DTLSCipher:   u.DTLSCipher,
-		Status:       u.Status,
+		ID:            u.ID,
+		Username:      u.Username,
+		Groupname:     u.Groupname,
+		Vhost:         u.Vhost,
+		RemoteIP:      u.RemoteIP,
+		Location:      u.Location,
+		VpnIP:         u.VpnIP,
+		Device:        u.Device,
+		MTU:           u.MTU,
+		LocalDeviceIP: u.LocalDeviceIP,
+		PtPIPv4:       u.PtPIPv4,
+		UserAgent:     u.UserAgent,
+		RxBytes:       u.RxBytes,
+		TxBytes:       u.TxBytes,
+		Hostname:      u.Hostname,
+		Since:         u.Since,
+		DurationSecs:  int64(u.Duration.Seconds()),
+		ConnectedAt:   connectedAt,
+		SessionID:     u.SessionID,
+		FullSession:   u.FullSession,
+		TLSCipher:     u.TLSCipher,
+		DTLSCipher:    u.DTLSCipher,
+		Status:        u.Status,
 	}
 }
 
-func userConnectionToResponse(c ocserv.UserConnection) userConnectionResponse {
+func userConnectionToResponse(c sessions.UserConnection) userConnectionResponse {
 	connectedAt := ""
 	if !c.ConnectedAt.IsZero() {
 		connectedAt = c.ConnectedAt.UTC().Format(time.RFC3339)
@@ -990,7 +1040,7 @@ func userConnectionToResponse(c ocserv.UserConnection) userConnectionResponse {
 	}
 }
 
-func connectionEventToResponse(e ocserv.ConnectionEvent) connectionEventResponse {
+func connectionEventToResponse(e sessions.ConnectionEvent) connectionEventResponse {
 	ts := ""
 	if !e.Timestamp.IsZero() {
 		ts = e.Timestamp.UTC().Format(time.RFC3339)
@@ -1004,7 +1054,7 @@ func connectionEventToResponse(e ocserv.ConnectionEvent) connectionEventResponse
 	}
 }
 
-func userRouteToResponse(r ocserv.UserRoute) userRouteResponse {
+func userRouteToResponse(r sessions.UserRoute) userRouteResponse {
 	return userRouteResponse{
 		ID:       r.ID,
 		Username: r.Username,
@@ -1015,7 +1065,7 @@ func userRouteToResponse(r ocserv.UserRoute) userRouteResponse {
 	}
 }
 
-func bannedIPToResponse(b ocserv.BannedIP) bannedIPResponse {
+func bannedIPToResponse(b sessions.BannedIP) bannedIPResponse {
 	return bannedIPResponse{
 		IP:     b.IP,
 		Score:  b.Score,
@@ -1023,7 +1073,7 @@ func bannedIPToResponse(b ocserv.BannedIP) bannedIPResponse {
 	}
 }
 
-func banPointEntryToResponse(p ocserv.BanPointEntry) banPointEntryResponse {
+func banPointEntryToResponse(p sessions.BanPointEntry) banPointEntryResponse {
 	since := ""
 	if !p.Since.IsZero() {
 		since = p.Since.UTC().Format(time.RFC3339)

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"ocserv_panel/backend/internal/app"
-	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
+	"ocserv_panel/backend/internal/vpn/config"
 )
 
 // --- request/response types ---
@@ -333,7 +333,7 @@ func (a *App) writeConfigError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "config file is locked by another operation")
 	case errors.Is(err, app.ErrConfigValidationFailed):
 		writeError(w, http.StatusUnprocessableEntity, "config validation failed")
-	case errors.Is(err, ocservconfig.ErrConfigTooLarge):
+	case errors.Is(err, config.ErrConfigTooLarge):
 		writeError(w, http.StatusBadRequest, "config content exceeds size limit")
 	default:
 		writeError(w, http.StatusInternalServerError, "internal server error")
@@ -341,7 +341,7 @@ func (a *App) writeConfigError(w http.ResponseWriter, err error) {
 }
 
 // toConfigMetadataJSON converts domain metadata to the JSON response type.
-func toConfigMetadataJSON(m ocservconfig.ConfigMetadata) configMetadataJSON {
+func toConfigMetadataJSON(m config.ConfigMetadata) configMetadataJSON {
 	return configMetadataJSON{
 		Path:         m.Path,
 		LastModified: m.LastModified,
@@ -350,7 +350,7 @@ func toConfigMetadataJSON(m ocservconfig.ConfigMetadata) configMetadataJSON {
 }
 
 // toConfigIssuesJSON converts a slice of domain issues to the JSON response type.
-func toConfigIssuesJSON(issues []ocservconfig.ConfigIssue) []configIssueJSON {
+func toConfigIssuesJSON(issues []config.ConfigIssue) []configIssueJSON {
 	result := make([]configIssueJSON, 0, len(issues))
 	for _, issue := range issues {
 		result = append(result, configIssueJSON{

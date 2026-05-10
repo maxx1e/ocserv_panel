@@ -12,8 +12,10 @@ import (
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/config"
-	"ocserv_panel/backend/internal/metrics"
-	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/monitor"
+	"ocserv_panel/backend/internal/vpn/sessions"
+	"ocserv_panel/backend/internal/vpn/users"
+	"ocserv_panel/backend/internal/vpn/health"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
@@ -53,12 +55,12 @@ type App struct {
 	now              func() time.Time
 
 	// Direct dependencies for monitoring/health/log handlers (collapsed thin services).
-	metricStore   metrics.Store
-	metricCatalog *metrics.Catalog
+	metricStore   monitor.Store
+	metricCatalog *monitor.Catalog
 	logFileReader app.LogFileReader
 	cfgFn         func() config.Config
 	adminCounter  app.AdminCounter
-	readiness     *ocserv.ReadinessChecker
+	readiness     *health.ReadinessChecker
 	tsdbPath      string
 	store         *store.Store
 }
@@ -195,14 +197,14 @@ type userSessionSummaryResponse struct {
 func NewAppRouter(
 	authService *app.AuthService,
 	dashboardService *app.DashboardService,
-	metricStore metrics.Store,
-	metricCatalog *metrics.Catalog,
+	metricStore monitor.Store,
+	metricCatalog *monitor.Catalog,
 	settingsService *app.SettingsService,
 	ocservService *app.OcservService,
 	logFileReader app.LogFileReader,
 	cfgFn func() config.Config,
 	adminCounter app.AdminCounter,
-	readiness *ocserv.ReadinessChecker,
+	readiness *health.ReadinessChecker,
 	tsdbPath string,
 	configService *app.ConfigManagementService,
 	adminUserService *app.AdminUserService,
@@ -589,16 +591,16 @@ func (a *App) handleMonitoringOverview(w http.ResponseWriter, r *http.Request) {
 
 	window := queryValueDefault(r, "window", "1h")
 	step := defaultMonitoringStep(window)
-	windowDuration, stepDuration, err := metrics.ValidateWindowAndStep(window, step)
+	windowDuration, stepDuration, err := monitor.ValidateWindowAndStep(window, step)
 	if err != nil {
 		a.writeAppError(w, err)
 		return
 	}
 
 	now := a.now().UTC()
-	series := make([]metrics.Series, 0, len(monitoringOverviewMetrics))
+	series := make([]monitor.Series, 0, len(monitoringOverviewMetrics))
 	for _, name := range monitoringOverviewMetrics {
-		item, err := a.metricStore.QueryRange(r.Context(), metrics.Query{
+		item, err := a.metricStore.QueryRange(r.Context(), monitor.Query{
 			Metric: name,
 			Labels: map[string]string{},
 			Start:  now.Add(-windowDuration),
@@ -633,19 +635,19 @@ func (a *App) handleMonitoringSeries(w http.ResponseWriter, r *http.Request) {
 	window := queryValueDefault(r, "window", "1h")
 	step := queryValueDefault(r, "step", "60s")
 
-	metricName := metrics.MetricName(metric)
-	if err := metrics.ValidateMetric(metricName); err != nil {
+	metricName := monitor.MetricName(metric)
+	if err := monitor.ValidateMetric(metricName); err != nil {
 		a.writeAppError(w, err)
 		return
 	}
-	windowDuration, stepDuration, err := metrics.ValidateWindowAndStep(window, step)
+	windowDuration, stepDuration, err := monitor.ValidateWindowAndStep(window, step)
 	if err != nil {
 		a.writeAppError(w, err)
 		return
 	}
 
 	now := a.now().UTC()
-	result, err := a.metricStore.QueryRange(r.Context(), metrics.Query{
+	result, err := a.metricStore.QueryRange(r.Context(), monitor.Query{
 		Metric: metricName,
 		Labels: map[string]string{},
 		Start:  now.Add(-windowDuration),
@@ -701,11 +703,11 @@ func (a *App) writeAppError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnprocessableEntity, "config file has syntax errors — fix the file manually or restore from backup")
 	case errors.Is(err, app.ErrConfigFileUnreadable):
 		writeError(w, http.StatusServiceUnavailable, "config file is not readable — check file permissions")
-	case errors.Is(err, ocserv.ErrNotConfigured):
+	case errors.Is(err, sessions.ErrNotConfigured):
 		writeError(w, http.StatusServiceUnavailable, "ocserv is not available")
-	case errors.Is(err, ocserv.ErrSessionNotFound):
+	case errors.Is(err, sessions.ErrSessionNotFound):
 		writeError(w, http.StatusNotFound, "session not found")
-	case errors.Is(err, ocserv.ErrPasswordFileMissing):
+	case errors.Is(err, users.ErrPasswordFileMissing):
 		writeError(w, http.StatusServiceUnavailable, "the VPN password file does not exist — check server configuration")
 	case errors.Is(err, app.ErrLogSourceUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "log source is unavailable")
@@ -717,10 +719,10 @@ func (a *App) writeAppError(w http.ResponseWriter, err error) {
 }
 
 func isMetricsValidationError(err error) bool {
-	return errors.Is(err, metrics.ErrInvalidMetric) ||
-		errors.Is(err, metrics.ErrInvalidWindow) ||
-		errors.Is(err, metrics.ErrInvalidStep) ||
-		errors.Is(err, metrics.ErrInvalidRange)
+	return errors.Is(err, monitor.ErrInvalidMetric) ||
+		errors.Is(err, monitor.ErrInvalidWindow) ||
+		errors.Is(err, monitor.ErrInvalidStep) ||
+		errors.Is(err, monitor.ErrInvalidRange)
 }
 
 func queryValueDefault(r *http.Request, key string, fallback string) string {

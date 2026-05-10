@@ -6,8 +6,7 @@ import (
 	"os"
 	"runtime"
 
-	"ocserv_panel/backend/internal/metrics"
-	"ocserv_panel/backend/internal/monitoring"
+	"ocserv_panel/backend/internal/monitor"
 	"time"
 )
 
@@ -15,8 +14,8 @@ import (
 type monitoringOverviewResponse struct {
 	Window      string                     `json:"window"`
 	GeneratedAt time.Time                  `json:"generatedAt"`
-	Catalog     []metrics.MetricDefinition `json:"catalog"`
-	Series      []metrics.Series           `json:"series"`
+	Catalog     []monitor.MetricDefinition `json:"catalog"`
+	Series      []monitor.Series           `json:"series"`
 }
 
 // systemInfoResponse is the response for GET /api/monitoring/system-info.
@@ -34,17 +33,17 @@ func (a *App) buildSystemInfo(ctx context.Context) systemInfoResponse {
 	}
 
 	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
-		if totalKB, _, parseErr := monitoring.ParseMeminfo(string(data)); parseErr == nil && totalKB > 0 {
+		if totalKB, _, parseErr := monitor.ParseMeminfo(string(data)); parseErr == nil && totalKB > 0 {
 			gb := float64(totalKB) / (1024 * 1024)
 			info.MemoryTotalGB = math.Round(gb*10) / 10
 		}
 	}
 
-	if lbls, err := a.metricStore.QueryLatestLabels(ctx, metrics.MetricNetInterfaceRXBytes); err == nil {
+	if lbls, err := a.metricStore.QueryLatestLabels(ctx, monitor.MetricNetInterfaceRXBytes); err == nil {
 		info.NetInterface = lbls["interface"]
 	}
 
-	if lbls, err := a.metricStore.QueryLatestLabels(ctx, metrics.MetricVPNInterfaceRXBytes); err == nil {
+	if lbls, err := a.metricStore.QueryLatestLabels(ctx, monitor.MetricVPNInterfaceRXBytes); err == nil {
 		if iface := lbls["interface"]; iface != "" {
 			info.VPNInterfaces = []string{iface}
 		}
@@ -54,8 +53,8 @@ func (a *App) buildSystemInfo(ctx context.Context) systemInfoResponse {
 }
 
 // catalogList returns metric definitions for the monitoring catalog.
-func (a *App) catalogList() []metrics.MetricDefinition {
-	definitions := make([]metrics.MetricDefinition, 0, len(monitoringCatalogMetrics))
+func (a *App) catalogList() []monitor.MetricDefinition {
+	definitions := make([]monitor.MetricDefinition, 0, len(monitoringCatalogMetrics))
 	for _, name := range monitoringCatalogMetrics {
 		definition, ok := a.metricCatalog.Find(name)
 		if !ok {
@@ -77,30 +76,30 @@ func defaultMonitoringStep(window string) string {
 	}
 }
 
-var monitoringCatalogMetrics = []metrics.MetricName{
-	metrics.MetricHostCPUUtilization,
-	metrics.MetricHostMemoryUtilization,
-	metrics.MetricNetInterfaceRXBytes,
-	metrics.MetricNetInterfaceTXBytes,
-	metrics.MetricVPNInterfaceRXBytes,
-	metrics.MetricVPNInterfaceTXBytes,
-	metrics.MetricUserRXBytes,
-	metrics.MetricUserTXBytes,
-	metrics.MetricActiveSessions,
-	metrics.MetricConnectionRate,
-	metrics.MetricConcurrentSessions,
-	metrics.MetricConcurrentSessionsLimit,
+var monitoringCatalogMetrics = []monitor.MetricName{
+	monitor.MetricHostCPUUtilization,
+	monitor.MetricHostMemoryUtilization,
+	monitor.MetricNetInterfaceRXBytes,
+	monitor.MetricNetInterfaceTXBytes,
+	monitor.MetricVPNInterfaceRXBytes,
+	monitor.MetricVPNInterfaceTXBytes,
+	monitor.MetricUserRXBytes,
+	monitor.MetricUserTXBytes,
+	monitor.MetricActiveSessions,
+	monitor.MetricConnectionRate,
+	monitor.MetricConcurrentSessions,
+	monitor.MetricConcurrentSessionsLimit,
 }
 
-var monitoringOverviewMetrics = []metrics.MetricName{
-	metrics.MetricHostCPUUtilization,
-	metrics.MetricHostMemoryUtilization,
-	metrics.MetricNetInterfaceRXBytes,
-	metrics.MetricNetInterfaceTXBytes,
-	metrics.MetricVPNInterfaceRXBytes,
-	metrics.MetricVPNInterfaceTXBytes,
-	metrics.MetricActiveSessions,
-	metrics.MetricConnectionRate,
-	metrics.MetricConcurrentSessions,
-	metrics.MetricConcurrentSessionsLimit,
+var monitoringOverviewMetrics = []monitor.MetricName{
+	monitor.MetricHostCPUUtilization,
+	monitor.MetricHostMemoryUtilization,
+	monitor.MetricNetInterfaceRXBytes,
+	monitor.MetricNetInterfaceTXBytes,
+	monitor.MetricVPNInterfaceRXBytes,
+	monitor.MetricVPNInterfaceTXBytes,
+	monitor.MetricActiveSessions,
+	monitor.MetricConnectionRate,
+	monitor.MetricConcurrentSessions,
+	monitor.MetricConcurrentSessionsLimit,
 }

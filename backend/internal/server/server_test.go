@@ -20,11 +20,13 @@ import (
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/db"
-	"ocserv_panel/backend/internal/metrics"
-	"ocserv_panel/backend/internal/ocserv"
-	"ocserv_panel/backend/internal/ocserv/cmd"
-	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
-	"ocserv_panel/backend/internal/ocserv/service"
+	"ocserv_panel/backend/internal/monitor"
+	"ocserv_panel/backend/internal/vpn/exec"
+	"ocserv_panel/backend/internal/vpn/health"
+	"ocserv_panel/backend/internal/vpn/sessions"
+	"ocserv_panel/backend/internal/vpn/service"
+	vpnconfig "ocserv_panel/backend/internal/vpn/config"
+	"ocserv_panel/backend/internal/vpn/users"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
@@ -219,7 +221,7 @@ func TestAuthMeUnauthenticatedDoesNotRecordMonitoringAudit(t *testing.T) {
 	rec := serveAPI(t, h.router, http.MethodGet, "/api/auth/me", nil, "")
 
 	assertStatus(t, rec, http.StatusUnauthorized)
-	assertNoAuditActionPrefix(t, h.store, "monitoring.")
+	assertNoAuditActionPrefix(t, h.store, "monitor.")
 }
 
 func TestLogoutClearsCookieWhenRevocationFails(t *testing.T) {
@@ -309,7 +311,7 @@ func TestMonitoringCatalogReturnsDefaultMetrics(t *testing.T) {
 	assertStatus(t, rec, http.StatusOK)
 	var body []map[string]any
 	decodeJSON(t, rec, &body)
-	assertCatalogContainsMetric(t, body, string(metrics.MetricHostCPUUtilization))
+	assertCatalogContainsMetric(t, body, string(monitor.MetricHostCPUUtilization))
 	assertNoMapField(t, body[0], "Name")
 	assertMapHasFields(t, body[0], "name", "description", "state")
 }
@@ -362,7 +364,7 @@ func TestMonitoringSeriesReturnsRequestedMetric(t *testing.T) {
 	assertStatus(t, rec, http.StatusOK)
 	var body map[string]any
 	decodeJSON(t, rec, &body)
-	assertMapField(t, body, "metric", string(metrics.MetricHostCPUUtilization))
+	assertMapField(t, body, "metric", string(monitor.MetricHostCPUUtilization))
 	assertNoMapField(t, body, "Metric")
 	if _, ok := body["points"].([]any); !ok {
 		t.Fatalf("expected points array in %v", body)
@@ -595,7 +597,7 @@ type testHarness struct {
 	database   *sql.DB
 	store      *store.Store
 	router     http.Handler
-	ocservFake *ocserv.FakeManager
+	ocservFake *sessions.FakeManager
 }
 
 func newTestHarness(t *testing.T) *testHarness {
@@ -624,32 +626,32 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	recorder := audit.NewSQLiteRecorder(s)
 	authService := app.NewAuthService(s, recorder)
 	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
-	memStore := metrics.NewMemoryStore()
-	catalog := metrics.DefaultCatalog()
+	memStore := monitor.NewMemoryStore()
+	catalog := monitor.DefaultCatalog()
 	cfg := config.Defaults()
 	settingsService := app.NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
 
 	testCfg := config.Defaults()
 	testCfgFn := func() config.Config { return testCfg }
-	fakeRunner2 := cmd.NewFakeCommandRunner()
+	fakeRunner2 := exec.NewFakeCommandRunner()
 	fakeSvcMgr2 := service.NewFakeServiceManager(service.ServiceInactive)
-	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
+	testChecker := health.NewReadinessChecker(func() health.ReadinessConfig { return health.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
 
 	// Config management service for tests
 	confDir := t.TempDir()
 	confPath := filepath.Join(confDir, "ocserv.conf")
 	os.WriteFile(confPath, []byte("tcp-port = 443\n"), 0640)
-	configFiles := ocservconfig.NewConfigFileManager(confPath, 10)
-	configValidator := ocservconfig.NewConfigValidator(confPath)
-	configReloader := ocservconfig.NewConfigReloader(fakeRunner2, "occtl")
-	networkInspector := ocserv.NewNetworkInspectorWithProcDir(fakeRunner2, confDir)
+	configFiles := vpnconfig.NewConfigFileManager(confPath, 10)
+	configValidator := vpnconfig.NewConfigValidator(confPath)
+	configReloader := vpnconfig.NewConfigReloader(fakeRunner2, "occtl")
+	networkInspector := health.NewNetworkInspectorWithProcDir(fakeRunner2, confDir)
 	configMgmtSvc := app.NewConfigManagementService(
 		configFiles,
 		configValidator,
 		configReloader,
 		networkInspector,
-		ocservconfig.NewRestartDetector(),
+		vpnconfig.NewRestartDetector(),
 		recorder,
 		rbac.NewDefaultAuthorizer(),
 	)
@@ -686,16 +688,16 @@ func newTestOcservService(s *store.Store, recorder audit.SQLiteRecorder) *app.Oc
 	return svc
 }
 
-func newTestOcservServiceWithFake(s *store.Store, recorder audit.SQLiteRecorder) (*app.OcservService, *ocserv.FakeManager) {
-	runner := cmd.NewFakeCommandRunner()
+func newTestOcservServiceWithFake(s *store.Store, recorder audit.SQLiteRecorder) (*app.OcservService, *sessions.FakeManager) {
+	runner := exec.NewFakeCommandRunner()
 	fakeSvc := service.NewFakeServiceManager(service.ServiceInactive)
-	checker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, runner, fakeSvc)
-	validator := ocservconfig.NewConfigValidator("/nonexistent/ocserv.conf")
-	fakeManager := ocserv.NewFakeManager()
+	checker := health.NewReadinessChecker(func() health.ReadinessConfig { return health.ReadinessConfig{} }, runner, fakeSvc)
+	validator := vpnconfig.NewConfigValidator("/nonexistent/ocserv.conf")
+	fakeManager := sessions.NewFakeManager()
 	return app.NewOcservService(
 		checker,
 		fakeManager,
-		ocserv.NewFakePasswdManager(),
+		users.NewFakePasswdManager(),
 		fakeSvc,
 		validator,
 		recorder,
@@ -703,7 +705,7 @@ func newTestOcservServiceWithFake(s *store.Store, recorder audit.SQLiteRecorder)
 	), fakeManager
 }
 
-func (h *testHarness) fakeManager(t *testing.T) *ocserv.FakeManager {
+func (h *testHarness) fakeManager(t *testing.T) *sessions.FakeManager {
 	t.Helper()
 	if h.ocservFake == nil {
 		t.Fatal("testHarness.ocservFake is nil — use newTestHarness to get one")
@@ -992,7 +994,7 @@ func TestWriteAppErrorMapsErrNotConfiguredTo503(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	app := &App{}
-	app.writeAppError(rec, ocserv.ErrNotConfigured)
+	app.writeAppError(rec, sessions.ErrNotConfigured)
 
 	assertStatus(t, rec, http.StatusServiceUnavailable)
 	assertJSONField(t, rec, "error", "ocserv is not available")
@@ -1002,7 +1004,7 @@ func TestWriteAppErrorMapsWrappedErrNotConfiguredTo503(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	wrapped := fmt.Errorf("list ocserv sessions: %w", ocserv.ErrNotConfigured)
+	wrapped := fmt.Errorf("list ocserv sessions: %w", sessions.ErrNotConfigured)
 	a := &App{}
 	a.writeAppError(rec, wrapped)
 
@@ -1107,30 +1109,30 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 	recorder := audit.NewSQLiteRecorder(s)
 	authService := app.NewAuthService(s, recorder)
 	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
-	memStore := metrics.NewMemoryStore()
-	catalog := metrics.DefaultCatalog()
+	memStore := monitor.NewMemoryStore()
+	catalog := monitor.DefaultCatalog()
 	settingsService := app.NewSettingsService(&initialCfg, cfgPath, s, recorder, rbac.NewDefaultAuthorizer())
 	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
 
 	tempCfgFn := func() config.Config { return initialCfg }
-	fakeRunner2 := cmd.NewFakeCommandRunner()
+	fakeRunner2 := exec.NewFakeCommandRunner()
 	fakeSvcMgr2 := service.NewFakeServiceManager(service.ServiceInactive)
-	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
+	testChecker := health.NewReadinessChecker(func() health.ReadinessConfig { return health.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
 
 	// Config management service for temp-config harness
 	confDir2 := t.TempDir()
 	confPath2 := filepath.Join(confDir2, "ocserv.conf")
 	os.WriteFile(confPath2, []byte("tcp-port = 443\n"), 0640)
-	configFiles2 := ocservconfig.NewConfigFileManager(confPath2, 10)
-	configValidator2 := ocservconfig.NewConfigValidator(confPath2)
-	configReloader2 := ocservconfig.NewConfigReloader(fakeRunner2, "occtl")
-	networkInspector2 := ocserv.NewNetworkInspectorWithProcDir(fakeRunner2, confDir2)
+	configFiles2 := vpnconfig.NewConfigFileManager(confPath2, 10)
+	configValidator2 := vpnconfig.NewConfigValidator(confPath2)
+	configReloader2 := vpnconfig.NewConfigReloader(fakeRunner2, "occtl")
+	networkInspector2 := health.NewNetworkInspectorWithProcDir(fakeRunner2, confDir2)
 	configMgmtSvc2 := app.NewConfigManagementService(
 		configFiles2,
 		configValidator2,
 		configReloader2,
 		networkInspector2,
-		ocservconfig.NewRestartDetector(),
+		vpnconfig.NewRestartDetector(),
 		recorder,
 		rbac.NewDefaultAuthorizer(),
 	)
