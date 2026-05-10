@@ -80,3 +80,14 @@ export function getMonitoringOverview(window: MonitoringWindow): Promise<Monitor
   const query = new URLSearchParams({ window });
   return apiFetch<MonitoringOverview>(`/api/monitoring/overview?${query.toString()}`);
 }
+
+export type SystemInfo = {
+  cpuCores: number;
+  memoryTotalGB: number;
+  netInterface: string;
+  vpnInterfaces: string[];
+};
+
+export function getSystemInfo(): Promise<SystemInfo> {
+  return apiFetch<SystemInfo>('/api/monitoring/system-info');
+}

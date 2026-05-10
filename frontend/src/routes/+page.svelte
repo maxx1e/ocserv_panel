@@ -14,13 +14,15 @@
     getMonitoringOverview,
     getSetupStatus,
     getSystemHealth,
+    getSystemInfo,
     principalFromAuth,
     type ActiveUserSessionsResult,
     type DashboardSummary,
     type MonitoringOverview,
     type MonitoringWindow,
     type Principal,
-    type SystemHealth
+    type SystemHealth,
+    type SystemInfo
   } from '$lib/api';
 
   const MONITORING_WINDOWS: MonitoringWindow[] = ['15m', '1h', '6h', '24h'];
@@ -45,6 +47,7 @@
   let healthRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
   let activeUserSessions = $state<ActiveUserSessionsResult | null>(null);
+  let systemInfo = $state<SystemInfo | null>(null);
 
   const STORAGE_TOOLTIPS: Record<string, Record<string, { title: string; description: string; action: string }>> = {
     sqlite: {
@@ -128,6 +131,7 @@
 
       void loadActiveSessions();
       void reloadMonitoring(monitoringWindow);
+      void loadSystemInfo();
     } catch (caught) {
       error = caught instanceof Error ? caught.message : 'Unable to load dashboard state.';
       principal = null;
@@ -187,6 +191,14 @@
       activeUserSessions = null;
     }
   }
+
+  async function loadSystemInfo() {
+    try {
+      systemInfo = await getSystemInfo();
+    } catch {
+      // Non-fatal — cards degrade gracefully without subtitle
+    }
+  }
 </script>
 
 {#if loading}
@@ -239,6 +251,7 @@
     {healthCheckedAt}
     {healthLoading}
     {health}
+    {systemInfo}
   />
 
   <DashboardMetrics
@@ -248,6 +261,7 @@
     {monitoringWindow}
     onWindowChange={handleMonitoringWindowChange}
     onRefresh={() => reloadMonitoring()}
+    {systemInfo}
   />
 
 {:else}
