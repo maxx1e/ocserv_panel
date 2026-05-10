@@ -128,6 +128,64 @@ func resolveInterfaceName(cfg vpnDiscoveryConfig, baseName string) string {
 	return ""
 }
 
+// resolveAllInterfaceNames returns every entry in sysfs that matches baseName
+// exactly or starts with baseName (e.g., baseName="vpns" -> "vpns0", "vpns1").
+func resolveAllInterfaceNames(cfg vpnDiscoveryConfig, baseName string) []string {
+	entries, err := cfg.readDir(cfg.sysNetPath)
+	if err != nil {
+		return nil
+	}
+	var result []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == baseName || (strings.HasPrefix(name, baseName) && len(name) > len(baseName)) {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+// DiscoverAllVPNInterfaces returns all active VPN interface names found via
+// ocserv config (all numbered instances of the device directive) or sysfs scan.
+// Returns nil slice when none are found, never returns an error for missing config.
+func DiscoverAllVPNInterfaces(opts ...VPNDiscoveryOption) ([]string, error) {
+	cfg := vpnDiscoveryConfig{
+		reader:     OSReader{},
+		configPath: "/etc/ocserv/ocserv.conf",
+		sysNetPath: "/sys/class/net",
+		readDir:    os.ReadDir,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	// Strategy 1: ocserv config device directive -> resolve all numbered instances.
+	if baseName, err := discoverFromOcservConfig(cfg); err == nil && baseName != "" {
+		if all := resolveAllInterfaceNames(cfg, baseName); len(all) > 0 {
+			return all, nil
+		}
+	}
+
+	// Strategy 2: sysfs scan — return all matching prefix entries.
+	entries, err := cfg.readDir(cfg.sysNetPath)
+	if err != nil {
+		return nil, fmt.Errorf("read network interfaces: %w", err)
+	}
+
+	vpnPrefixes := []string{"vpns", "tun", "tap", "wg"}
+	var found []string
+	for _, entry := range entries {
+		name := entry.Name()
+		for _, prefix := range vpnPrefixes {
+			if strings.HasPrefix(name, prefix) {
+				found = append(found, name)
+				break
+			}
+		}
+	}
+	return found, nil
+}
+
 // discoverFromSysFS scans the given directory for network interfaces that match
 // typical VPN interface name prefixes. If multiple VPN interfaces are found,
 // "tun0" is preferred; otherwise the first match is returned.

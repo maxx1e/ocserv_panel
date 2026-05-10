@@ -195,3 +195,89 @@ func TestDiscoverVPNInterfaceConfigDeviceBaseNameResolvesToNumbered(t *testing.T
 		t.Fatalf("source = %q, want %q", source, "ocserv-config")
 	}
 }
+
+func TestDiscoverAllVPNInterfacesFromSysFS(t *testing.T) {
+	t.Parallel()
+
+	ifaces, err := DiscoverAllVPNInterfaces(
+		WithFileReader(&fakeFileReaderForDiscovery{files: map[string]string{}}),
+		WithReadDirFunc(func(dirname string) ([]os.DirEntry, error) {
+			return []os.DirEntry{
+				fakeDirEntry{name: "eth0"},
+				fakeDirEntry{name: "vpns0"},
+				fakeDirEntry{name: "vpns1"},
+				fakeDirEntry{name: "lo"},
+			}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("DiscoverAllVPNInterfaces: %v", err)
+	}
+	if len(ifaces) != 2 {
+		t.Fatalf("ifaces = %v, want [vpns0, vpns1]", ifaces)
+	}
+	if ifaces[0] != "vpns0" || ifaces[1] != "vpns1" {
+		t.Fatalf("ifaces = %v, want [vpns0, vpns1]", ifaces)
+	}
+}
+
+func TestDiscoverAllVPNInterfacesFromOcservConfig(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{
+		"/etc/ocserv/ocserv.conf": "device = vpns\n",
+	}
+	ifaces, err := DiscoverAllVPNInterfaces(
+		WithFileReader(&fakeFileReaderForDiscovery{files: files}),
+		WithReadDirFunc(func(dirname string) ([]os.DirEntry, error) {
+			return []os.DirEntry{
+				fakeDirEntry{name: "vpns0"},
+				fakeDirEntry{name: "vpns1"},
+				fakeDirEntry{name: "eth0"},
+			}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("DiscoverAllVPNInterfaces: %v", err)
+	}
+	if len(ifaces) != 2 {
+		t.Fatalf("ifaces = %v, want [vpns0, vpns1]", ifaces)
+	}
+}
+
+func TestDiscoverAllVPNInterfacesEmpty(t *testing.T) {
+	t.Parallel()
+
+	ifaces, err := DiscoverAllVPNInterfaces(
+		WithFileReader(&fakeFileReaderForDiscovery{files: map[string]string{}}),
+		WithReadDirFunc(func(dirname string) ([]os.DirEntry, error) {
+			return []os.DirEntry{fakeDirEntry{name: "eth0"}, fakeDirEntry{name: "lo"}}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("DiscoverAllVPNInterfaces: %v", err)
+	}
+	if len(ifaces) != 0 {
+		t.Fatalf("ifaces = %v, want empty", ifaces)
+	}
+}
+
+func TestResolveAllInterfaceNames(t *testing.T) {
+	t.Parallel()
+
+	cfg := vpnDiscoveryConfig{
+		sysNetPath: "/sys/class/net",
+		readDir: func(string) ([]os.DirEntry, error) {
+			return []os.DirEntry{
+				fakeDirEntry{name: "vpns0"},
+				fakeDirEntry{name: "vpns1"},
+				fakeDirEntry{name: "vpns2"},
+				fakeDirEntry{name: "eth0"},
+			}, nil
+		},
+	}
+	got := resolveAllInterfaceNames(cfg, "vpns")
+	if len(got) != 3 {
+		t.Fatalf("resolveAllInterfaceNames = %v, want [vpns0, vpns1, vpns2]", got)
+	}
+}
