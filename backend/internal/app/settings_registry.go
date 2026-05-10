@@ -52,7 +52,7 @@ func AllSettingDefs() []SettingDef {
 		{Key: "general.app_name", Label: "Application Name", Section: "general", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "ocserv Panel", SortOrder: 1},
 		{Key: "general.timezone", Label: "Timezone", Section: "general", Type: SettingTypeSelect, Source: SettingSourceConfig, RequiresRestart: true, Default: "UTC", Options: []string{"UTC", "US/Eastern", "US/Central", "US/Mountain", "US/Pacific", "Europe/London", "Europe/Berlin", "Europe/Paris", "Asia/Tokyo", "Asia/Shanghai"}, SortOrder: 2},
 		{Key: "general.theme", Label: "Theme", Section: "general", Type: SettingTypeSelect, Source: SettingSourceDatabase, RequiresRestart: false, Default: "system", Options: []string{"system", "light", "dark"}, SortOrder: 3},
-		{Key: "general.language", Label: "Language", Section: "general", Type: SettingTypeSelect, Source: SettingSourceDatabase, RequiresRestart: false, Default: "en", Options: []string{"en"}, SortOrder: 4},
+		{Key: "general.language", Label: "Language", Section: "general", Type: SettingTypeReadonly, Source: SettingSourceDatabase, RequiresRestart: false, Default: "English (en)", SortOrder: 4},
 
 		// Installation
 		{Key: "installation.config_path", Label: "Config Path", Section: "installation", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "/etc/ocserv-panel/config.toml", SortOrder: 1},
@@ -121,8 +121,8 @@ func AllSettingDefs() []SettingDef {
 		{Key: "logs.audit_retention_days", Label: "Audit Retention (days)", Section: "logs", Type: SettingTypeNumber, Source: SettingSourceDatabase, RequiresRestart: false, Default: "90", SortOrder: 4},
 
 		// Monitoring
-		{Key: "monitoring.health_endpoint", Label: "Health Check Endpoint", Section: "monitoring", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "true", SortOrder: 1},
-		{Key: "monitoring.metrics_endpoint", Label: "Metrics Endpoint", Section: "monitoring", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "false", SortOrder: 2},
+		{Key: "monitoring.health_endpoint", Label: "Health Check Endpoint", Section: "monitoring", Type: SettingTypeReadonly, Source: SettingSourceConfig, RequiresRestart: false, Default: "/api/health", SortOrder: 1},
+		{Key: "monitoring.metrics_endpoint", Label: "Metrics Endpoint", Section: "monitoring", Type: SettingTypeReadonly, Source: SettingSourceConfig, RequiresRestart: false, Default: "Not implemented", SortOrder: 2},
 		{Key: "monitoring.dashboard_refresh_interval", Label: "Dashboard Refresh Interval (s)", Section: "monitoring", Type: SettingTypeNumber, Source: SettingSourceConfig, RequiresRestart: true, Default: "15", Validation: "min:5", SortOrder: 3},
 		{Key: "monitoring.log_file_read_enabled", Label: "Enable Log File Reading", Section: "monitoring", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: false, Default: "true", SortOrder: 4},
 		{Key: "monitoring.network_interface", Label: "Network Interface", Section: "monitoring", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "", SortOrder: 5},

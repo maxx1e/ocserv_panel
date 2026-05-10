@@ -13,25 +13,29 @@
     setting: SettingDef;
     onUpdate: (key: string, value: string) => Promise<SettingDef>;
     savingKey: string | null;
+    configHealthy?: boolean;
   };
 
-  let { setting, onUpdate, savingKey }: Props = $props();
+  let { setting, onUpdate, savingKey, configHealthy = true }: Props = $props();
+
+  // Config-source settings are disabled when config file has issues
+  const disabled = $derived(!configHealthy && setting.source === 'config');
 </script>
 
 {#if setting.type === 'toggle'}
-  <SettingToggle {setting} {onUpdate} {savingKey} />
+  <SettingToggle {setting} {onUpdate} {savingKey} {disabled} />
 {:else if setting.type === 'select'}
-  <SettingSelect {setting} {onUpdate} {savingKey} />
+  <SettingSelect {setting} {onUpdate} {savingKey} {disabled} />
 {:else if setting.type === 'text'}
-  <SettingText {setting} {onUpdate} {savingKey} />
+  <SettingText {setting} {onUpdate} {savingKey} {disabled} />
 {:else if setting.type === 'number'}
-  <SettingNumber {setting} {onUpdate} {savingKey} />
+  <SettingNumber {setting} {onUpdate} {savingKey} {disabled} />
 {:else if setting.type === 'password'}
-  <SettingPassword {setting} {onUpdate} {savingKey} />
+  <SettingPassword {setting} {onUpdate} {savingKey} {disabled} />
 {:else if setting.type === 'multi-checkbox'}
-  <SettingMultiCheckbox {setting} {onUpdate} {savingKey} />
+  <SettingMultiCheckbox {setting} {onUpdate} {savingKey} {disabled} />
 {:else if setting.type === 'readonly'}
   <SettingReadonly {setting} />
 {:else if setting.type === 'button'}
-  <SettingButton {setting} {onUpdate} {savingKey} />
+  <SettingButton {setting} {onUpdate} {savingKey} {disabled} />
 {/if}

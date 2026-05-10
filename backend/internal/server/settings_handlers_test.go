@@ -106,7 +106,7 @@ func TestSettingsUpdateRejectsUnknownKey(t *testing.T) {
 	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/nonexistent.key", map[string]string{"value": "test"}, cookie)
 
 	assertStatus(t, rec, http.StatusBadRequest)
-	assertJSONField(t, rec, "error", "invalid request")
+	assertJSONField(t, rec, "error", "invalid input")
 }
 
 func TestSettingsUpdateRejectsInvalidToggle(t *testing.T) {
@@ -117,7 +117,7 @@ func TestSettingsUpdateRejectsInvalidToggle(t *testing.T) {
 	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/service.restart_on_failure", map[string]string{"value": "yes"}, cookie)
 
 	assertStatus(t, rec, http.StatusBadRequest)
-	assertJSONField(t, rec, "error", "invalid request")
+	assertJSONField(t, rec, "error", "invalid input: toggle must be true or false")
 }
 
 func TestRestartStatusRequiresAuth(t *testing.T) {

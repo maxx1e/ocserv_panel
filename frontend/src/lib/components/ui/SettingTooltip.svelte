@@ -24,13 +24,14 @@
 </script>
 
 {#if description}
-  <span class="relative inline-flex items-center ml-1" role="img" aria-label="More information" onmouseenter={handleMouseEnter} onmouseleave={handleMouseLeave}>
+  <span class="relative inline-flex items-center ml-1" role="button" tabindex="-1" onmouseenter={handleMouseEnter} onmouseleave={handleMouseLeave}>
     <svg
       class="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 transition-colors cursor-help"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
       stroke-width="2"
+      aria-hidden="true"
     >
       <circle cx="12" cy="12" r="10" />
       <path d="M12 16v-4" />

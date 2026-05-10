@@ -605,7 +605,7 @@ func (a *App) authenticate(w http.ResponseWriter, r *http.Request) (auth.Princip
 func (a *App) writeAppError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, app.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, "invalid request")
+		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, app.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not found")
 	case errors.Is(err, app.ErrSetupAlreadyComplete):

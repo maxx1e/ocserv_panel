@@ -7,17 +7,21 @@
     setting: SettingDef;
     onUpdate: (key: string, value: string) => Promise<SettingDef>;
     savingKey: string | null;
+    disabled?: boolean;
   };
 
-  let { setting, onUpdate, savingKey }: Props = $props();
+  let { setting, onUpdate, savingKey, disabled = false }: Props = $props();
 
-  let editValue = $state(setting.value);
+  let editValue = $state('');
   let editing = $state(false);
   let error = $state('');
   let savedPending = $state(false);
+  let savedSuccess = $state(false);
+  let successTimer: ReturnType<typeof setTimeout> | null = null;
   const isSaving = $derived(savingKey === setting.key);
 
   function startEdit() {
+    if (disabled) return;
     editValue = setting.value;
     editing = true;
     error = '';
@@ -25,11 +29,16 @@
 
   async function save() {
     savedPending = false;
+    savedSuccess = false;
     error = '';
     try {
       const result = await onUpdate(setting.key, editValue);
       if (result.requires_restart) {
         savedPending = true;
+      } else {
+        savedSuccess = true;
+        if (successTimer) clearTimeout(successTimer);
+        successTimer = setTimeout(() => { savedSuccess = false; }, 2000);
       }
       editing = false;
     } catch (e) {
@@ -49,7 +58,7 @@
   }
 </script>
 
-<SettingRow label={setting.label} description={settingDescriptions[setting.key]} requiresRestart={setting.requires_restart} isSaving={isSaving} {savedPending}>
+<SettingRow label={setting.label} description={settingDescriptions[setting.key]} requiresRestart={setting.requires_restart} isSaving={isSaving} {savedPending} {savedSuccess}>
   {#if editing}
     <input
       type="text"
@@ -69,11 +78,12 @@
   {:else}
     <span class="text-sm text-slate-600">{setting.value || '—'}</span>
     <button
-      class="px-3 py-1.5 text-sm font-medium text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+      class="px-3 py-1.5 text-sm font-medium text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       onclick={startEdit}
+      {disabled}
     >Edit</button>
   {/if}
   {#if error}
-    <span class="text-sm text-red-600">{error}</span>
+    <span class="text-sm text-red-600 max-w-md break-words">{error}</span>
   {/if}
 </SettingRow>

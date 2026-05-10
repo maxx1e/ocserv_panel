@@ -7,14 +7,15 @@
     requiresRestart?: boolean;
     isSaving?: boolean;
     savedPending?: boolean;
+    savedSuccess?: boolean;
     children: import('svelte').Snippet;
   };
 
-  let { label, description, requiresRestart = false, isSaving = false, savedPending = false, children }: Props = $props();
+  let { label, description, requiresRestart = false, isSaving = false, savedPending = false, savedSuccess = false, children }: Props = $props();
 </script>
 
-<div class="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-1 md:gap-4 py-3 border-b border-slate-100 last:border-0 items-center">
-  <div class="flex items-center justify-end md:text-right">
+<div class="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-1 md:gap-4 py-3 border-b border-slate-100 last:border-0 items-center">
+  <div class="flex items-center">
     <span class="font-medium text-slate-700 text-sm">{label}</span>
     <SettingTooltip {description} />
     {#if requiresRestart}
@@ -24,12 +25,15 @@
       >&#x21BB;</span>
     {/if}
     {#if isSaving}
-      <span class="text-xs text-slate-400 ml-2">Saving…</span>
+      <span class="text-xs text-slate-400 ml-2">Saving...</span>
     {/if}
   </div>
   <div class="flex flex-col gap-1" aria-live="polite">
     <div class="flex items-center gap-2">
       {@render children()}
+      {#if savedSuccess}
+        <span class="text-xs font-medium text-green-600 transition-opacity duration-300">Saved</span>
+      {/if}
     </div>
     {#if savedPending}
       <span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700 border border-amber-200 w-fit">

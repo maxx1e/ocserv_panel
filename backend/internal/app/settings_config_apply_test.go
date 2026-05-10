@@ -102,8 +102,6 @@ func TestConfigValueForKeyAllConfigSourceKeys(t *testing.T) {
 		{"database.max_open_conns", "10"},
 		{"database.max_idle_conns", "3"},
 		{"database.conn_max_lifetime", "600"},
-		{"monitoring.health_endpoint", "false"},
-		{"monitoring.metrics_endpoint", "true"},
 		{"monitoring.dashboard_refresh_interval", "30"},
 	}
 	for _, tc := range keys {
@@ -166,6 +164,10 @@ func TestComputePendingChangesDetectsDiff(t *testing.T) {
 func TestConfigValueForKeyCoversAllRegistryConfigSourceKeys(t *testing.T) {
 	for _, def := range AllSettingDefs() {
 		if def.Source != SettingSourceConfig {
+			continue
+		}
+		// Readonly settings are informational only and cannot be applied via the settings UI.
+		if def.Type == SettingTypeReadonly {
 			continue
 		}
 		t.Run(def.Key, func(t *testing.T) {

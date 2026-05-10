@@ -70,13 +70,13 @@ export const settingDescriptions: Record<string, string> = {
   'logs.audit_retention_days': 'Number of days to keep audit log entries before automatic cleanup.',
 
   // Monitoring
-  'monitoring.health_endpoint': 'Enable the /health HTTP endpoint for uptime checks.',
-  'monitoring.metrics_endpoint': 'Enable the /metrics HTTP endpoint for monitoring dashboards.',
+  'monitoring.health_endpoint': 'The health check endpoint is always available at /api/health. It returns {"status":"ok"} and is used by load balancers and uptime monitors.',
+  'monitoring.metrics_endpoint': 'A Prometheus-compatible /metrics endpoint is not yet available in this version.',
   'monitoring.dashboard_refresh_interval': 'How often (in seconds) the dashboard auto-refreshes its data.',
-  'monitoring.log_file_read_enabled': 'Allow the panel to read log files for display in the dashboard.',
-  'monitoring.network_interface': 'Network interface for bandwidth metrics. Leave empty for auto-discovery.',
-  'monitoring.vpn_interface': 'VPN interface for VPN bandwidth metrics. Leave empty for auto-discovery (reads ocserv config).',
-  'monitoring.collector_interval': 'How often (in seconds) the backend collects system and VPN metrics.',
+  'monitoring.log_file_read_enabled': 'Allow the panel to read log files for display in the Logs section of the dashboard.',
+  'monitoring.network_interface': 'Physical network interface (e.g. eth0, ens3) used for inbound/outbound bandwidth charts. Leave empty to auto-detect the default route interface.',
+  'monitoring.vpn_interface': 'VPN tunnel interface prefix (e.g. vpns0) used for VPN bandwidth charts. Leave empty to auto-detect from the ocserv configuration.',
+  'monitoring.collector_interval': 'How often (in seconds) the backend samples CPU, memory, and network metrics. Lower values give finer-grained charts but increase I/O.',
 
   // Backup & Restore
   'backup.schedule': 'How often automatic database backups are created.',

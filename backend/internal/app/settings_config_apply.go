@@ -263,9 +263,9 @@ func configValueForKey(cfg config.Config, key string) string {
 	case "database.conn_max_lifetime":
 		return strconv.Itoa(cfg.Database.ConnMaxLifetime)
 	case "monitoring.health_endpoint":
-		return strconv.FormatBool(cfg.Monitoring.HealthEndpoint)
+		return "/api/health (always enabled)"
 	case "monitoring.metrics_endpoint":
-		return strconv.FormatBool(cfg.Monitoring.MetricsEndpoint)
+		return "Not implemented"
 	case "monitoring.dashboard_refresh_interval":
 		return strconv.Itoa(cfg.Monitoring.DashboardRefreshInterval)
 	case "monitoring.log_file_read_enabled":
