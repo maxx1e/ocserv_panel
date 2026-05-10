@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/ocserv/service"
 )
 
 // ocserv API response types
@@ -865,26 +866,26 @@ func ocservUserToResponse(u ocserv.PasswdUser) ocservUserResponse {
 	}
 }
 
-func serviceStatusString(s ocserv.ServiceStatus) string {
+func serviceStatusString(s service.ServiceStatus) string {
 	switch s {
-	case ocserv.ServiceActive:
+	case service.ServiceActive:
 		return "active"
-	case ocserv.ServiceInactive:
+	case service.ServiceInactive:
 		return "inactive"
-	case ocserv.ServiceFailed:
+	case service.ServiceFailed:
 		return "failed"
 	default:
 		return "not_found"
 	}
 }
 
-func serviceStatusMessage(s ocserv.ServiceStatus) string {
+func serviceStatusMessage(s service.ServiceStatus) string {
 	switch s {
-	case ocserv.ServiceActive:
+	case service.ServiceActive:
 		return "ocserv service is running"
-	case ocserv.ServiceInactive:
+	case service.ServiceInactive:
 		return "ocserv service is stopped"
-	case ocserv.ServiceFailed:
+	case service.ServiceFailed:
 		return "ocserv service has failed"
 	default:
 		return "ocserv service unit not found"

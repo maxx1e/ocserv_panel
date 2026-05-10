@@ -1,18 +1,21 @@
-package ocserv
+package config_test
 
 import (
 	"context"
 	"testing"
 	"time"
+
+	"ocserv_panel/backend/internal/ocserv/cmd"
+	"ocserv_panel/backend/internal/ocserv/config"
 )
 
 func TestConfigReloaderSuccess(t *testing.T) {
 	t.Parallel()
 
-	runner := NewFakeCommandRunner()
-	runner.Results["occtl reload"] = CommandResult{Stdout: "", ExitCode: 0}
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["occtl reload"] = cmd.CommandResult{Stdout: "", ExitCode: 0}
 
-	r := NewConfigReloader(runner, "occtl")
+	r := config.NewConfigReloader(runner, "occtl")
 	result, err := r.Reload(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -28,10 +31,10 @@ func TestConfigReloaderSuccess(t *testing.T) {
 func TestConfigReloaderNonZeroExit(t *testing.T) {
 	t.Parallel()
 
-	runner := NewFakeCommandRunner()
-	runner.Results["occtl reload"] = CommandResult{Stderr: "config error in line 5", ExitCode: 1}
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["occtl reload"] = cmd.CommandResult{Stderr: "config error in line 5", ExitCode: 1}
 
-	r := NewConfigReloader(runner, "occtl")
+	r := config.NewConfigReloader(runner, "occtl")
 	result, err := r.Reload(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -47,13 +50,13 @@ func TestConfigReloaderNonZeroExit(t *testing.T) {
 func TestConfigReloaderRunnerError(t *testing.T) {
 	t.Parallel()
 
-	runner := NewFakeCommandRunner()
+	runner := cmd.NewFakeCommandRunner()
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 	time.Sleep(5 * time.Millisecond)
 
 	runner.Err = ctx.Err()
-	r := NewConfigReloader(runner, "occtl")
+	r := config.NewConfigReloader(runner, "occtl")
 	_, err := r.Reload(ctx)
 	if err == nil {
 		t.Fatal("expected error for runner failure")

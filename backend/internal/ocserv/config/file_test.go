@@ -1,4 +1,4 @@
-package ocserv
+package config_test
 
 import (
 	"errors"
@@ -7,6 +7,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"ocserv_panel/backend/internal/ocserv/config"
 )
 
 func TestConfigFileManagerReadSuccess(t *testing.T) {
@@ -19,7 +21,7 @@ func TestConfigFileManagerReadSuccess(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	got, meta, err := mgr.Read()
 	if err != nil {
 		t.Fatalf("Read: %v", err)
@@ -41,7 +43,7 @@ func TestConfigFileManagerReadSuccess(t *testing.T) {
 func TestConfigFileManagerReadNotFound(t *testing.T) {
 	t.Parallel()
 
-	mgr := NewConfigFileManager("/nonexistent/path/ocserv.conf", 5)
+	mgr := config.NewConfigFileManager("/nonexistent/path/ocserv.conf", 5)
 	_, _, err := mgr.Read()
 	if err == nil {
 		t.Fatal("expected error for non-existent file, got nil")
@@ -58,7 +60,7 @@ func TestConfigFileManagerWriteCreatesBackup(t *testing.T) {
 		t.Fatalf("write original: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	newContent := "# updated config\n"
 	if err := mgr.Write(newContent); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -93,7 +95,7 @@ func TestConfigFileManagerWriteRotatesBackups(t *testing.T) {
 		t.Fatalf("write initial: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 3)
+	mgr := config.NewConfigFileManager(cfgPath, 3)
 
 	// Write 4 times: after 4 writes, only 3 backups should exist (.1, .2, .3).
 	// .4 should not exist because maxBackups=3 causes deletion on rotation.
@@ -124,11 +126,11 @@ func TestConfigFileManagerWriteRejectsLargeContent(t *testing.T) {
 		t.Fatalf("write initial: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	// 65 KB exceeds the 64 KB limit.
 	large := strings.Repeat("x", 65*1024)
 	err := mgr.Write(large)
-	if !errors.Is(err, ErrConfigTooLarge) {
+	if !errors.Is(err, config.ErrConfigTooLarge) {
 		t.Errorf("expected ErrConfigTooLarge, got %v", err)
 	}
 }
@@ -142,7 +144,7 @@ func TestConfigFileManagerListBackups(t *testing.T) {
 		t.Fatalf("write initial: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 
 	// Two writes produce two backups (.1 and .2).
 	if err := mgr.Write("v1\n"); err != nil {
@@ -183,7 +185,7 @@ func TestConfigFileManagerGetBackup(t *testing.T) {
 		t.Fatalf("write original: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	if err := mgr.Write("# new\n"); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -206,9 +208,9 @@ func TestConfigFileManagerGetBackupNotFound(t *testing.T) {
 		t.Fatalf("write initial: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	_, err := mgr.GetBackup(99)
-	if !errors.Is(err, ErrBackupNotFound) {
+	if !errors.Is(err, config.ErrBackupNotFound) {
 		t.Errorf("expected ErrBackupNotFound, got %v", err)
 	}
 }
@@ -223,7 +225,7 @@ func TestConfigFileManagerRollbackSuccess(t *testing.T) {
 		t.Fatalf("write original: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	updated := "# updated config\n"
 	if err := mgr.Write(updated); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -262,9 +264,9 @@ func TestConfigFileManagerRollbackNotFound(t *testing.T) {
 		t.Fatalf("write initial: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	err := mgr.Rollback(99)
-	if !errors.Is(err, ErrBackupNotFound) {
+	if !errors.Is(err, config.ErrBackupNotFound) {
 		t.Errorf("expected ErrBackupNotFound, got %v", err)
 	}
 }
@@ -279,7 +281,7 @@ func TestConfigFileManagerDiffWithContent(t *testing.T) {
 		t.Fatalf("write original: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	proposed := "line-one\nline-two-modified\nline-three\n"
 	diff, err := mgr.DiffWithContent(proposed)
 	if err != nil {
@@ -306,7 +308,7 @@ func TestConfigFileManagerDiffWithContentNoDiff(t *testing.T) {
 		t.Fatalf("write content: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	diff, err := mgr.DiffWithContent(content)
 	if err != nil {
 		t.Fatalf("DiffWithContent: %v", err)
@@ -326,7 +328,7 @@ func TestConfigFileManagerDiffWithBackup(t *testing.T) {
 		t.Fatalf("write original: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	// Write new content; original becomes backup .1.
 	newContent := "# original line\nkey = new-value\n"
 	if err := mgr.Write(newContent); err != nil {
@@ -374,9 +376,9 @@ func TestConfigFileManagerWriteLockContention(t *testing.T) {
 	}()
 
 	// Now ConfigFileManager.Write should fail with ErrConfigLocked.
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	err = mgr.Write("new content\n")
-	if !errors.Is(err, ErrConfigLocked) {
+	if !errors.Is(err, config.ErrConfigLocked) {
 		t.Fatalf("expected ErrConfigLocked, got %v", err)
 	}
 
@@ -396,7 +398,7 @@ func TestConfigFileManagerRollbackLockContention(t *testing.T) {
 		t.Fatalf("write original: %v", err)
 	}
 
-	mgr := NewConfigFileManager(cfgPath, 5)
+	mgr := config.NewConfigFileManager(cfgPath, 5)
 	// Create a backup first so rollback has something to target.
 	if err := mgr.Write("updated\n"); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -419,7 +421,7 @@ func TestConfigFileManagerRollbackLockContention(t *testing.T) {
 
 	// Rollback should fail with ErrConfigLocked.
 	err = mgr.Rollback(1)
-	if !errors.Is(err, ErrConfigLocked) {
+	if !errors.Is(err, config.ErrConfigLocked) {
 		t.Fatalf("expected ErrConfigLocked, got %v", err)
 	}
 }

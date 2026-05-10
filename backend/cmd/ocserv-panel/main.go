@@ -26,6 +26,8 @@ import (
 	"ocserv_panel/backend/internal/monitoring"
 	"ocserv_panel/backend/internal/ocserv"
 	"ocserv_panel/backend/internal/ocserv/cmd"
+	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
+	"ocserv_panel/backend/internal/ocserv/service"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/server"
 	"ocserv_panel/backend/internal/store"
@@ -105,7 +107,7 @@ func main() {
 
 	// Build ocserv integration components from config.
 	runner := cmd.NewOSCommandRunner()
-	svcManager := ocserv.NewSystemdManager(cfg.Service.SystemdUnitName, runner)
+	svcManager := service.NewSystemdManager(cfg.Service.SystemdUnitName, runner)
 	readinessChecker := ocserv.NewReadinessChecker(
 		func() ocserv.ReadinessConfig {
 			liveCfg, err := config.Load(configPath)
@@ -127,7 +129,7 @@ func main() {
 	)
 	sessionManager := ocserv.NewOcctlAdapter(cfg.Installation.OcctlBinPath, cfg.Installation.OcservSocketPath, runner)
 	passwdManager := ocserv.NewOcpasswdAdapter(cfg.Installation.OcpasswdBinPath, cfg.Installation.OcpasswdFilePath, cfg.Installation.OcservConfigPath, runner)
-	configValidator := ocserv.NewConfigValidator(cfg.Installation.OcservConfigPath)
+	configValidator := ocservconfig.NewConfigValidator(cfg.Installation.OcservConfigPath)
 	ocservService := app.NewOcservService(readinessChecker, sessionManager, passwdManager, svcManager, configValidator, recorder, rbac.NewDefaultAuthorizer())
 
 	healthCfgFn := func() config.Config {
@@ -153,15 +155,15 @@ func main() {
 		rbac.NewDefaultAuthorizer(),
 	)
 
-	configFiles := ocserv.NewConfigFileManager(cfg.Installation.OcservConfigPath, 10)
-	configReloader := ocserv.NewConfigReloader(runner, cfg.Installation.OcctlBinPath)
+	configFiles := ocservconfig.NewConfigFileManager(cfg.Installation.OcservConfigPath, 10)
+	configReloader := ocservconfig.NewConfigReloader(runner, cfg.Installation.OcctlBinPath)
 	networkInspector := ocserv.NewNetworkInspectorWithConfig(runner, "/proc/sys", cfg.Installation.OcservConfigPath)
 	configMgmtService := app.NewConfigManagementService(
 		configFiles,
 		configValidator,
 		configReloader,
 		networkInspector,
-		ocserv.NewRestartDetector(),
+		ocservconfig.NewRestartDetector(),
 		recorder,
 		rbac.NewDefaultAuthorizer(),
 	)

@@ -1,33 +1,36 @@
-package ocserv
+package service_test
 
 import (
 	"context"
 	"errors"
 	"testing"
+
+	"ocserv_panel/backend/internal/ocserv/cmd"
+	"ocserv_panel/backend/internal/ocserv/service"
 )
 
 // FakeServiceManager tests
 
 func TestFakeServiceManagerDefaultStatus(t *testing.T) {
 	t.Parallel()
-	svc := NewFakeServiceManager(ServiceActive)
+	svc := service.NewFakeServiceManager(service.ServiceActive)
 	status, err := svc.Status(context.Background())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if status != ServiceActive {
+	if status != service.ServiceActive {
 		t.Fatalf("expected ServiceActive, got %d", status)
 	}
 }
 
 func TestFakeServiceManagerStart(t *testing.T) {
 	t.Parallel()
-	svc := NewFakeServiceManager(ServiceInactive)
+	svc := service.NewFakeServiceManager(service.ServiceInactive)
 	if err := svc.Start(context.Background()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	status, _ := svc.Status(context.Background())
-	if status != ServiceActive {
+	if status != service.ServiceActive {
 		t.Fatalf("expected ServiceActive after start, got %d", status)
 	}
 	if svc.StartCount() != 1 {
@@ -37,12 +40,12 @@ func TestFakeServiceManagerStart(t *testing.T) {
 
 func TestFakeServiceManagerStop(t *testing.T) {
 	t.Parallel()
-	svc := NewFakeServiceManager(ServiceActive)
+	svc := service.NewFakeServiceManager(service.ServiceActive)
 	if err := svc.Stop(context.Background()); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	status, _ := svc.Status(context.Background())
-	if status != ServiceInactive {
+	if status != service.ServiceInactive {
 		t.Fatalf("expected ServiceInactive after stop, got %d", status)
 	}
 	if svc.StopCount() != 1 {
@@ -52,12 +55,12 @@ func TestFakeServiceManagerStop(t *testing.T) {
 
 func TestFakeServiceManagerRestart(t *testing.T) {
 	t.Parallel()
-	svc := NewFakeServiceManager(ServiceInactive)
+	svc := service.NewFakeServiceManager(service.ServiceInactive)
 	if err := svc.Restart(context.Background()); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
 	status, _ := svc.Status(context.Background())
-	if status != ServiceActive {
+	if status != service.ServiceActive {
 		t.Fatalf("expected ServiceActive after restart, got %d", status)
 	}
 	if svc.RestartCount() != 1 {
@@ -67,7 +70,7 @@ func TestFakeServiceManagerRestart(t *testing.T) {
 
 func TestFakeServiceManagerIsEnabled(t *testing.T) {
 	t.Parallel()
-	svc := NewFakeServiceManager(ServiceActive)
+	svc := service.NewFakeServiceManager(service.ServiceActive)
 	enabled, err := svc.IsEnabled(context.Background())
 	if err != nil {
 		t.Fatalf("is-enabled: %v", err)
@@ -79,7 +82,7 @@ func TestFakeServiceManagerIsEnabled(t *testing.T) {
 
 func TestFakeServiceManagerSetError(t *testing.T) {
 	t.Parallel()
-	svc := NewFakeServiceManager(ServiceActive)
+	svc := service.NewFakeServiceManager(service.ServiceActive)
 	svc.SetError(errors.New("systemctl failed"))
 	_, err := svc.Status(context.Background())
 	if err == nil {
@@ -91,60 +94,60 @@ func TestFakeServiceManagerSetError(t *testing.T) {
 
 func TestSystemdManagerStatusActive(t *testing.T) {
 	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["systemctl"] = CommandResult{
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["systemctl"] = cmd.CommandResult{
 		ExitCode: 0,
 		Stdout:   "● ocserv.service - ocserv\n   Active: active (running) since Mon 2026-01-01 00:00:00 UTC\n",
 	}
-	mgr := NewSystemdManager("ocserv", runner)
+	mgr := service.NewSystemdManager("ocserv", runner)
 	status, err := mgr.Status(context.Background())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if status != ServiceActive {
+	if status != service.ServiceActive {
 		t.Fatalf("expected ServiceActive, got %d", status)
 	}
 }
 
 func TestSystemdManagerStatusInactive(t *testing.T) {
 	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["systemctl"] = CommandResult{
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["systemctl"] = cmd.CommandResult{
 		ExitCode: 3,
 		Stdout:   "● ocserv.service - ocserv\n   Active: inactive (dead)\n",
 	}
-	mgr := NewSystemdManager("ocserv", runner)
+	mgr := service.NewSystemdManager("ocserv", runner)
 	status, err := mgr.Status(context.Background())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if status != ServiceInactive {
+	if status != service.ServiceInactive {
 		t.Fatalf("expected ServiceInactive, got %d", status)
 	}
 }
 
 func TestSystemdManagerStatusFailed(t *testing.T) {
 	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["systemctl"] = CommandResult{
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["systemctl"] = cmd.CommandResult{
 		ExitCode: 3,
 		Stdout:   "● ocserv.service - ocserv\n   Active: failed (Result: exit-code)\n",
 	}
-	mgr := NewSystemdManager("ocserv", runner)
+	mgr := service.NewSystemdManager("ocserv", runner)
 	status, err := mgr.Status(context.Background())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if status != ServiceFailed {
+	if status != service.ServiceFailed {
 		t.Fatalf("expected ServiceFailed, got %d", status)
 	}
 }
 
 func TestSystemdManagerStart(t *testing.T) {
 	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["systemctl"] = CommandResult{ExitCode: 0}
-	mgr := NewSystemdManager("ocserv", runner)
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["systemctl"] = cmd.CommandResult{ExitCode: 0}
+	mgr := service.NewSystemdManager("ocserv", runner)
 	if err := mgr.Start(context.Background()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -152,9 +155,9 @@ func TestSystemdManagerStart(t *testing.T) {
 
 func TestSystemdManagerStartFailsOnNonZeroExit(t *testing.T) {
 	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["systemctl"] = CommandResult{ExitCode: 1, Stderr: "Job failed."}
-	mgr := NewSystemdManager("ocserv", runner)
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["systemctl"] = cmd.CommandResult{ExitCode: 1, Stderr: "Job failed."}
+	mgr := service.NewSystemdManager("ocserv", runner)
 	if err := mgr.Start(context.Background()); err == nil {
 		t.Fatal("expected start to fail")
 	}
@@ -162,9 +165,9 @@ func TestSystemdManagerStartFailsOnNonZeroExit(t *testing.T) {
 
 func TestSystemdManagerStop(t *testing.T) {
 	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["systemctl"] = CommandResult{ExitCode: 0}
-	mgr := NewSystemdManager("ocserv", runner)
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["systemctl"] = cmd.CommandResult{ExitCode: 0}
+	mgr := service.NewSystemdManager("ocserv", runner)
 	if err := mgr.Stop(context.Background()); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
@@ -172,9 +175,9 @@ func TestSystemdManagerStop(t *testing.T) {
 
 func TestSystemdManagerRestart(t *testing.T) {
 	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["systemctl"] = CommandResult{ExitCode: 0}
-	mgr := NewSystemdManager("ocserv", runner)
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["systemctl"] = cmd.CommandResult{ExitCode: 0}
+	mgr := service.NewSystemdManager("ocserv", runner)
 	if err := mgr.Restart(context.Background()); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
@@ -182,9 +185,9 @@ func TestSystemdManagerRestart(t *testing.T) {
 
 func TestSystemdManagerIsEnabled(t *testing.T) {
 	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["systemctl"] = CommandResult{ExitCode: 0, Stdout: "enabled\n"}
-	mgr := NewSystemdManager("ocserv", runner)
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["systemctl"] = cmd.CommandResult{ExitCode: 0, Stdout: "enabled\n"}
+	mgr := service.NewSystemdManager("ocserv", runner)
 	enabled, err := mgr.IsEnabled(context.Background())
 	if err != nil {
 		t.Fatalf("is-enabled: %v", err)
@@ -196,9 +199,9 @@ func TestSystemdManagerIsEnabled(t *testing.T) {
 
 func TestSystemdManagerIsEnabledWhenDisabled(t *testing.T) {
 	t.Parallel()
-	runner := NewFakeCommandRunner()
-	runner.Results["systemctl"] = CommandResult{ExitCode: 1, Stdout: "disabled\n"}
-	mgr := NewSystemdManager("ocserv", runner)
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["systemctl"] = cmd.CommandResult{ExitCode: 1, Stdout: "disabled\n"}
+	mgr := service.NewSystemdManager("ocserv", runner)
 	enabled, err := mgr.IsEnabled(context.Background())
 	if err != nil {
 		t.Fatalf("is-enabled: %v", err)

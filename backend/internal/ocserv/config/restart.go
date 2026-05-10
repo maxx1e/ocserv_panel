@@ -1,4 +1,4 @@
-package ocserv
+package config
 
 import (
 	"fmt"
@@ -67,7 +67,7 @@ func parseDirectiveValues(content string, filter map[string]bool) map[string]str
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		key, value, ok := parseConfigLine(line)
+		key, value, ok := ParseConfigLine(line)
 		if !ok {
 			continue
 		}

@@ -7,6 +7,8 @@ import (
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/ocserv"
+	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
+	"ocserv_panel/backend/internal/ocserv/service"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/validation"
 )
@@ -16,8 +18,8 @@ type OcservService struct {
 	readiness  *ocserv.ReadinessChecker
 	sessions   ocserv.Manager
 	users      ocserv.PasswdManager
-	svc        ocserv.ServiceManager
-	validator  *ocserv.ConfigValidator
+	svc        service.ServiceManager
+	validator  *ocservconfig.ConfigValidator
 	recorder   audit.Recorder
 	authorizer rbac.Authorizer
 }
@@ -27,8 +29,8 @@ func NewOcservService(
 	readiness *ocserv.ReadinessChecker,
 	sessions ocserv.Manager,
 	users ocserv.PasswdManager,
-	svc ocserv.ServiceManager,
-	validator *ocserv.ConfigValidator,
+	svc service.ServiceManager,
+	validator *ocservconfig.ConfigValidator,
 	recorder audit.Recorder,
 	authorizer rbac.Authorizer,
 ) *OcservService {
@@ -59,13 +61,13 @@ func (s *OcservService) Readiness(ctx context.Context, principal auth.Principal)
 }
 
 // ServiceStatus returns the ocserv service status.
-func (s *OcservService) ServiceStatus(ctx context.Context, principal auth.Principal) (ocserv.ServiceStatus, error) {
+func (s *OcservService) ServiceStatus(ctx context.Context, principal auth.Principal) (service.ServiceStatus, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservServiceRead, "ocserv.service.status"); err != nil {
-		return ocserv.ServiceNotFound, err
+		return service.ServiceNotFound, err
 	}
 	status, err := s.svc.Status(ctx)
 	if err != nil {
-		return ocserv.ServiceNotFound, fmt.Errorf("get service status: %w", err)
+		return service.ServiceNotFound, fmt.Errorf("get service status: %w", err)
 	}
 	return status, nil
 }
@@ -577,7 +579,7 @@ func (s *OcservService) ActiveUserSessions(ctx context.Context, principal auth.P
 }
 
 // ConfigIssues returns ocserv configuration validation issues.
-func (s *OcservService) ConfigIssues(ctx context.Context, principal auth.Principal) ([]ocserv.ConfigIssue, error) {
+func (s *OcservService) ConfigIssues(ctx context.Context, principal auth.Principal) ([]ocservconfig.ConfigIssue, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.issues"); err != nil {
 		return nil, err
 	}

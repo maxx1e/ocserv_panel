@@ -1,4 +1,4 @@
-package ocserv
+package config_test
 
 import (
 	"context"
@@ -9,16 +9,18 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"ocserv_panel/backend/internal/ocserv/config"
 )
 
 func TestConfigValidatorMissingFile(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/nonexistent/ocserv.conf")
+	v := config.NewConfigValidator("/nonexistent/ocserv.conf")
 	issues, err := v.ValidateConfig(context.Background())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if len(issues) != 1 || issues[0].Severity != IssueError {
+	if len(issues) != 1 || issues[0].Severity != config.IssueError {
 		t.Fatalf("expected 1 error issue for missing file, got %v", issues)
 	}
 	if issues[0].Key != "config_file" {
@@ -34,7 +36,7 @@ func TestConfigValidatorRelativeCertPath(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	v := NewConfigValidator(confPath)
+	v := config.NewConfigValidator(confPath)
 	issues, err := v.ValidateConfig(context.Background())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
@@ -42,7 +44,7 @@ func TestConfigValidatorRelativeCertPath(t *testing.T) {
 
 	hasWarning := false
 	for _, issue := range issues {
-		if issue.Severity == IssueWarning && issue.Key == "server-cert" {
+		if issue.Severity == config.IssueWarning && issue.Key == "server-cert" {
 			hasWarning = true
 		}
 	}
@@ -60,7 +62,7 @@ func TestConfigValidatorMissingCertFileError(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	v := NewConfigValidator(confPath)
+	v := config.NewConfigValidator(confPath)
 	issues, err := v.ValidateConfig(context.Background())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
@@ -68,7 +70,7 @@ func TestConfigValidatorMissingCertFileError(t *testing.T) {
 
 	hasError := false
 	for _, issue := range issues {
-		if issue.Severity == IssueError && issue.Key == "server-cert" {
+		if issue.Severity == config.IssueError && issue.Key == "server-cert" {
 			hasError = true
 		}
 	}
@@ -85,7 +87,7 @@ func TestConfigValidatorAuthWithMissingPasswd(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	v := NewConfigValidator(confPath)
+	v := config.NewConfigValidator(confPath)
 	issues, err := v.ValidateConfig(context.Background())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
@@ -93,7 +95,7 @@ func TestConfigValidatorAuthWithMissingPasswd(t *testing.T) {
 
 	hasInfo := false
 	for _, issue := range issues {
-		if issue.Severity == IssueInfo && issue.Key == "auth" {
+		if issue.Severity == config.IssueInfo && issue.Key == "auth" {
 			hasInfo = true
 		}
 	}
@@ -110,7 +112,7 @@ func TestConfigValidatorAuthWithRelativePasswd(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	v := NewConfigValidator(confPath)
+	v := config.NewConfigValidator(confPath)
 	issues, err := v.ValidateConfig(context.Background())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
@@ -118,7 +120,7 @@ func TestConfigValidatorAuthWithRelativePasswd(t *testing.T) {
 
 	hasWarning := false
 	for _, issue := range issues {
-		if issue.Severity == IssueWarning && issue.Key == "auth" {
+		if issue.Severity == config.IssueWarning && issue.Key == "auth" {
 			hasWarning = true
 		}
 	}
@@ -139,14 +141,14 @@ func TestConfigValidatorValidAbsoluteCertPath(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	v := NewConfigValidator(confPath)
+	v := config.NewConfigValidator(confPath)
 	issues, err := v.ValidateConfig(context.Background())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 
 	for _, issue := range issues {
-		if issue.Severity == IssueError && issue.Key == "server-cert" {
+		if issue.Severity == config.IssueError && issue.Key == "server-cert" {
 			t.Fatalf("unexpected error for valid cert path: %v", issue)
 		}
 	}
@@ -160,7 +162,7 @@ func TestConfigValidatorRelativeSocketPath(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	v := NewConfigValidator(confPath)
+	v := config.NewConfigValidator(confPath)
 	issues, err := v.ValidateConfig(context.Background())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
@@ -168,7 +170,7 @@ func TestConfigValidatorRelativeSocketPath(t *testing.T) {
 
 	hasWarning := false
 	for _, issue := range issues {
-		if issue.Severity == IssueWarning && issue.Key == "socket-file" {
+		if issue.Severity == config.IssueWarning && issue.Key == "socket-file" {
 			hasWarning = true
 		}
 	}
@@ -185,7 +187,7 @@ func TestConfigValidatorEmptyConfig(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	v := NewConfigValidator(confPath)
+	v := config.NewConfigValidator(confPath)
 	issues, err := v.ValidateConfig(context.Background())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
@@ -212,9 +214,9 @@ func TestParseConfigLine(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		key, value, ok := parseConfigLine(tt.line)
+		key, value, ok := config.ParseConfigLine(tt.line)
 		if ok != tt.wantOK || key != tt.key || value != tt.value {
-			t.Errorf("parseConfigLine(%q) = (%q, %q, %v), want (%q, %q, %v)",
+			t.Errorf("ParseConfigLine(%q) = (%q, %q, %v), want (%q, %q, %v)",
 				tt.line, key, value, ok, tt.key, tt.value, tt.wantOK)
 		}
 	}
@@ -222,13 +224,13 @@ func TestParseConfigLine(t *testing.T) {
 
 func TestConfigValidatorValidateContentPortRange(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/nonexistent")
+	v := config.NewConfigValidator("/nonexistent")
 	issues, err := v.ValidateContent(context.Background(), "tcp-port = 99999\n")
 	if err != nil {
 		t.Fatalf("ValidateContent: %v", err)
 	}
 	for _, issue := range issues {
-		if issue.Key == "tcp-port" && issue.Severity == IssueError {
+		if issue.Key == "tcp-port" && issue.Severity == config.IssueError {
 			return
 		}
 	}
@@ -237,13 +239,13 @@ func TestConfigValidatorValidateContentPortRange(t *testing.T) {
 
 func TestConfigValidatorValidateContentInvalidCIDR(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/nonexistent")
+	v := config.NewConfigValidator("/nonexistent")
 	issues, err := v.ValidateContent(context.Background(), "route = not-a-cidr\n")
 	if err != nil {
 		t.Fatalf("ValidateContent: %v", err)
 	}
 	for _, issue := range issues {
-		if issue.Key == "route" && issue.Severity == IssueError {
+		if issue.Key == "route" && issue.Severity == config.IssueError {
 			return
 		}
 	}
@@ -252,13 +254,13 @@ func TestConfigValidatorValidateContentInvalidCIDR(t *testing.T) {
 
 func TestConfigValidatorValidateContentInvalidDNS(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/nonexistent")
+	v := config.NewConfigValidator("/nonexistent")
 	issues, err := v.ValidateContent(context.Background(), "dns = not.an.ip\n")
 	if err != nil {
 		t.Fatalf("ValidateContent: %v", err)
 	}
 	for _, issue := range issues {
-		if issue.Key == "dns" && issue.Severity == IssueWarning {
+		if issue.Key == "dns" && issue.Severity == config.IssueWarning {
 			return
 		}
 	}
@@ -267,14 +269,14 @@ func TestConfigValidatorValidateContentInvalidDNS(t *testing.T) {
 
 func TestConfigValidatorValidateContentValid(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/nonexistent")
+	v := config.NewConfigValidator("/nonexistent")
 	content := "tcp-port = 443\nudp-port = 443\nroute = 10.0.0.0/8\ndns = 8.8.8.8\n"
 	issues, err := v.ValidateContent(context.Background(), content)
 	if err != nil {
 		t.Fatalf("ValidateContent: %v", err)
 	}
 	for _, issue := range issues {
-		if issue.Severity == IssueError {
+		if issue.Severity == config.IssueError {
 			t.Fatalf("unexpected error issue for valid content: %v", issue)
 		}
 	}
@@ -282,13 +284,13 @@ func TestConfigValidatorValidateContentValid(t *testing.T) {
 
 func TestConfigValidatorValidateContentMalformedLine(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/nonexistent")
+	v := config.NewConfigValidator("/nonexistent")
 	issues, err := v.ValidateContent(context.Background(), "this-line-has-no-equals\n")
 	if err != nil {
 		t.Fatalf("ValidateContent: %v", err)
 	}
 	for _, issue := range issues {
-		if issue.Severity == IssueError {
+		if issue.Severity == config.IssueError {
 			return
 		}
 	}
@@ -302,11 +304,11 @@ func TestValidateConfigFileReportsLineNumbers(t *testing.T) {
 	content := "server-cert = ../certs/server-cert.pem\ndevice = vpns\n"
 	require.NoError(t, os.WriteFile(cfgPath, []byte(content), 0644))
 
-	v := NewConfigValidator(cfgPath)
+	v := config.NewConfigValidator(cfgPath)
 	issues, err := v.ValidateConfig(context.Background())
 	require.NoError(t, err)
 	// server-cert relative path warning should report line 1
-	var certIssue *ConfigIssue
+	var certIssue *config.ConfigIssue
 	for i := range issues {
 		if issues[i].Key == "server-cert" {
 			certIssue = &issues[i]
@@ -319,12 +321,12 @@ func TestValidateConfigFileReportsLineNumbers(t *testing.T) {
 
 func TestValidateContentCIDRAutoFix(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/dev/null")
+	v := config.NewConfigValidator("/dev/null")
 	content := "route = 10.10.10.0/255.255.255.0\n"
 	issues, err := v.ValidateContent(context.Background(), content)
 	require.NoError(t, err)
 	require.Len(t, issues, 1)
-	assert.Equal(t, IssueWarning, issues[0].Severity)
+	assert.Equal(t, config.IssueWarning, issues[0].Severity)
 	assert.Equal(t, "route = 10.10.10.0/24", issues[0].FixedValue)
 	assert.Equal(t, 1, issues[0].Line)
 	assert.Contains(t, issues[0].Message, "netmask notation")
@@ -332,19 +334,19 @@ func TestValidateContentCIDRAutoFix(t *testing.T) {
 
 func TestValidateContentNonContiguousMaskNoFix(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/dev/null")
+	v := config.NewConfigValidator("/dev/null")
 	content := "route = 10.0.0.0/255.255.100.0\n"
 	issues, err := v.ValidateContent(context.Background(), content)
 	require.NoError(t, err)
 	require.Len(t, issues, 1)
-	assert.Equal(t, IssueError, issues[0].Severity)
+	assert.Equal(t, config.IssueError, issues[0].Severity)
 	assert.Empty(t, issues[0].FixedValue)
 	assert.Contains(t, issues[0].Message, "non-contiguous")
 }
 
 func TestValidateContentValidCIDRNoProblem(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/dev/null")
+	v := config.NewConfigValidator("/dev/null")
 	content := "route = 10.0.0.0/24\n"
 	issues, err := v.ValidateContent(context.Background(), content)
 	require.NoError(t, err)
@@ -353,7 +355,7 @@ func TestValidateContentValidCIDRNoProblem(t *testing.T) {
 
 func TestValidateContentReportsLineNumbers(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/dev/null")
+	v := config.NewConfigValidator("/dev/null")
 	content := "# comment\ntcp-port = 99999\nroute = invalid\n"
 	issues, err := v.ValidateContent(context.Background(), content)
 	require.NoError(t, err)
@@ -364,13 +366,13 @@ func TestValidateContentReportsLineNumbers(t *testing.T) {
 
 func TestValidateContentUnclosedDoubleQuote(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/dev/null")
+	v := config.NewConfigValidator("/dev/null")
 	content := "server-cert = \"/etc/ocserv/cert.pem\ntcp-port = 443\n"
 	issues, err := v.ValidateContent(context.Background(), content)
 	require.NoError(t, err)
 	var found bool
 	for _, issue := range issues {
-		if issue.Severity == IssueError && strings.Contains(issue.Message, "unclosed") {
+		if issue.Severity == config.IssueError && strings.Contains(issue.Message, "unclosed") {
 			found = true
 			assert.Equal(t, 1, issue.Line)
 			break
@@ -381,13 +383,13 @@ func TestValidateContentUnclosedDoubleQuote(t *testing.T) {
 
 func TestValidateContentUnclosedSingleQuote(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/dev/null")
+	v := config.NewConfigValidator("/dev/null")
 	content := "server-cert = '/etc/ocserv/cert.pem\n"
 	issues, err := v.ValidateContent(context.Background(), content)
 	require.NoError(t, err)
 	var found bool
 	for _, issue := range issues {
-		if issue.Severity == IssueError && strings.Contains(issue.Message, "unclosed") {
+		if issue.Severity == config.IssueError && strings.Contains(issue.Message, "unclosed") {
 			found = true
 			assert.Equal(t, 1, issue.Line)
 			break
@@ -398,7 +400,7 @@ func TestValidateContentUnclosedSingleQuote(t *testing.T) {
 
 func TestValidateContentBalancedQuotesNoIssue(t *testing.T) {
 	t.Parallel()
-	v := NewConfigValidator("/dev/null")
+	v := config.NewConfigValidator("/dev/null")
 	content := "server-cert = \"/etc/ocserv/cert.pem\"\nauth = 'plain[passwd=/etc/ocserv/ocpasswd]'\n"
 	issues, err := v.ValidateContent(context.Background(), content)
 	require.NoError(t, err)

@@ -11,6 +11,8 @@ import (
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/ocserv/cmd"
+	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
 	"ocserv_panel/backend/internal/rbac"
 )
 
@@ -25,12 +27,12 @@ func newTestConfigService(t *testing.T) (*ConfigManagementService, string) {
 		t.Fatalf("write test config: %v", err)
 	}
 
-	files := ocserv.NewConfigFileManager(confPath, 10)
-	validator := ocserv.NewConfigValidator(confPath)
+	files := ocservconfig.NewConfigFileManager(confPath, 10)
+	validator := ocservconfig.NewConfigValidator(confPath)
 
-	runner := ocserv.NewFakeCommandRunner()
-	runner.Results["occtl reload"] = ocserv.CommandResult{ExitCode: 0}
-	reloader := ocserv.NewConfigReloader(runner, "occtl")
+	runner := cmd.NewFakeCommandRunner()
+	runner.Results["occtl reload"] = cmd.CommandResult{ExitCode: 0}
+	reloader := ocservconfig.NewConfigReloader(runner, "occtl")
 
 	inspector := ocserv.NewNetworkInspectorWithProcDir(runner, dir)
 
@@ -39,7 +41,7 @@ func newTestConfigService(t *testing.T) (*ConfigManagementService, string) {
 		validator,
 		reloader,
 		inspector,
-		ocserv.NewRestartDetector(),
+		ocservconfig.NewRestartDetector(),
 		audit.NoopRecorder{},
 		rbac.NewDefaultAuthorizer(),
 	)
@@ -347,16 +349,16 @@ func TestConfigServiceApplyConfigPartialSuccessReloadFails(t *testing.T) {
 		t.Fatalf("write test config: %v", err)
 	}
 
-	files := ocserv.NewConfigFileManager(confPath, 10)
-	validator := ocserv.NewConfigValidator(confPath)
+	files := ocservconfig.NewConfigFileManager(confPath, 10)
+	validator := ocservconfig.NewConfigValidator(confPath)
 
-	runner := ocserv.NewFakeCommandRunner()
+	runner := cmd.NewFakeCommandRunner()
 	// Reload returns non-zero exit — simulates ocserv rejecting the config at runtime.
-	runner.Results["occtl reload"] = ocserv.CommandResult{
+	runner.Results["occtl reload"] = cmd.CommandResult{
 		Stderr:   "error in configuration line 2",
 		ExitCode: 1,
 	}
-	reloader := ocserv.NewConfigReloader(runner, "occtl")
+	reloader := ocservconfig.NewConfigReloader(runner, "occtl")
 	inspector := ocserv.NewNetworkInspectorWithProcDir(runner, dir)
 
 	svc := NewConfigManagementService(
@@ -364,7 +366,7 @@ func TestConfigServiceApplyConfigPartialSuccessReloadFails(t *testing.T) {
 		validator,
 		reloader,
 		inspector,
-		ocserv.NewRestartDetector(),
+		ocservconfig.NewRestartDetector(),
 		audit.NoopRecorder{},
 		rbac.NewDefaultAuthorizer(),
 	)

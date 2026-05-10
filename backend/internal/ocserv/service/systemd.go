@@ -1,4 +1,4 @@
-package ocserv
+package service
 
 import (
 	"context"

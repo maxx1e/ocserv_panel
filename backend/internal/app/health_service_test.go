@@ -10,6 +10,7 @@ import (
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/ocserv/service"
 	"ocserv_panel/backend/internal/rbac"
 )
 
@@ -25,7 +26,7 @@ func TestHealthServiceSystemHealth_HappyPath(t *testing.T) {
 			}
 		},
 		ocserv.NewFakeCommandRunner(),
-		ocserv.NewFakeServiceManager(ocserv.ServiceActive),
+		service.NewFakeServiceManager(service.ServiceActive),
 	)
 
 	cfg := config.Defaults()
@@ -294,7 +295,7 @@ func TestHealthServiceSystemHealth_PasswordFilePresent(t *testing.T) {
 			}
 		},
 		ocserv.NewFakeCommandRunner(),
-		ocserv.NewFakeServiceManager(ocserv.ServiceActive),
+		service.NewFakeServiceManager(service.ServiceActive),
 	)
 
 	cfg := config.Defaults()
@@ -325,7 +326,7 @@ func TestHealthServiceSystemHealth_PasswordFileMissing(t *testing.T) {
 			}
 		},
 		ocserv.NewFakeCommandRunner(),
-		ocserv.NewFakeServiceManager(ocserv.ServiceActive),
+		service.NewFakeServiceManager(service.ServiceActive),
 	)
 
 	cfg := config.Defaults()

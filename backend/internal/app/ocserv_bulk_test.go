@@ -7,13 +7,14 @@ import (
 
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/ocserv/service"
 )
 
 // --- helper: build an OcservService wired with a custom FakePasswdManager ---
 
 func newBulkTestService(t *testing.T, passwd *ocserv.FakePasswdManager) *OcservService {
 	t.Helper()
-	svc, _, _, _ := newTestOcservService(t, ocserv.ServiceActive)
+	svc, _, _, _ := newTestOcservService(t, service.ServiceActive)
 	// Replace the fake passwd manager with the one supplied by the test.
 	svc.users = passwd
 	return svc
@@ -25,8 +26,8 @@ func TestOcservServiceBulkDeleteAllSucceed(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
-	_ = passwd.CreateUser(ctx, "bob", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
+	_ = passwd.CreateUser(ctx, "bob", "pass", "")
 
 	svc := newBulkTestService(t, passwd)
 	result := svc.BulkDeleteOcservUsers(ctx, ownerPrincipal(), []string{"alice", "bob"})
@@ -60,7 +61,7 @@ func TestOcservServiceBulkDeletePartialSuccess(t *testing.T) {
 	// Only "alice" exists; "ghost" does not — but Delete on FakePasswdManager is
 	// idempotent (no error for missing users).  To force a partial failure we use
 	// an invalid username that fails validation.
-	_ = passwd.CreateUser(ctx, "alice", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
 
 	svc := newBulkTestService(t, passwd)
 	// "!invalid!" fails validation.Username.
@@ -87,8 +88,8 @@ func TestOcservServiceBulkDeleteDeniedForViewer(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
-	_ = passwd.CreateUser(ctx, "bob", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
+	_ = passwd.CreateUser(ctx, "bob", "pass", "")
 
 	svc := newBulkTestService(t, passwd)
 	viewer := auth.Principal{ID: 2, Username: "viewer", Roles: []string{"viewer"}}
@@ -122,7 +123,7 @@ func TestOcservServiceBulkDeleteDeniedForUnauthenticated(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
 
 	svc := newBulkTestService(t, passwd)
 	result := svc.BulkDeleteOcservUsers(ctx, auth.Principal{}, []string{"alice"})
@@ -139,7 +140,7 @@ func TestOcservServiceBulkDeletePasswdManagerError(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
 	passwd.SetError(errors.New("filesystem unavailable"))
 
 	svc := newBulkTestService(t, passwd)
@@ -162,8 +163,8 @@ func TestOcservServiceBulkLockAllSucceed(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
-	_ = passwd.CreateUser(ctx, "bob", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
+	_ = passwd.CreateUser(ctx, "bob", "pass", "")
 
 	svc := newBulkTestService(t, passwd)
 	result := svc.BulkLockOcservUsers(ctx, ownerPrincipal(), []string{"alice", "bob"})
@@ -208,7 +209,7 @@ func TestOcservServiceBulkLockDeniedForViewer(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
 
 	svc := newBulkTestService(t, passwd)
 	viewer := auth.Principal{ID: 2, Username: "viewer", Roles: []string{"viewer"}}
@@ -231,7 +232,7 @@ func TestOcservServiceBulkLockInvalidUsernameReturnsError(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
 
 	svc := newBulkTestService(t, passwd)
 	// Mix of valid and invalid username.
@@ -251,8 +252,8 @@ func TestOcservServiceBulkUnlockAllSucceed(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
-	_ = passwd.CreateUser(ctx, "bob", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
+	_ = passwd.CreateUser(ctx, "bob", "pass", "")
 	// Lock them first so unlock has something to do.
 	_ = passwd.LockUser(ctx, "alice")
 	_ = passwd.LockUser(ctx, "bob")
@@ -296,7 +297,7 @@ func TestOcservServiceBulkUnlockDeniedForViewer(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
 	_ = passwd.LockUser(ctx, "alice")
 
 	svc := newBulkTestService(t, passwd)
@@ -320,7 +321,7 @@ func TestOcservServiceBulkUnlockDeniedForUnauthenticated(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
 	_ = passwd.LockUser(ctx, "alice")
 
 	svc := newBulkTestService(t, passwd)
@@ -338,7 +339,7 @@ func TestOcservServiceBulkUnlockInvalidUsernameReturnsError(t *testing.T) {
 	t.Parallel()
 	passwd := ocserv.NewFakePasswdManager()
 	ctx := context.Background()
-	_ = passwd.CreateUser(ctx, "alice", "pass")
+	_ = passwd.CreateUser(ctx, "alice", "pass", "")
 	_ = passwd.LockUser(ctx, "alice")
 
 	svc := newBulkTestService(t, passwd)

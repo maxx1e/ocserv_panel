@@ -1,4 +1,4 @@
-package ocserv
+package config
 
 import (
 	"context"
@@ -72,7 +72,7 @@ func (v *ConfigValidator) ValidateConfig(ctx context.Context) ([]ConfigIssue, er
 			continue
 		}
 
-		key, value, ok := parseConfigLine(line)
+		key, value, ok := ParseConfigLine(line)
 		if !ok {
 			continue
 		}
@@ -117,7 +117,7 @@ func (v *ConfigValidator) ValidateContent(ctx context.Context, content string) (
 			continue
 		}
 
-		key, value, ok := parseConfigLine(line)
+		key, value, ok := ParseConfigLine(line)
 		if !ok {
 			issues = append(issues, ConfigIssue{
 				Line:       i + 1,
@@ -323,10 +323,10 @@ func (v *ConfigValidator) checkDevice(key, value string) []ConfigIssue {
 	return issues
 }
 
-// parseConfigLine parses a single "key = value" line from an ocserv config file.
+// ParseConfigLine parses a single "key = value" line from an ocserv config file.
 // Returns the key, value, and true if parsing succeeded.
 // Surrounding whitespace and quotes are removed from the value.
-func parseConfigLine(line string) (key, value string, ok bool) {
+func ParseConfigLine(line string) (key, value string, ok bool) {
 	idx := strings.Index(line, "=")
 	if idx < 0 {
 		return "", "", false

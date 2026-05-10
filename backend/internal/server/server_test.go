@@ -22,6 +22,9 @@ import (
 	"ocserv_panel/backend/internal/db"
 	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/ocserv/cmd"
+	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
+	"ocserv_panel/backend/internal/ocserv/service"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
@@ -630,8 +633,8 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 
 	testCfg := config.Defaults()
 	testCfgFn := func() config.Config { return testCfg }
-	fakeRunner2 := ocserv.NewFakeCommandRunner()
-	fakeSvcMgr2 := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
+	fakeRunner2 := cmd.NewFakeCommandRunner()
+	fakeSvcMgr2 := service.NewFakeServiceManager(service.ServiceInactive)
 	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
 	healthSvc := app.NewHealthService(testChecker, s, testCfgFn, rbac.NewDefaultAuthorizer(), "")
 	logTailSvc := app.NewLogTailService(testCfgFn, app.FakeLogFileReader{}, rbac.NewDefaultAuthorizer())
@@ -640,16 +643,16 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	confDir := t.TempDir()
 	confPath := filepath.Join(confDir, "ocserv.conf")
 	os.WriteFile(confPath, []byte("tcp-port = 443\n"), 0640)
-	configFiles := ocserv.NewConfigFileManager(confPath, 10)
-	configValidator := ocserv.NewConfigValidator(confPath)
-	configReloader := ocserv.NewConfigReloader(fakeRunner2, "occtl")
+	configFiles := ocservconfig.NewConfigFileManager(confPath, 10)
+	configValidator := ocservconfig.NewConfigValidator(confPath)
+	configReloader := ocservconfig.NewConfigReloader(fakeRunner2, "occtl")
 	networkInspector := ocserv.NewNetworkInspectorWithProcDir(fakeRunner2, confDir)
 	configMgmtSvc := app.NewConfigManagementService(
 		configFiles,
 		configValidator,
 		configReloader,
 		networkInspector,
-		ocserv.NewRestartDetector(),
+		ocservconfig.NewRestartDetector(),
 		recorder,
 		rbac.NewDefaultAuthorizer(),
 	)
@@ -684,10 +687,10 @@ func newTestOcservService(s *store.Store, recorder audit.SQLiteRecorder) *app.Oc
 }
 
 func newTestOcservServiceWithFake(s *store.Store, recorder audit.SQLiteRecorder) (*app.OcservService, *ocserv.FakeManager) {
-	runner := ocserv.NewFakeCommandRunner()
-	fakeSvc := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
+	runner := cmd.NewFakeCommandRunner()
+	fakeSvc := service.NewFakeServiceManager(service.ServiceInactive)
 	checker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, runner, fakeSvc)
-	validator := ocserv.NewConfigValidator("/nonexistent/ocserv.conf")
+	validator := ocservconfig.NewConfigValidator("/nonexistent/ocserv.conf")
 	fakeManager := ocserv.NewFakeManager()
 	return app.NewOcservService(
 		checker,
@@ -1109,8 +1112,8 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
 
 	tempCfgFn := func() config.Config { return initialCfg }
-	fakeRunner2 := ocserv.NewFakeCommandRunner()
-	fakeSvcMgr2 := ocserv.NewFakeServiceManager(ocserv.ServiceInactive)
+	fakeRunner2 := cmd.NewFakeCommandRunner()
+	fakeSvcMgr2 := service.NewFakeServiceManager(service.ServiceInactive)
 	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
 	healthSvc := app.NewHealthService(testChecker, s, tempCfgFn, rbac.NewDefaultAuthorizer(), "")
 	logTailSvc := app.NewLogTailService(tempCfgFn, app.FakeLogFileReader{}, rbac.NewDefaultAuthorizer())
@@ -1119,16 +1122,16 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 	confDir2 := t.TempDir()
 	confPath2 := filepath.Join(confDir2, "ocserv.conf")
 	os.WriteFile(confPath2, []byte("tcp-port = 443\n"), 0640)
-	configFiles2 := ocserv.NewConfigFileManager(confPath2, 10)
-	configValidator2 := ocserv.NewConfigValidator(confPath2)
-	configReloader2 := ocserv.NewConfigReloader(fakeRunner2, "occtl")
+	configFiles2 := ocservconfig.NewConfigFileManager(confPath2, 10)
+	configValidator2 := ocservconfig.NewConfigValidator(confPath2)
+	configReloader2 := ocservconfig.NewConfigReloader(fakeRunner2, "occtl")
 	networkInspector2 := ocserv.NewNetworkInspectorWithProcDir(fakeRunner2, confDir2)
 	configMgmtSvc2 := app.NewConfigManagementService(
 		configFiles2,
 		configValidator2,
 		configReloader2,
 		networkInspector2,
-		ocserv.NewRestartDetector(),
+		ocservconfig.NewRestartDetector(),
 		recorder,
 		rbac.NewDefaultAuthorizer(),
 	)
