@@ -12,25 +12,34 @@
 backend/
 ├── cmd/ocserv-panel/        Entry point — wires all deps, starts HTTP server
 └── internal/
-    ├── app/                 Business logic services (one file per service)
-    ├── audit/               Audit event types and recording interface
+    ├── app/                 Business logic services (cross-domain, one file per service)
+    ├── audit/               Audit event types, Recorder interface, SQLiteRecorder
     ├── auth/                Principal type, password hashing, session tokens, rate limiter
     ├── config/              TOML app config (load, merge env vars)
     ├── db/                  SQLite connection setup and schema migrations
     ├── logging/             zerolog initialisation (file + stderr, SIGHUP reopen)
     ├── logs/                Log file / journal reading interface and implementations
-    ├── metrics/             Time-series metric types, Store interface, TSDBStore, MemoryStore
-    ├── monitoring/          Metric collectors (CPU, memory, network, sessions)
-    ├── ocserv/              ocserv integration boundary
-    │   ├── cmd/             CommandRunner interface + OSCommandRunner + FakeCommandRunner
-    │   ├── config/          ConfigValidator, ConfigFileManager, ConfigReloader, RestartDetector
-    │   ├── parse/           occtl JSON/text output parsers and result types
-    │   └── service/         ServiceManager interface, SystemdManager, FakeServiceManager
+    ├── monitor/             Metric collection + time-series storage (merged from metrics/ + monitoring/)
+    │                        Types, Store interface, TSDBStore, MemoryStore, collectors, poll loop
     ├── rbac/                Role and permission definitions, Authorizer
     ├── sanitize/            Redact sensitive keys from metadata maps
     ├── server/              HTTP router (App struct), middleware, all request handlers
     ├── store/               SQLite repositories (admin users, sessions, audit, history, settings)
-    └── validation/          Input validation rules (username, password, group, IP)
+    ├── validation/          Input validation rules (username, password, group, IP)
+    └── vpn/                 All ocserv integration — organised by business task
+        ├── exec/            Command execution primitive (no vpn deps)
+        │                    CommandRunner interface, OSCommandRunner, FakeCommandRunner
+        ├── sessions/        Active session visibility and control
+        │                    Manager interface, OcctlAdapter, FakeManager
+        │                    All occtl output types and JSON parsers
+        ├── users/           VPN user lifecycle (passwd file)
+        │                    PasswdManager interface, OcpasswdAdapter, FakePasswdManager
+        ├── config/          ocserv.conf read/write/validate/diff/rollback
+        │                    ConfigFileManager, ConfigValidator, ConfigReloader, RestartDetector
+        ├── service/         systemd unit control
+        │                    ServiceManager interface, SystemdManager, FakeServiceManager
+        └── health/          Readiness checks and network prerequisite inspection
+                             ReadinessChecker, NetworkInspector
 ```
 
 ---
@@ -40,15 +49,25 @@ backend/
 Arrows point from importer → dependency. No cycles permitted.
 
 ```
-server   → app, auth, rbac, config, metrics, ocserv, store
-app      → store, audit, auth, rbac, config, ocserv, metrics, logs, monitoring, validation
-audit    → store (via AuditStore interface), sanitize
-store    → db
-ocserv   → ocserv/cmd, ocserv/parse, ocserv/config, ocserv/service, validation
-monitoring → metrics, ocserv (via SessionStatusProvider interface)
-logging  → (zerolog only)
+server      → app, auth, rbac, config, monitor, vpn/sessions, store
+app         → store, audit, auth, rbac, config, vpn/sessions, vpn/users,
+              vpn/config, vpn/service, vpn/health, monitor, logs, validation
+audit       → store (via AuditStore interface), sanitize
+store       → db
+vpn/health  → vpn/exec, vpn/service, vpn/config
+vpn/sessions → vpn/exec, validation
+vpn/users   → vpn/exec
+vpn/config  → vpn/exec
+vpn/service → vpn/exec
+monitor     → vpn/sessions (via SessionStatusProvider interface)
+logging     → (zerolog only)
 validation, sanitize, rbac → (stdlib only)
 ```
+
+`vpn/exec/` is the only shared leaf within `vpn/`. The only permitted cross-sub-package imports inside `vpn/` are:
+- `vpn/health/` → `vpn/service/` (checks service status)
+- `vpn/health/` → `vpn/config/` (uses ParseConfigLine for network inspection)
+- all `vpn/*` → `vpn/exec/` (command execution)
 
 `audit` imports `store`; therefore `store` must never import `audit`. Break this cycle with an interface (`AuditStore`) defined in `audit`, implemented by `store.Store`.
 
@@ -94,22 +113,25 @@ type Event struct {
 }
 ```
 
-### `ocserv.Manager` interface
+### `vpn/sessions.Manager` interface
 Implemented by `OcctlAdapter` (production) and `FakeManager` (tests). All session and user inspection goes through this interface.
 
-### `ocserv.PasswdManager` interface
+### `vpn/users.PasswdManager` interface
 Implemented by `OcpasswdAdapter` (production) and `FakePasswdManager` (tests). User lifecycle (create, delete, lock, unlock, update password) goes through this interface.
 
-### `ocserv/service.ServiceManager` interface
+### `vpn/service.ServiceManager` interface
 Implemented by `SystemdManager` (production) and `FakeServiceManager` (tests). Start/stop/restart/status of the systemd unit.
 
-### `ocserv/cmd.CommandRunner` interface
+### `vpn/exec.CommandRunner` interface
 ```go
 type CommandRunner interface {
-    Run(ctx context.Context, name string, args []string, stdin string) (CommandResult, error)
+    Run(ctx context.Context, name string, args []string, stdin io.Reader) (CommandResult, error)
 }
 ```
 `OSCommandRunner` uses `exec.CommandContext`. **Always pass args separately — never interpolate into a shell string.**
+
+### `monitor.Store` interface
+Implemented by `TSDBStore` (production, backed by tstorage) and `MemoryStore` (tests/fallback). All metric writes and range queries go through this interface.
 
 ---
 
@@ -142,21 +164,19 @@ Do not create a service that only calls `authorizer.Allowed` and then delegates 
 
 ### 5. Interface placement
 Define interfaces where they are consumed, not where they are produced.
-- `CommandRunner` lives in `ocserv/cmd` — the cmd package defines and implements it; callers import the interface.
-- `ServiceManager` lives in `ocserv/service`.
-- `LogReader` lives in `internal/logs`.
+- `CommandRunner` lives in `vpn/exec/` — the exec package defines and implements it; callers import the interface.
+- `ServiceManager` lives in `vpn/service/`.
+- `Manager` (session) lives in `vpn/sessions/`.
+- `PasswdManager` lives in `vpn/users/`.
+- `LogReader` lives in `internal/logs/`.
+- `Store` (metrics) lives in `internal/monitor/`.
 
-### 6. Shim files for backward compat
-When a type moves to a sub-package, add a `*_compat.go` file in the old package with type aliases:
-```go
-type CommandRunner = cmd.CommandRunner
-func NewOSCommandRunner() *cmd.OSCommandRunner { return cmd.NewOSCommandRunner() }
-```
-This allows incremental migration without a big-bang rename. Remove shims after all callers are updated.
+### 6. No compat shims
+Types live in exactly one package. Do not add `*_compat.go` re-export files. If a type needs to move, update all callers in the same change.
 
 ### 7. Test doubles follow the `Fake*` naming convention
 - Prefix: `Fake` (e.g. `FakeCommandRunner`, `FakePasswdManager`, `FakeServiceManager`)
-- Live in the same package as the interface (`cmd/fake.go`, `service/fake.go`, `passwd_fake.go`)
+- Live in the same package as the interface (`vpn/exec/fake.go`, `vpn/service/fake.go`, `vpn/users/fake.go`)
 - Thread-safe (use `sync.Mutex`)
 - Expose call counters and an injectable error: `StartCount()`, `SetError(err)`
 - Never use `testify/mock` — fakes are preferred
