@@ -11,12 +11,15 @@
   import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
   import UnavailableChips from '$lib/components/ui/UnavailableChips.svelte';
   import PaginatedTable from '$lib/components/ui/PaginatedTable.svelte';
+  import UserSessionDrawer from '$lib/components/history/UserSessionDrawer.svelte';
   import type { Chip } from '$lib/components/ui/UnavailableChips.svelte';
   import { formatRelativeTime, formatAbsoluteTime } from '$lib/utils/format';
   import { paginate } from '$lib/utils/pagination';
 
   import {
     getHistoryAnalytics,
+    getHistoryUsers,
+    getHistoryUserSessions,
     getMe,
     getMonitoringOverview,
     getSettings,
@@ -31,7 +34,8 @@
     type MonitoringSeries,
     type MonitoringWindow,
     type Principal,
-    type Setting
+    type Setting,
+    type UserSessionSummary
   } from '$lib/api';
   import { formatBytes, metricByName, seriesByMetric } from '$lib/monitoring';
 
@@ -42,9 +46,9 @@
   const NET_TX = 'net_interface_tx_bytes';
   const VPN_RX = 'vpn_interface_rx_bytes';
   const VPN_TX = 'vpn_interface_tx_bytes';
-  const USER_RX = 'user_rx_bytes';
-  const USER_TX = 'user_tx_bytes';
   const CONNECTION_RATE = 'connection_rate';
+  const ACTIVE_SESSIONS = 'active_sessions';
+  const CONCURRENT_SESSIONS = 'concurrent_sessions';
 
   type ChartDefinition = {
     metric: string;
@@ -58,9 +62,9 @@
     { metric: NET_TX, title: 'Network outbound' },
     { metric: VPN_RX, title: 'VPN inbound' },
     { metric: VPN_TX, title: 'VPN outbound' },
-    { metric: USER_RX, title: 'User inbound' },
-    { metric: USER_TX, title: 'User outbound' },
-    { metric: CONNECTION_RATE, title: 'Connection rate' }
+    { metric: ACTIVE_SESSIONS, title: 'Active sessions' },
+    { metric: CONNECTION_RATE, title: 'Connection rate' },
+    { metric: CONCURRENT_SESSIONS, title: 'Concurrent sessions' }
   ];
 
   let loading = $state(true);
@@ -83,14 +87,23 @@
   let settingsLoading = $state(false);
   let settingsError = $state('');
   let settingsSuccess = $state('');
-  let sessionsPage = $state(1);
+
+  // Per-user table state
+  let userSummaries = $state<UserSessionSummary[]>([]);
+  let userSummariesLoading = $state(false);
+  let userSummariesError = $state('');
+  let userSummariesPage = $state(1);
+
+  // Drawer state
+  let drawerUsername = $state<string | null>(null);
+  let drawerSessions = $state<HistoricalSession[]>([]);
+  let drawerLoading = $state(false);
 
   const isOwner = $derived(hasOwnerRole(principal));
-  const sessions = $derived(analytics?.recentSessions ?? analytics?.sessions ?? []);
   const sampleWarning = $derived(sampleDataWarning(analytics));
-  const totals = $derived(calculateTotals(sessions, analytics?.summary));
+  const totals = $derived(calculateTotals(analytics?.summary));
   const purgeEnabled = $derived(isOwner && confirmation === 'PURGE' && !purgeSubmitting);
-  const pagedSessions = $derived(paginate(sessions, sessionsPage, 10));
+  const pagedUserSummaries = $derived(paginate(userSummaries, userSummariesPage, 10));
   const unavailableChips = $derived<Chip[]>(
     chartDefinitions
       .filter(chart => !shouldShowChart(chart.metric))
@@ -102,6 +115,7 @@
     refreshInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         void reloadMonitoring();
+        void reloadUserSummaries();
       }
     }, 15_000);
   });
@@ -113,7 +127,6 @@
   });
 
   async function loadHistory() {
-    sessionsPage = 1;
     loading = true;
     error = '';
     try {
@@ -124,6 +137,7 @@
       principal = principalFromAuth(await getMe());
       analytics = await getHistoryAnalytics();
       void reloadMonitoring(monitoringWindow);
+      void reloadUserSummaries(monitoringWindow);
       void loadSettings();
     } catch (caught) {
       error = caught instanceof Error ? caught.message : 'Unable to load historical analytics.';
@@ -142,7 +156,7 @@
         retentionSetting = retention.value;
       }
     } catch {
-      // Settings are optional — don't block the page
+      // Settings are optional
     } finally {
       settingsLoading = false;
     }
@@ -179,15 +193,49 @@
     }
   }
 
+  async function reloadUserSummaries(window: MonitoringWindow = monitoringWindow) {
+    userSummariesPage = 1;
+    userSummariesLoading = true;
+    userSummariesError = '';
+    try {
+      userSummaries = await getHistoryUsers(window);
+    } catch (caught) {
+      userSummariesError = caught instanceof Error ? caught.message : 'Unable to load user session summaries.';
+      userSummaries = [];
+    } finally {
+      userSummariesLoading = false;
+    }
+  }
+
   function isLatestMonitoringRequest(requestId: number, window: MonitoringWindow): boolean {
     return requestId === monitoringRequestId && window === monitoringWindow;
   }
 
-  function handleMonitoringWindowChange(nextWindow: string) {
+  function handleWindowChange(nextWindow: string) {
     const window = nextWindow as MonitoringWindow;
     if (!HISTORY_WINDOWS.includes(window) || window === monitoringWindow) return;
     monitoringWindow = window;
     void reloadMonitoring(window);
+    void reloadUserSummaries(window);
+  }
+
+  async function handleUserRowClick(username: string) {
+    drawerUsername = username;
+    drawerSessions = [];
+    drawerLoading = true;
+    try {
+      drawerSessions = await getHistoryUserSessions(username, monitoringWindow);
+    } catch {
+      // 404 means no sessions in window — show empty drawer rather than error
+      drawerSessions = [];
+    } finally {
+      drawerLoading = false;
+    }
+  }
+
+  function closeDrawer() {
+    drawerUsername = null;
+    drawerSessions = [];
   }
 
   function metricSeries(metric: string): MonitoringSeries | undefined {
@@ -233,19 +281,15 @@
     return '';
   }
 
-  function calculateTotals(sessionsToTotal: HistoricalSession[], summary: Record<string, unknown> | undefined) {
-    const sessionCount = numberFrom(summary?.sessionCount) ?? numberFrom(summary?.totalSessions) ?? sessionsToTotal.length;
-    const rxBytes = numberFrom(summary?.rxBytes) ?? numberFrom(summary?.bytesIn) ?? sessionsToTotal.reduce((total, session) => total + (session.rxBytes ?? session.bytesIn ?? 0), 0);
-    const txBytes = numberFrom(summary?.txBytes) ?? numberFrom(summary?.bytesOut) ?? sessionsToTotal.reduce((total, session) => total + (session.txBytes ?? session.bytesOut ?? 0), 0);
+  function calculateTotals(summary: Record<string, unknown> | undefined) {
+    const sessionCount = numberFrom(summary?.sessionCount) ?? numberFrom(summary?.totalSessions) ?? 0;
+    const rxBytes = numberFrom(summary?.rxBytes) ?? numberFrom(summary?.bytesIn) ?? 0;
+    const txBytes = numberFrom(summary?.txBytes) ?? numberFrom(summary?.bytesOut) ?? 0;
     return { sessionCount, rxBytes, txBytes, totalBytes: rxBytes + txBytes };
   }
 
   function numberFrom(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
-  }
-
-  function sessionUser(session: HistoricalSession): string {
-    return session.username ?? session.user ?? '—';
   }
 
   function chartData(metric: string): { timestamp: Date; value: number }[] {
@@ -255,6 +299,16 @@
       .filter(p => Number.isFinite(Date.parse(p.timestamp)) && Number.isFinite(p.value))
       .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
+
+  function formatDuration(secs: number): string {
+    if (secs === 0) return '—';
+    const d = Math.floor(secs / 86400);
+    const h = Math.floor((secs % 86400) / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
   }
 </script>
 
@@ -334,7 +388,7 @@
         <WindowSelector
           value={monitoringWindow}
           windows={HISTORY_WINDOWS}
-          onchange={handleMonitoringWindowChange}
+          onchange={handleWindowChange}
         />
         <button
           type="button"
@@ -391,44 +445,70 @@
     {/if}
   </section>
 
-  <!-- Recent historical sessions -->
+  <!-- User session summaries -->
   <section aria-labelledby="sessions-heading" class="mb-8">
-    {#if sessions.length > 0}
-      <CardTable title="Recent historical sessions">
+    <div class="flex items-center justify-between mb-4">
+      <h2 id="sessions-heading" class="text-lg font-semibold text-slate-700">User sessions</h2>
+    </div>
+
+    {#if userSummariesError}
+      <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4" role="alert">
+        <p class="text-red-700 text-sm">{userSummariesError}</p>
+      </div>
+    {/if}
+
+    {#if userSummariesLoading && userSummaries.length === 0}
+      <div class="flex items-center justify-center py-12">
+        <div class="text-center">
+          <div class="w-6 h-6 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin mx-auto mb-2"></div>
+          <p class="text-slate-500 text-sm">Loading user sessions…</p>
+        </div>
+      </div>
+    {:else if userSummaries.length === 0}
+      <p class="text-sm text-slate-500">No sessions in this period.</p>
+    {:else}
+      <CardTable title="User sessions — last {monitoringWindow}">
         <PaginatedTable
-          totalPages={pagedSessions.totalPages}
-          currentPage={pagedSessions.page}
-          onPageChange={(p) => (sessionsPage = p)}
+          totalPages={pagedUserSummaries.totalPages}
+          currentPage={pagedUserSummaries.page}
+          onPageChange={(p) => (userSummariesPage = p)}
         >
           <table class="w-full text-sm">
             <thead class="bg-slate-50">
-              <tr class="text-left text-slate-500 font-medium">
+              <tr class="text-left text-slate-500 font-medium text-xs">
                 <th class="px-6 py-3">User</th>
-                <th class="px-6 py-3">Started</th>
-                <th class="px-6 py-3">Ended</th>
-                <th class="px-6 py-3">Received</th>
-                <th class="px-6 py-3">Sent</th>
-                <th class="px-6 py-3">Remote</th>
+                <th class="px-6 py-3">Sessions</th>
+                <th class="px-6 py-3">Total time</th>
+                <th class="px-6 py-3">Avg download</th>
+                <th class="px-6 py-3">Avg upload</th>
+                <th class="px-6 py-3">Total received</th>
+                <th class="px-6 py-3">Total sent</th>
+                <th class="px-6 py-3">Total</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-              {#each pagedSessions.items as session}
-                <tr class="hover:bg-slate-50">
-                  <td class="px-6 py-3 text-slate-700">{sessionUser(session)}</td>
-                  <td class="px-6 py-3 text-slate-700" title={session.connectedAt ?? session.startedAt ?? ''}>{formatRelativeTime(session.connectedAt ?? session.startedAt)}</td>
-                  <td class="px-6 py-3 text-slate-700" title={session.disconnectedAt ?? session.endedAt ?? ''}>{formatRelativeTime(session.disconnectedAt ?? session.endedAt)}</td>
-                  <td class="px-6 py-3 text-slate-700">{formatBytes(session.rxBytes ?? session.bytesIn ?? 0)}</td>
-                  <td class="px-6 py-3 text-slate-700">{formatBytes(session.txBytes ?? session.bytesOut ?? 0)}</td>
-                  <td class="px-6 py-3 text-slate-700">{session.remoteAddress ?? '—'}</td>
+              {#each pagedUserSummaries.items as row (row.username)}
+                <tr
+                  class="hover:bg-slate-50 cursor-pointer"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => handleUserRowClick(row.username)}
+                  onkeydown={(e) => e.key === 'Enter' && handleUserRowClick(row.username)}
+                >
+                  <td class="px-6 py-3 text-slate-700 font-medium">{row.username}</td>
+                  <td class="px-6 py-3 text-slate-700">{row.sessionCount}</td>
+                  <td class="px-6 py-3 text-slate-700">{formatDuration(row.totalDurationSeconds)}</td>
+                  <td class="px-6 py-3 text-slate-700">{formatBytes(row.avgBytesIn)}</td>
+                  <td class="px-6 py-3 text-slate-700">{formatBytes(row.avgBytesOut)}</td>
+                  <td class="px-6 py-3 text-slate-700">{formatBytes(row.totalBytesIn)}</td>
+                  <td class="px-6 py-3 text-slate-700">{formatBytes(row.totalBytesOut)}</td>
+                  <td class="px-6 py-3 text-slate-700">{formatBytes(row.totalBytesIn + row.totalBytesOut)}</td>
                 </tr>
               {/each}
             </tbody>
           </table>
         </PaginatedTable>
       </CardTable>
-    {:else}
-      <h2 id="sessions-heading" class="text-lg font-semibold text-slate-700 mb-4">Recent historical sessions</h2>
-      <p class="text-sm text-slate-500">No historical sessions returned yet.</p>
     {/if}
   </section>
 
@@ -515,6 +595,25 @@
       {/if}
     </div>
   </section>
+
+  <!-- User session drawer -->
+  {#if drawerUsername !== null}
+    {#if drawerLoading}
+      <div class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center">
+        <div class="bg-white rounded-lg p-8 flex flex-col items-center gap-3">
+          <div class="w-6 h-6 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin"></div>
+          <p class="text-sm text-slate-500">Loading sessions…</p>
+        </div>
+      </div>
+    {:else}
+      <UserSessionDrawer
+        username={drawerUsername}
+        window={monitoringWindow}
+        sessions={drawerSessions}
+        onclose={closeDrawer}
+      />
+    {/if}
+  {/if}
 
 {:else}
   <div class="bg-red-50 border border-red-200 rounded-lg p-6">
