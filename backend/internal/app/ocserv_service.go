@@ -8,6 +8,7 @@ import (
 	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/ocserv"
 	"ocserv_panel/backend/internal/rbac"
+	"ocserv_panel/backend/internal/validation"
 )
 
 // OcservService orchestrates ocserv readiness, sessions, users, service, and config.
@@ -181,13 +182,13 @@ func (s *OcservService) CreateOcservUser(ctx context.Context, principal auth.Pri
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersCreate, "ocserv.users.create"); err != nil {
 		return err
 	}
-	if err := ocserv.ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
-	if err := ocserv.ValidatePassword(password); err != nil {
+	if err := validation.Password(password); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
-	if err := ocserv.ValidateGroup(group); err != nil {
+	if err := validation.Group(group); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
@@ -208,7 +209,7 @@ func (s *OcservService) DeleteOcservUser(ctx context.Context, principal auth.Pri
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersDelete, "ocserv.users.delete"); err != nil {
 		return err
 	}
-	if err := ocserv.ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
@@ -225,10 +226,10 @@ func (s *OcservService) UpdateOcservUserPassword(ctx context.Context, principal 
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.update_password"); err != nil {
 		return err
 	}
-	if err := ocserv.ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
-	if err := ocserv.ValidatePassword(newPassword); err != nil {
+	if err := validation.Password(newPassword); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
@@ -246,10 +247,10 @@ func (s *OcservService) UpdateOcservUserGroup(ctx context.Context, principal aut
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.update_group"); err != nil {
 		return err
 	}
-	if err := ocserv.ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
-	if err := ocserv.ValidateGroup(group); err != nil {
+	if err := validation.Group(group); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
@@ -267,7 +268,7 @@ func (s *OcservService) LockOcservUser(ctx context.Context, principal auth.Princ
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.lock"); err != nil {
 		return err
 	}
-	if err := ocserv.ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
@@ -284,7 +285,7 @@ func (s *OcservService) UnlockOcservUser(ctx context.Context, principal auth.Pri
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersUpdate, "ocserv.users.unlock"); err != nil {
 		return err
 	}
-	if err := ocserv.ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
@@ -311,7 +312,7 @@ func (s *OcservService) BulkDeleteOcservUsers(ctx context.Context, principal aut
 
 	actorID := principal.ID
 	for _, username := range usernames {
-		if err := ocserv.ValidateUsername(username); err != nil {
+		if err := validation.Username(username); err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, BulkError{ID: username, Error: "invalid username"})
 			continue
@@ -346,7 +347,7 @@ func (s *OcservService) BulkLockOcservUsers(ctx context.Context, principal auth.
 
 	actorID := principal.ID
 	for _, username := range usernames {
-		if err := ocserv.ValidateUsername(username); err != nil {
+		if err := validation.Username(username); err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, BulkError{ID: username, Error: "invalid username"})
 			continue
@@ -381,7 +382,7 @@ func (s *OcservService) BulkUnlockOcservUsers(ctx context.Context, principal aut
 
 	actorID := principal.ID
 	for _, username := range usernames {
-		if err := ocserv.ValidateUsername(username); err != nil {
+		if err := validation.Username(username); err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, BulkError{ID: username, Error: "invalid username"})
 			continue
@@ -430,7 +431,7 @@ func (s *OcservService) GetUserConnections(ctx context.Context, principal auth.P
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.users.connections"); err != nil {
 		return nil, err
 	}
-	if err := ocserv.ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	conns, err := s.sessions.GetUserDetails(ctx, username)
@@ -508,7 +509,7 @@ func (s *OcservService) DisconnectUser(ctx context.Context, principal auth.Princ
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsDisconnect, "ocserv.user.disconnect"); err != nil {
 		return err
 	}
-	if err := ocserv.ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID
@@ -525,7 +526,7 @@ func (s *OcservService) UnbanIP(ctx context.Context, principal auth.Principal, i
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservBanManage, "ocserv.ban.unban"); err != nil {
 		return err
 	}
-	if err := ocserv.ValidateIPAddress(ip); err != nil {
+	if err := validation.IPAddress(ip); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 	}
 	actorID := principal.ID

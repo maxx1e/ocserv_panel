@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"ocserv_panel/backend/internal/validation"
 )
 
 // sessionIDPattern matches valid ocserv session IDs (alphanumeric, hyphens, dots, underscores).
@@ -320,7 +322,7 @@ func (a *OcctlAdapter) ListConnectedUsers(ctx context.Context) ([]ConnectedUser,
 // Tries JSON parsing first (native occtl -j output), falls back to text parsing.
 // Timeout: 10 seconds.
 func (a *OcctlAdapter) GetUserDetails(ctx context.Context, username string) ([]UserConnection, error) {
-	if err := ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return nil, fmt.Errorf("get user details: %w", err)
 	}
 
@@ -516,7 +518,7 @@ func (a *OcctlAdapter) ListBanPoints(ctx context.Context) ([]BanPointEntry, erro
 // DisconnectUser calls `occtl disconnect user <username>`.
 // Timeout: 15 seconds.
 func (a *OcctlAdapter) DisconnectUser(ctx context.Context, username string) error {
-	if err := ValidateUsername(username); err != nil {
+	if err := validation.Username(username); err != nil {
 		return fmt.Errorf("disconnect user: %w", err)
 	}
 
@@ -539,7 +541,7 @@ func (a *OcctlAdapter) DisconnectUser(ctx context.Context, username string) erro
 // UnbanIP calls `occtl unban ip <ip>`.
 // Timeout: 15 seconds.
 func (a *OcctlAdapter) UnbanIP(ctx context.Context, ip string) error {
-	if err := ValidateIPAddress(ip); err != nil {
+	if err := validation.IPAddress(ip); err != nil {
 		return fmt.Errorf("unban ip: %w", err)
 	}
 
