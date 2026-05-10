@@ -33,6 +33,7 @@ const (
 	PermissionOcservConfigRead        Permission = "ocserv:config:read"
 	PermissionOcservConfigEdit        Permission = "ocserv:config:edit"
 	PermissionOcservConfigRollback    Permission = "ocserv:config:rollback"
+	PermissionOcservBanManage         Permission = "ocserv:bans:manage"
 
 	// Admin user management permissions
 	PermissionAdminUsersRead   Permission = "admin:users:read"
@@ -73,6 +74,7 @@ func NewDefaultAuthorizer() Authorizer {
 				PermissionOcservConfigRead:         {},
 				PermissionOcservConfigEdit:         {},
 				PermissionOcservConfigRollback:     {},
+				PermissionOcservBanManage:          {},
 				PermissionAdminUsersRead:           {},
 				PermissionAdminUsersCreate:         {},
 				PermissionAdminUsersUpdate:         {},

@@ -11,7 +11,8 @@ type PasswdUser struct {
 
 // PasswdManager manages ocserv password-based users.
 type PasswdManager interface {
-	CreateUser(ctx context.Context, username, password string) error
+	CreateUser(ctx context.Context, username, password, group string) error
+	UpdateGroup(ctx context.Context, username, group string) error
 	DeleteUser(ctx context.Context, username string) error
 	UpdatePassword(ctx context.Context, username, newPassword string) error
 	ListUsers(ctx context.Context) ([]PasswdUser, error)

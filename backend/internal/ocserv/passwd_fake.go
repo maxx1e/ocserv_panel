@@ -22,7 +22,7 @@ func NewFakePasswdManager() *FakePasswdManager {
 }
 
 // CreateUser adds a user to the in-memory store.
-func (f *FakePasswdManager) CreateUser(ctx context.Context, username, password string) error {
+func (f *FakePasswdManager) CreateUser(ctx context.Context, username, password, group string) error {
 	_ = ctx
 	_ = password
 	f.mu.Lock()
@@ -30,7 +30,27 @@ func (f *FakePasswdManager) CreateUser(ctx context.Context, username, password s
 	if f.err != nil {
 		return f.err
 	}
-	f.users[username] = PasswdUser{Username: username, Group: "default", Active: true}
+	if group == "" {
+		group = "*"
+	}
+	f.users[username] = PasswdUser{Username: username, Group: group, Active: true}
+	return nil
+}
+
+// UpdateGroup changes the group for an existing user.
+func (f *FakePasswdManager) UpdateGroup(ctx context.Context, username, group string) error {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	u, ok := f.users[username]
+	if !ok {
+		return fmt.Errorf("user %s not found", username)
+	}
+	u.Group = group
+	f.users[username] = u
 	return nil
 }
 

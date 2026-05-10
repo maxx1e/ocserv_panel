@@ -163,7 +163,7 @@ func TestOcservServiceDisconnectAllowedForOwner(t *testing.T) {
 func TestOcservServiceCreateUserDeniedForViewer(t *testing.T) {
 	t.Parallel()
 	svc, _, _, _ := newTestOcservService(t, ocserv.ServiceInactive)
-	err := svc.CreateOcservUser(context.Background(), viewerPrincipal(), "alice", "password")
+	err := svc.CreateOcservUser(context.Background(), viewerPrincipal(), "alice", "password", "")
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("expected ErrPermissionDenied for viewer, got %v", err)
 	}
@@ -172,7 +172,7 @@ func TestOcservServiceCreateUserDeniedForViewer(t *testing.T) {
 func TestOcservServiceCreateUserAllowedForOwner(t *testing.T) {
 	t.Parallel()
 	svc, _, fakePasswd, _ := newTestOcservService(t, ocserv.ServiceInactive)
-	if err := svc.CreateOcservUser(context.Background(), ownerPrincipal(), "alice", "password"); err != nil {
+	if err := svc.CreateOcservUser(context.Background(), ownerPrincipal(), "alice", "password", ""); err != nil {
 		t.Fatalf("expected owner to create user, got %v", err)
 	}
 	exists, _ := fakePasswd.UserExists(context.Background(), "alice")
@@ -184,7 +184,7 @@ func TestOcservServiceCreateUserAllowedForOwner(t *testing.T) {
 func TestOcservServiceDeleteUserAllowedForOwner(t *testing.T) {
 	t.Parallel()
 	svc, _, fakePasswd, _ := newTestOcservService(t, ocserv.ServiceInactive)
-	_ = fakePasswd.CreateUser(context.Background(), "alice", "password")
+	_ = fakePasswd.CreateUser(context.Background(), "alice", "password", "")
 
 	if err := svc.DeleteOcservUser(context.Background(), ownerPrincipal(), "alice"); err != nil {
 		t.Fatalf("expected owner to delete user, got %v", err)
@@ -198,7 +198,7 @@ func TestOcservServiceDeleteUserAllowedForOwner(t *testing.T) {
 func TestOcservServiceListUsersAllowedForViewer(t *testing.T) {
 	t.Parallel()
 	svc, _, fakePasswd, _ := newTestOcservService(t, ocserv.ServiceInactive)
-	_ = fakePasswd.CreateUser(context.Background(), "alice", "password")
+	_ = fakePasswd.CreateUser(context.Background(), "alice", "password", "")
 
 	users, err := svc.ListOcservUsers(context.Background(), viewerPrincipal())
 	if err != nil {
