@@ -674,6 +674,7 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 			app.NewAdminUserService(s, recorder, rbac.NewDefaultAuthorizer(), nil),
 			nil,
 			rbac.NewDefaultAuthorizer(),
+			s,
 			AppOptions{CookieSecure: cookieSecure},
 			"",
 		),
@@ -1154,6 +1155,7 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 			app.NewAdminUserService(s, recorder, rbac.NewDefaultAuthorizer(), nil),
 			nil,
 			rbac.NewDefaultAuthorizer(),
+			s,
 			AppOptions{CookieSecure: true},
 			"",
 		),
@@ -1213,4 +1215,134 @@ func TestSystemInfoEndpointDeniedWithoutDashboardRead(t *testing.T) {
 
 	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/system-info", nil, cookie)
 	assertStatus(t, rec, http.StatusForbidden)
+}
+
+func TestHistoryUsersRequiresAuth(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+func TestHistoryUsersReturnsAggregates(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+
+	// Insert two sessions for "alice"
+	now := time.Now().UTC()
+	for _, offset := range []time.Duration{-2 * time.Hour, -1 * time.Hour} {
+		connectedAt := now.Add(offset)
+		_, err := h.database.ExecContext(context.Background(),
+			`INSERT INTO historical_sessions (username, connected_at, disconnected_at, bytes_in, bytes_out, duration_seconds, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			"alice", connectedAt.Format(time.RFC3339), connectedAt.Add(time.Hour).Format(time.RFC3339),
+			100, 200, 3600, "ingested", now.Format(time.RFC3339),
+		)
+		if err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+	}
+
+	cookie := h.login(t, "owner", "owner-password")
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users?window=24h", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body []map[string]any
+	decodeJSON(t, rec, &body)
+	if len(body) != 1 {
+		t.Fatalf("got %d user summaries, want 1", len(body))
+	}
+	row := body[0]
+	if row["username"] != "alice" {
+		t.Fatalf("username = %v, want alice", row["username"])
+	}
+	if row["sessionCount"] != float64(2) {
+		t.Fatalf("sessionCount = %v, want 2", row["sessionCount"])
+	}
+}
+
+func TestHistoryUsersDefaultsTo24h(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+
+	// Session within 24h
+	now := time.Now().UTC()
+	_, err := h.database.ExecContext(context.Background(),
+		`INSERT INTO historical_sessions (username, connected_at, disconnected_at, bytes_in, bytes_out, duration_seconds, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"alice", now.Add(-1*time.Hour).Format(time.RFC3339), now.Format(time.RFC3339),
+		100, 200, 3600, "ingested", now.Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	cookie := h.login(t, "owner", "owner-password")
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body []map[string]any
+	decodeJSON(t, rec, &body)
+	if len(body) != 1 {
+		t.Fatalf("got %d summaries without window param, want 1", len(body))
+	}
+}
+
+func TestHistoryUserSessionsRequiresAuth(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users/alice", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+func TestHistoryUserSessionsReturnsSessionsForUser(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+
+	now := time.Now().UTC()
+	for i, username := range []string{"alice", "alice", "bob"} {
+		connectedAt := now.Add(-time.Duration(i+1) * time.Hour)
+		_, err := h.database.ExecContext(context.Background(),
+			`INSERT INTO historical_sessions (username, connected_at, disconnected_at, bytes_in, bytes_out, duration_seconds, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			username, connectedAt.Format(time.RFC3339), connectedAt.Add(time.Hour).Format(time.RFC3339),
+			100, 200, 3600, "ingested", now.Format(time.RFC3339),
+		)
+		if err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+	}
+
+	cookie := h.login(t, "owner", "owner-password")
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users/alice?window=24h", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body []map[string]any
+	decodeJSON(t, rec, &body)
+	if len(body) != 2 {
+		t.Fatalf("got %d sessions for alice, want 2", len(body))
+	}
+	for _, s := range body {
+		if s["username"] != "alice" {
+			t.Fatalf("session username = %v, want alice", s["username"])
+		}
+	}
+}
+
+func TestHistoryUserSessionsUnknownUserReturns404(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+
+	cookie := h.login(t, "owner", "owner-password")
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users/nobody?window=24h", nil, cookie)
+	assertStatus(t, rec, http.StatusNotFound)
+}
+
+func TestHistoryUsersViewerCanRead(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	h.createViewer(t, "viewer", "viewer-password")
+
+	cookie := h.login(t, "viewer", "viewer-password")
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
 }

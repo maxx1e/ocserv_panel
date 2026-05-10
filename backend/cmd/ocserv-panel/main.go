@@ -254,6 +254,7 @@ func main() {
 			adminUserService,
 			auditLogService,
 			rbac.NewDefaultAuthorizer(),
+			persistence,
 			server.AppOptions{CookieSecure: cookieSecureFromEnv(), LoginLimiter: loginLimiter, RefreshInterval: cfg.Monitoring.DashboardRefreshInterval},
 			staticDir,
 		),

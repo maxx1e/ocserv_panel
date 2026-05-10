@@ -60,6 +60,7 @@ type App struct {
 	adminCounter  app.AdminCounter
 	readiness     *ocserv.ReadinessChecker
 	tsdbPath      string
+	store         *store.Store
 }
 
 // AppOptions configures NewAppRouter.
@@ -180,6 +181,16 @@ type purgeHistoryResponse struct {
 	DeletedRows   int64     `json:"deletedRows"`
 }
 
+type userSessionSummaryResponse struct {
+	Username             string `json:"username"`
+	SessionCount         int64  `json:"sessionCount"`
+	TotalDurationSeconds int64  `json:"totalDurationSeconds"`
+	TotalBytesIn         int64  `json:"totalBytesIn"`
+	TotalBytesOut        int64  `json:"totalBytesOut"`
+	AvgBytesIn           int64  `json:"avgBytesIn"`
+	AvgBytesOut          int64  `json:"avgBytesOut"`
+}
+
 // NewAppRouter builds the backend HTTP API router.
 func NewAppRouter(
 	authService *app.AuthService,
@@ -197,6 +208,7 @@ func NewAppRouter(
 	adminUserService *app.AdminUserService,
 	auditLogService *app.AuditLogService,
 	authorizer rbac.Authorizer,
+	s *store.Store,
 	opts AppOptions,
 	staticDir string,
 ) http.Handler {
@@ -224,6 +236,7 @@ func NewAppRouter(
 		adminCounter:     adminCounter,
 		readiness:        readiness,
 		tsdbPath:         tsdbPath,
+		store:            s,
 	}
 
 	mux := http.NewServeMux()
@@ -239,6 +252,8 @@ func NewAppRouter(
 	mux.HandleFunc("GET /api/dashboard/active-sessions", appHandler.handleDashboardActiveSessions)
 	mux.HandleFunc("/api/history/analytics", appHandler.handleHistoryAnalytics)
 	mux.HandleFunc("/api/history/purge", appHandler.handleHistoryPurge)
+	mux.Handle("GET /api/history/users/{username}", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleHistoryUserSessions)))
+	mux.Handle("GET /api/history/users", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleHistoryUsers)))
 	mux.Handle("/api/monitoring/catalog", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringCatalog)))
 	mux.Handle("/api/monitoring/overview", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringOverview)))
 	mux.Handle("/api/monitoring/series", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringSeries)))
@@ -498,6 +513,68 @@ func (a *App) handleHistoryPurge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, purgeHistoryResponse{RetentionDays: result.RetentionDays, Cutoff: result.Cutoff, DeletedRows: result.DeletedRows})
 }
 
+func (a *App) handleHistoryUsers(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	window := queryValueDefault(r, "window", "24h")
+	since := a.now().UTC().Add(-historyWindowDuration(window))
+	summaries, err := a.store.UserSessionSummaries(r.Context(), since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	resp := make([]userSessionSummaryResponse, 0, len(summaries))
+	for _, s := range summaries {
+		resp = append(resp, userSessionSummaryResponse{
+			Username:             s.Username,
+			SessionCount:         s.SessionCount,
+			TotalDurationSeconds: s.TotalDurationSeconds,
+			TotalBytesIn:         s.TotalBytesIn,
+			TotalBytesOut:        s.TotalBytesOut,
+			AvgBytesIn:           s.AvgBytesIn,
+			AvgBytesOut:          s.AvgBytesOut,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *App) handleHistoryUserSessions(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	username := r.PathValue("username")
+	if username == "" {
+		writeError(w, http.StatusBadRequest, "username is required")
+		return
+	}
+	window := queryValueDefault(r, "window", "24h")
+	since := a.now().UTC().Add(-historyWindowDuration(window))
+	sessions, err := a.store.UserSessions(r.Context(), username, since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if len(sessions) == 0 {
+		writeError(w, http.StatusNotFound, "no sessions found for user in this window")
+		return
+	}
+	resp := make([]historicalSessionResponse, 0, len(sessions))
+	for _, s := range sessions {
+		resp = append(resp, historicalSessionResponse{
+			ID:              s.ID,
+			Username:        s.Username,
+			ConnectedAt:     s.ConnectedAt,
+			DisconnectedAt:  s.DisconnectedAt,
+			DurationSeconds: s.DurationSeconds,
+			BytesIn:         s.BytesIn,
+			BytesOut:        s.BytesOut,
+			Source:          s.Source,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (a *App) handleMonitoringCatalog(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodGet) {
 		return
@@ -652,6 +729,19 @@ func queryValueDefault(r *http.Request, key string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// historyWindowDuration converts a history window string to a time.Duration.
+// Valid values: "24h", "7d", "30d". Defaults to 24h for unrecognized values.
+func historyWindowDuration(window string) time.Duration {
+	switch window {
+	case "7d":
+		return 7 * 24 * time.Hour
+	case "30d":
+		return 30 * 24 * time.Hour
+	default:
+		return 24 * time.Hour
+	}
 }
 
 func (a *App) setSessionCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
