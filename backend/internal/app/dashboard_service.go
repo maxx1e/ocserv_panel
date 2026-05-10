@@ -7,8 +7,8 @@ import (
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
-	"ocserv_panel/backend/internal/metrics"
-	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/monitor"
+	"ocserv_panel/backend/internal/vpn/health"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/store"
 )
@@ -18,8 +18,8 @@ type DashboardService struct {
 	store       dashboardStore
 	recorder    audit.Recorder
 	authorizer  rbac.Authorizer
-	readiness   *ocserv.ReadinessChecker
-	metricStore metrics.Store
+	readiness   *health.ReadinessChecker
+	metricStore monitor.Store
 	now         func() time.Time
 }
 
@@ -66,12 +66,12 @@ type PurgeHistoryResult struct {
 
 // NewDashboardService returns a dashboard service using local SQLite data only.
 // readiness may be nil; in that case, ocserv status is reported as not_configured.
-// An optional metrics.Store can be passed to populate active session counts from TSDB.
-func NewDashboardService(s *store.Store, recorder audit.Recorder, authorizer rbac.Authorizer, readiness *ocserv.ReadinessChecker, metricStores ...metrics.Store) *DashboardService {
+// An optional monitor.Store can be passed to populate active session counts from TSDB.
+func NewDashboardService(s *store.Store, recorder audit.Recorder, authorizer rbac.Authorizer, readiness *health.ReadinessChecker, metricStores ...monitor.Store) *DashboardService {
 	if recorder == nil {
 		recorder = audit.NoopRecorder{}
 	}
-	var ms metrics.Store
+	var ms monitor.Store
 	if len(metricStores) > 0 {
 		ms = metricStores[0]
 	}
@@ -159,8 +159,8 @@ func (s *DashboardService) latestSessionCount(ctx context.Context) int {
 		return 0
 	}
 	now := s.now()
-	series, err := s.metricStore.QueryRange(ctx, metrics.Query{
-		Metric: metrics.MetricActiveSessions,
+	series, err := s.metricStore.QueryRange(ctx, monitor.Query{
+		Metric: monitor.MetricActiveSessions,
 		Labels: map[string]string{},
 		Start:  now.Add(-2 * time.Minute),
 		End:    now,
@@ -194,7 +194,7 @@ func (s *DashboardService) buildOcservStatus(ctx context.Context) OcservStatusSu
 }
 
 // readinessToStatus maps OcservReadiness to the dashboard OcservStatusSummary.
-func readinessToStatus(r *ocserv.OcservReadiness) OcservStatusSummary {
+func readinessToStatus(r *health.OcservReadiness) OcservStatusSummary {
 	switch {
 	case r.BinaryPresent && r.ServiceRunning && r.ConfigValid:
 		return OcservStatusSummary{Status: "running", Configured: true, Message: "ocserv is running"}

@@ -10,9 +10,9 @@ import (
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
-	"ocserv_panel/backend/internal/ocserv"
-	"ocserv_panel/backend/internal/ocserv/cmd"
-	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
+	"ocserv_panel/backend/internal/vpn/health"
+	"ocserv_panel/backend/internal/vpn/exec"
+	"ocserv_panel/backend/internal/vpn/config"
 	"ocserv_panel/backend/internal/rbac"
 )
 
@@ -27,21 +27,21 @@ func newTestConfigService(t *testing.T) (*ConfigManagementService, string) {
 		t.Fatalf("write test config: %v", err)
 	}
 
-	files := ocservconfig.NewConfigFileManager(confPath, 10)
-	validator := ocservconfig.NewConfigValidator(confPath)
+	files := config.NewConfigFileManager(confPath, 10)
+	validator := config.NewConfigValidator(confPath)
 
-	runner := cmd.NewFakeCommandRunner()
-	runner.Results["occtl reload"] = cmd.CommandResult{ExitCode: 0}
-	reloader := ocservconfig.NewConfigReloader(runner, "occtl")
+	runner := exec.NewFakeCommandRunner()
+	runner.Results["occtl reload"] = exec.CommandResult{ExitCode: 0}
+	reloader := config.NewConfigReloader(runner, "occtl")
 
-	inspector := ocserv.NewNetworkInspectorWithProcDir(runner, dir)
+	inspector := health.NewNetworkInspectorWithProcDir(runner, dir)
 
 	svc := NewConfigManagementService(
 		files,
 		validator,
 		reloader,
 		inspector,
-		ocservconfig.NewRestartDetector(),
+		config.NewRestartDetector(),
 		audit.NoopRecorder{},
 		rbac.NewDefaultAuthorizer(),
 	)
@@ -349,24 +349,24 @@ func TestConfigServiceApplyConfigPartialSuccessReloadFails(t *testing.T) {
 		t.Fatalf("write test config: %v", err)
 	}
 
-	files := ocservconfig.NewConfigFileManager(confPath, 10)
-	validator := ocservconfig.NewConfigValidator(confPath)
+	files := config.NewConfigFileManager(confPath, 10)
+	validator := config.NewConfigValidator(confPath)
 
-	runner := cmd.NewFakeCommandRunner()
+	runner := exec.NewFakeCommandRunner()
 	// Reload returns non-zero exit — simulates ocserv rejecting the config at runtime.
-	runner.Results["occtl reload"] = cmd.CommandResult{
+	runner.Results["occtl reload"] = exec.CommandResult{
 		Stderr:   "error in configuration line 2",
 		ExitCode: 1,
 	}
-	reloader := ocservconfig.NewConfigReloader(runner, "occtl")
-	inspector := ocserv.NewNetworkInspectorWithProcDir(runner, dir)
+	reloader := config.NewConfigReloader(runner, "occtl")
+	inspector := health.NewNetworkInspectorWithProcDir(runner, dir)
 
 	svc := NewConfigManagementService(
 		files,
 		validator,
 		reloader,
 		inspector,
-		ocservconfig.NewRestartDetector(),
+		config.NewRestartDetector(),
 		audit.NoopRecorder{},
 		rbac.NewDefaultAuthorizer(),
 	)

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"ocserv_panel/backend/internal/config"
-	"ocserv_panel/backend/internal/ocserv"
+	"ocserv_panel/backend/internal/vpn/health"
 )
 
 // AdminCounter is a minimal store interface for health checks.
@@ -81,7 +81,7 @@ const (
 )
 
 // BuildVPNHealth builds the VPN server health status from a readiness checker.
-func BuildVPNHealth(ctx context.Context, readiness *ocserv.ReadinessChecker) VPNServerHealth {
+func BuildVPNHealth(ctx context.Context, readiness *health.ReadinessChecker) VPNServerHealth {
 	if readiness == nil {
 		return VPNServerHealth{SystemdStatus: "unknown"}
 	}

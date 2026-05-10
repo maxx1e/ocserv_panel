@@ -7,31 +7,34 @@ import (
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
-	"ocserv_panel/backend/internal/ocserv"
-	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
-	"ocserv_panel/backend/internal/ocserv/service"
+	"ocserv_panel/backend/internal/vpn/exec"
+	"ocserv_panel/backend/internal/vpn/sessions"
+	"ocserv_panel/backend/internal/vpn/health"
+	"ocserv_panel/backend/internal/vpn/users"
+	"ocserv_panel/backend/internal/vpn/config"
+	"ocserv_panel/backend/internal/vpn/service"
 	"ocserv_panel/backend/internal/rbac"
 )
 
 // newTestOcservService creates an OcservService with all-fake dependencies.
 func newTestOcservService(t *testing.T, svcStatus service.ServiceStatus) (
 	*OcservService,
-	*ocserv.FakeManager,
-	*ocserv.FakePasswdManager,
+	*sessions.FakeManager,
+	*users.FakePasswdManager,
 	*service.FakeServiceManager,
 ) {
 	t.Helper()
 
-	runner := ocserv.NewFakeCommandRunner()
+	runner := exec.NewFakeCommandRunner()
 	fakeSvc := service.NewFakeServiceManager(svcStatus)
-	checker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, runner, fakeSvc)
+	checker := health.NewReadinessChecker(func() health.ReadinessConfig { return health.ReadinessConfig{} }, runner, fakeSvc)
 
-	fakeManager := ocserv.NewFakeManager()
+	fakeManager := sessions.NewFakeManager()
 	fakeManager.DisconnectErr = nil // allow disconnect by default in service tests
 	fakeManager.TerminateErr = nil  // allow terminate by default in service tests
 
-	fakePasswd := ocserv.NewFakePasswdManager()
-	validator := ocservconfig.NewConfigValidator("/nonexistent/ocserv.conf")
+	fakePasswd := users.NewFakePasswdManager()
+	validator := config.NewConfigValidator("/nonexistent/ocserv.conf")
 
 	svc := NewOcservService(
 		checker,
@@ -131,7 +134,7 @@ func TestOcservServiceListSessionsDeniedForUnauthenticated(t *testing.T) {
 func TestOcservServiceListSessionsAllowedForViewer(t *testing.T) {
 	t.Parallel()
 	svc, fakeManager, _, _ := newTestOcservService(t, service.ServiceInactive)
-	fakeManager.Sessions = []ocserv.Session{
+	fakeManager.Sessions = []sessions.Session{
 		{ID: "s1", Username: "alice"},
 	}
 	sessions, err := svc.ListSessions(context.Background(), viewerPrincipal())
@@ -225,18 +228,18 @@ func (r *capturingRecorder) Record(_ context.Context, event audit.Event) error {
 // capturing recorder so tests can inspect audit events.
 func newTestOcservServiceWithRecorder(t *testing.T, svcStatus service.ServiceStatus) (
 	*OcservService,
-	*ocserv.FakeManager,
+	*sessions.FakeManager,
 	*capturingRecorder,
 ) {
 	t.Helper()
 
-	runner := ocserv.NewFakeCommandRunner()
+	runner := exec.NewFakeCommandRunner()
 	fakeSvc := service.NewFakeServiceManager(svcStatus)
-	checker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, runner, fakeSvc)
+	checker := health.NewReadinessChecker(func() health.ReadinessConfig { return health.ReadinessConfig{} }, runner, fakeSvc)
 
-	fakeManager := ocserv.NewFakeManager()
-	fakePasswd := ocserv.NewFakePasswdManager()
-	validator := ocservconfig.NewConfigValidator("/nonexistent/ocserv.conf")
+	fakeManager := sessions.NewFakeManager()
+	fakePasswd := users.NewFakePasswdManager()
+	validator := config.NewConfigValidator("/nonexistent/ocserv.conf")
 	recorder := &capturingRecorder{}
 
 	svc := NewOcservService(
@@ -327,7 +330,7 @@ func TestOcservServiceGetSessionDetailDeniedForUnauthenticated(t *testing.T) {
 func TestOcservServiceGetSessionDetailSuccess(t *testing.T) {
 	t.Parallel()
 	svc, fakeManager, _ := newTestOcservServiceWithRecorder(t, service.ServiceActive)
-	want := &ocserv.SessionDetail{ID: "s5", Username: "bob"}
+	want := &sessions.SessionDetail{ID: "s5", Username: "bob"}
 	fakeManager.SessionDetails["s5"] = want
 
 	got, err := svc.GetSessionDetail(context.Background(), viewerPrincipal(), "s5")

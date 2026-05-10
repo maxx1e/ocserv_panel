@@ -7,8 +7,8 @@ import (
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
-	"ocserv_panel/backend/internal/ocserv"
-	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
+	"ocserv_panel/backend/internal/vpn/health"
+	"ocserv_panel/backend/internal/vpn/config"
 	"ocserv_panel/backend/internal/rbac"
 )
 
@@ -23,8 +23,8 @@ var (
 // and any validation issues found in the content.
 type ConfigReadResult struct {
 	Content  string
-	Metadata ocservconfig.ConfigMetadata
-	Issues   []ocservconfig.ConfigIssue
+	Metadata config.ConfigMetadata
+	Issues   []config.ConfigIssue
 }
 
 // ValidationResult carries whether content passed validation and any issues found.
@@ -32,7 +32,7 @@ type ConfigReadResult struct {
 // changes would require a full service restart (vs a simple reload).
 type ValidationResult struct {
 	Valid           bool
-	Issues          []ocservconfig.ConfigIssue
+	Issues          []config.ConfigIssue
 	RequiresRestart bool
 	RestartReasons  []string
 }
@@ -44,7 +44,7 @@ type ApplyResult struct {
 	BackupNumber  int
 	ReloadSuccess bool
 	ReloadError   string
-	Issues        []ocservconfig.ConfigIssue
+	Issues        []config.ConfigIssue
 }
 
 // RollbackResult carries the outcome of restoring a numbered backup and
@@ -57,11 +57,11 @@ type RollbackResult struct {
 // ConfigManagementService provides RBAC-guarded, audited operations for
 // reading, validating, writing, and rolling back the ocserv configuration file.
 type ConfigManagementService struct {
-	files           *ocservconfig.ConfigFileManager
-	validator       *ocservconfig.ConfigValidator
-	reloader        *ocservconfig.ConfigReloader
-	inspector       *ocserv.NetworkInspector
-	restartDetector *ocservconfig.RestartDetector
+	files           *config.ConfigFileManager
+	validator       *config.ConfigValidator
+	reloader        *config.ConfigReloader
+	inspector       *health.NetworkInspector
+	restartDetector *config.RestartDetector
 	recorder        audit.Recorder
 	authorizer      rbac.Authorizer
 }
@@ -69,11 +69,11 @@ type ConfigManagementService struct {
 // NewConfigManagementService returns a ConfigManagementService wired with the
 // given dependencies. A nil recorder is replaced by a no-op recorder.
 func NewConfigManagementService(
-	files *ocservconfig.ConfigFileManager,
-	validator *ocservconfig.ConfigValidator,
-	reloader *ocservconfig.ConfigReloader,
-	inspector *ocserv.NetworkInspector,
-	restartDetector *ocservconfig.RestartDetector,
+	files *config.ConfigFileManager,
+	validator *config.ConfigValidator,
+	reloader *config.ConfigReloader,
+	inspector *health.NetworkInspector,
+	restartDetector *config.RestartDetector,
 	recorder audit.Recorder,
 	authorizer rbac.Authorizer,
 ) *ConfigManagementService {
@@ -117,7 +117,7 @@ func (s *ConfigManagementService) ReadConfig(ctx context.Context, principal auth
 
 // ListBackups returns metadata for all numbered config backups.
 // Requires PermissionOcservConfigRead.
-func (s *ConfigManagementService) ListBackups(ctx context.Context, principal auth.Principal) ([]ocservconfig.BackupInfo, error) {
+func (s *ConfigManagementService) ListBackups(ctx context.Context, principal auth.Principal) ([]config.BackupInfo, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.backups.list"); err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (s *ConfigManagementService) ListBackups(ctx context.Context, principal aut
 }
 
 // GetBackup returns the content of backup number n.
-// Requires PermissionOcservConfigRead. Maps ocserv.ErrBackupNotFound to
+// Requires PermissionOcservConfigRead. Maps sessions.ErrBackupNotFound to
 // ErrConfigBackupNotFound.
 func (s *ConfigManagementService) GetBackup(ctx context.Context, principal auth.Principal, n int) (string, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.backup.get"); err != nil {
@@ -139,7 +139,7 @@ func (s *ConfigManagementService) GetBackup(ctx context.Context, principal auth.
 
 	content, err := s.files.GetBackup(n)
 	if err != nil {
-		if errors.Is(err, ocservconfig.ErrBackupNotFound) {
+		if errors.Is(err, config.ErrBackupNotFound) {
 			return "", ErrConfigBackupNotFound
 		}
 		return "", fmt.Errorf("get config backup %d: %w", n, err)
@@ -162,7 +162,7 @@ func (s *ConfigManagementService) DiffWithContent(ctx context.Context, principal
 }
 
 // DiffWithBackup returns a unified diff between backup n and the current live
-// config. Requires PermissionOcservConfigRead. Maps ocserv.ErrBackupNotFound to
+// config. Requires PermissionOcservConfigRead. Maps sessions.ErrBackupNotFound to
 // ErrConfigBackupNotFound.
 func (s *ConfigManagementService) DiffWithBackup(ctx context.Context, principal auth.Principal, n int) (string, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.diff.backup"); err != nil {
@@ -171,7 +171,7 @@ func (s *ConfigManagementService) DiffWithBackup(ctx context.Context, principal 
 
 	diff, err := s.files.DiffWithBackup(n)
 	if err != nil {
-		if errors.Is(err, ocservconfig.ErrBackupNotFound) {
+		if errors.Is(err, config.ErrBackupNotFound) {
 			return "", ErrConfigBackupNotFound
 		}
 		return "", fmt.Errorf("diff config with backup %d: %w", n, err)
@@ -245,10 +245,10 @@ func (s *ConfigManagementService) ApplyConfig(ctx context.Context, principal aut
 	// Write to disk with backup rotation.
 	if err := s.files.Write(content); err != nil {
 		switch {
-		case errors.Is(err, ocservconfig.ErrConfigTooLarge):
+		case errors.Is(err, config.ErrConfigTooLarge):
 			_ = s.record(ctx, &actorID, "ocserv.config.apply", "ocserv_config", "", audit.OutcomeFailure, "config too large", nil)
 			return ApplyResult{}, ErrConfigValidationFailed
-		case errors.Is(err, ocservconfig.ErrConfigLocked):
+		case errors.Is(err, config.ErrConfigLocked):
 			_ = s.record(ctx, &actorID, "ocserv.config.apply", "ocserv_config", "", audit.OutcomeFailure, "config locked", nil)
 			return ApplyResult{}, ErrConfigFileLocked
 		default:
@@ -289,7 +289,7 @@ func (s *ConfigManagementService) ApplyConfig(ctx context.Context, principal aut
 }
 
 // Rollback restores backup number n as the live config and reloads ocserv.
-// Requires PermissionOcservConfigRollback. Maps ocserv.ErrBackupNotFound to
+// Requires PermissionOcservConfigRollback. Maps sessions.ErrBackupNotFound to
 // ErrConfigBackupNotFound.
 //
 // A successful restore followed by a reload failure returns a non-error
@@ -303,10 +303,10 @@ func (s *ConfigManagementService) Rollback(ctx context.Context, principal auth.P
 
 	if err := s.files.Rollback(n); err != nil {
 		switch {
-		case errors.Is(err, ocservconfig.ErrBackupNotFound):
+		case errors.Is(err, config.ErrBackupNotFound):
 			_ = s.record(ctx, &actorID, "ocserv.config.rollback", "ocserv_config", fmt.Sprint(n), audit.OutcomeFailure, "backup not found", nil)
 			return RollbackResult{}, ErrConfigBackupNotFound
-		case errors.Is(err, ocservconfig.ErrConfigLocked):
+		case errors.Is(err, config.ErrConfigLocked):
 			_ = s.record(ctx, &actorID, "ocserv.config.rollback", "ocserv_config", fmt.Sprint(n), audit.OutcomeFailure, "config locked", nil)
 			return RollbackResult{}, ErrConfigFileLocked
 		default:
@@ -343,14 +343,14 @@ func (s *ConfigManagementService) Rollback(ctx context.Context, principal auth.P
 
 // InspectNetwork runs host-level network prerequisite checks for ocserv.
 // Requires PermissionOcservConfigRead.
-func (s *ConfigManagementService) InspectNetwork(ctx context.Context, principal auth.Principal) (ocserv.NetworkPrerequisites, error) {
+func (s *ConfigManagementService) InspectNetwork(ctx context.Context, principal auth.Principal) (health.NetworkPrerequisites, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.network.inspect"); err != nil {
-		return ocserv.NetworkPrerequisites{}, err
+		return health.NetworkPrerequisites{}, err
 	}
 
 	prereqs, err := s.inspector.Inspect(ctx)
 	if err != nil {
-		return ocserv.NetworkPrerequisites{}, fmt.Errorf("inspect network prerequisites: %w", err)
+		return health.NetworkPrerequisites{}, fmt.Errorf("inspect network prerequisites: %w", err)
 	}
 	return prereqs, nil
 }
@@ -395,9 +395,9 @@ func (s *ConfigManagementService) record(
 }
 
 // hasErrorSeverity reports whether any issue has IssueError severity.
-func hasErrorSeverity(issues []ocservconfig.ConfigIssue) bool {
+func hasErrorSeverity(issues []config.ConfigIssue) bool {
 	for _, issue := range issues {
-		if issue.Severity == ocservconfig.IssueError {
+		if issue.Severity == config.IssueError {
 			return true
 		}
 	}

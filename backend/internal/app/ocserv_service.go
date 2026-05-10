@@ -6,31 +6,33 @@ import (
 
 	"ocserv_panel/backend/internal/audit"
 	"ocserv_panel/backend/internal/auth"
-	"ocserv_panel/backend/internal/ocserv"
-	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
-	"ocserv_panel/backend/internal/ocserv/service"
+	"ocserv_panel/backend/internal/vpn/sessions"
+	"ocserv_panel/backend/internal/vpn/users"
+	"ocserv_panel/backend/internal/vpn/health"
+	"ocserv_panel/backend/internal/vpn/config"
+	"ocserv_panel/backend/internal/vpn/service"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/validation"
 )
 
 // OcservService orchestrates ocserv readiness, sessions, users, service, and config.
 type OcservService struct {
-	readiness  *ocserv.ReadinessChecker
-	sessions   ocserv.Manager
-	users      ocserv.PasswdManager
+	readiness  *health.ReadinessChecker
+	sessions   sessions.Manager
+	users      users.PasswdManager
 	svc        service.ServiceManager
-	validator  *ocservconfig.ConfigValidator
+	validator  *config.ConfigValidator
 	recorder   audit.Recorder
 	authorizer rbac.Authorizer
 }
 
 // NewOcservService returns an OcservService wired with the given dependencies.
 func NewOcservService(
-	readiness *ocserv.ReadinessChecker,
-	sessions ocserv.Manager,
-	users ocserv.PasswdManager,
+	readiness *health.ReadinessChecker,
+	sessions sessions.Manager,
+	users users.PasswdManager,
 	svc service.ServiceManager,
-	validator *ocservconfig.ConfigValidator,
+	validator *config.ConfigValidator,
 	recorder audit.Recorder,
 	authorizer rbac.Authorizer,
 ) *OcservService {
@@ -49,7 +51,7 @@ func NewOcservService(
 }
 
 // Readiness returns the current ocserv installation and runtime state.
-func (s *OcservService) Readiness(ctx context.Context, principal auth.Principal) (*ocserv.OcservReadiness, error) {
+func (s *OcservService) Readiness(ctx context.Context, principal auth.Principal) (*health.OcservReadiness, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservRead, "ocserv.readiness"); err != nil {
 		return nil, err
 	}
@@ -115,7 +117,7 @@ func (s *OcservService) RestartService(ctx context.Context, principal auth.Princ
 }
 
 // ListSessions returns active ocserv sessions.
-func (s *OcservService) ListSessions(ctx context.Context, principal auth.Principal) ([]ocserv.Session, error) {
+func (s *OcservService) ListSessions(ctx context.Context, principal auth.Principal) ([]sessions.Session, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.sessions.list"); err != nil {
 		return nil, err
 	}
@@ -155,7 +157,7 @@ func (s *OcservService) TerminateSession(ctx context.Context, principal auth.Pri
 }
 
 // GetSessionDetail returns detailed information for a single ocserv session.
-func (s *OcservService) GetSessionDetail(ctx context.Context, principal auth.Principal, sessionID string) (*ocserv.SessionDetail, error) {
+func (s *OcservService) GetSessionDetail(ctx context.Context, principal auth.Principal, sessionID string) (*sessions.SessionDetail, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.sessions.detail"); err != nil {
 		return nil, err
 	}
@@ -167,7 +169,7 @@ func (s *OcservService) GetSessionDetail(ctx context.Context, principal auth.Pri
 }
 
 // ListOcservUsers returns ocserv password-based users.
-func (s *OcservService) ListOcservUsers(ctx context.Context, principal auth.Principal) ([]ocserv.PasswdUser, error) {
+func (s *OcservService) ListOcservUsers(ctx context.Context, principal auth.Principal) ([]users.PasswdUser, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservUsersRead, "ocserv.users.list"); err != nil {
 		return nil, err
 	}
@@ -405,7 +407,7 @@ func (s *OcservService) BulkUnlockOcservUsers(ctx context.Context, principal aut
 }
 
 // GetServerStatus returns the ocserv server status from `occtl show status`.
-func (s *OcservService) GetServerStatus(ctx context.Context, principal auth.Principal) (*ocserv.ServerStatus, error) {
+func (s *OcservService) GetServerStatus(ctx context.Context, principal auth.Principal) (*sessions.ServerStatus, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservRead, "ocserv.server.status"); err != nil {
 		return nil, err
 	}
@@ -417,7 +419,7 @@ func (s *OcservService) GetServerStatus(ctx context.Context, principal auth.Prin
 }
 
 // ListConnectedUsers returns connected users from `occtl show users`.
-func (s *OcservService) ListConnectedUsers(ctx context.Context, principal auth.Principal) ([]ocserv.ConnectedUser, error) {
+func (s *OcservService) ListConnectedUsers(ctx context.Context, principal auth.Principal) ([]sessions.ConnectedUser, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.users.connected"); err != nil {
 		return nil, err
 	}
@@ -429,7 +431,7 @@ func (s *OcservService) ListConnectedUsers(ctx context.Context, principal auth.P
 }
 
 // GetUserConnections returns detailed connections for a single user.
-func (s *OcservService) GetUserConnections(ctx context.Context, principal auth.Principal, username string) ([]ocserv.UserConnection, error) {
+func (s *OcservService) GetUserConnections(ctx context.Context, principal auth.Principal, username string) ([]sessions.UserConnection, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.users.connections"); err != nil {
 		return nil, err
 	}
@@ -444,7 +446,7 @@ func (s *OcservService) GetUserConnections(ctx context.Context, principal auth.P
 }
 
 // GetConnectionByID returns connection details for a specific connection ID.
-func (s *OcservService) GetConnectionByID(ctx context.Context, principal auth.Principal, id int) (*ocserv.UserConnection, error) {
+func (s *OcservService) GetConnectionByID(ctx context.Context, principal auth.Principal, id int) (*sessions.UserConnection, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.connections.detail"); err != nil {
 		return nil, err
 	}
@@ -459,7 +461,7 @@ func (s *OcservService) GetConnectionByID(ctx context.Context, principal auth.Pr
 }
 
 // ListEvents returns connection events from `occtl show events`.
-func (s *OcservService) ListEvents(ctx context.Context, principal auth.Principal) ([]ocserv.ConnectionEvent, error) {
+func (s *OcservService) ListEvents(ctx context.Context, principal auth.Principal) ([]sessions.ConnectionEvent, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.events.list"); err != nil {
 		return nil, err
 	}
@@ -471,7 +473,7 @@ func (s *OcservService) ListEvents(ctx context.Context, principal auth.Principal
 }
 
 // ListRoutes returns user-provided routes from `occtl show iroutes`.
-func (s *OcservService) ListRoutes(ctx context.Context, principal auth.Principal) ([]ocserv.UserRoute, error) {
+func (s *OcservService) ListRoutes(ctx context.Context, principal auth.Principal) ([]sessions.UserRoute, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.routes.list"); err != nil {
 		return nil, err
 	}
@@ -483,7 +485,7 @@ func (s *OcservService) ListRoutes(ctx context.Context, principal auth.Principal
 }
 
 // ListBannedIPs returns banned IPs from `occtl show ip bans`.
-func (s *OcservService) ListBannedIPs(ctx context.Context, principal auth.Principal) ([]ocserv.BannedIP, error) {
+func (s *OcservService) ListBannedIPs(ctx context.Context, principal auth.Principal) ([]sessions.BannedIP, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.bans.list"); err != nil {
 		return nil, err
 	}
@@ -495,7 +497,7 @@ func (s *OcservService) ListBannedIPs(ctx context.Context, principal auth.Princi
 }
 
 // ListBanPoints returns ban point entries from `occtl show ip ban points`.
-func (s *OcservService) ListBanPoints(ctx context.Context, principal auth.Principal) ([]ocserv.BanPointEntry, error) {
+func (s *OcservService) ListBanPoints(ctx context.Context, principal auth.Principal) ([]sessions.BanPointEntry, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.bans.points"); err != nil {
 		return nil, err
 	}
@@ -579,7 +581,7 @@ func (s *OcservService) ActiveUserSessions(ctx context.Context, principal auth.P
 }
 
 // ConfigIssues returns ocserv configuration validation issues.
-func (s *OcservService) ConfigIssues(ctx context.Context, principal auth.Principal) ([]ocservconfig.ConfigIssue, error) {
+func (s *OcservService) ConfigIssues(ctx context.Context, principal auth.Principal) ([]config.ConfigIssue, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservConfigRead, "ocserv.config.issues"); err != nil {
 		return nil, err
 	}
