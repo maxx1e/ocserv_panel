@@ -107,6 +107,103 @@ func (s *Store) PurgeHistoricalBefore(ctx context.Context, cutoff time.Time) (in
 	return deleted, nil
 }
 
+// UserSessionSummary aggregates historical session data for a single user.
+type UserSessionSummary struct {
+	Username             string
+	SessionCount         int64
+	TotalDurationSeconds int64
+	TotalBytesIn         int64
+	TotalBytesOut        int64
+	AvgBytesIn           int64
+	AvgBytesOut          int64
+}
+
+// UserSessionSummaries returns per-user aggregated session stats for sessions
+// where connected_at >= since, ordered by total bytes descending.
+func (s *Store) UserSessionSummaries(ctx context.Context, since time.Time) ([]UserSessionSummary, error) {
+	sinceStr := since.UTC().Format(time.RFC3339)
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			username,
+			COUNT(*) AS session_count,
+			COALESCE(SUM(duration_seconds), 0) AS total_duration_seconds,
+			COALESCE(SUM(bytes_in), 0) AS total_bytes_in,
+			COALESCE(SUM(bytes_out), 0) AS total_bytes_out,
+			COALESCE(AVG(bytes_in), 0) AS avg_bytes_in,
+			COALESCE(AVG(bytes_out), 0) AS avg_bytes_out
+		FROM historical_sessions
+		WHERE connected_at >= ?
+		GROUP BY username
+		ORDER BY (SUM(bytes_in) + SUM(bytes_out)) DESC
+	`, sinceStr)
+	if err != nil {
+		return nil, fmt.Errorf("query user session summaries: %w", err)
+	}
+	defer rows.Close()
+
+	summaries := make([]UserSessionSummary, 0)
+	for rows.Next() {
+		var sum UserSessionSummary
+		if err := rows.Scan(
+			&sum.Username,
+			&sum.SessionCount,
+			&sum.TotalDurationSeconds,
+			&sum.TotalBytesIn,
+			&sum.TotalBytesOut,
+			&sum.AvgBytesIn,
+			&sum.AvgBytesOut,
+		); err != nil {
+			return nil, fmt.Errorf("scan user session summary: %w", err)
+		}
+		summaries = append(summaries, sum)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user session summaries: %w", err)
+	}
+	return summaries, nil
+}
+
+// UserSessions returns individual historical sessions for username where
+// connected_at >= since, ordered chronologically (oldest first).
+func (s *Store) UserSessions(ctx context.Context, username string, since time.Time) ([]HistoricalSession, error) {
+	sinceStr := since.UTC().Format(time.RFC3339)
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source
+		 FROM historical_sessions
+		 WHERE username = ? AND connected_at >= ?
+		 ORDER BY connected_at ASC`,
+		username, sinceStr,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query user sessions: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := make([]HistoricalSession, 0)
+	for rows.Next() {
+		var session HistoricalSession
+		var connectedAt, disconnectedAt string
+		if err := rows.Scan(&session.ID, &session.Username, &connectedAt, &disconnectedAt, &session.DurationSeconds, &session.BytesIn, &session.BytesOut, &session.Source); err != nil {
+			return nil, fmt.Errorf("scan user session: %w", err)
+		}
+		parsedConnectedAt, err := parseTime(connectedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse user session connected_at: %w", err)
+		}
+		parsedDisconnectedAt, err := parseTime(disconnectedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse user session disconnected_at: %w", err)
+		}
+		session.ConnectedAt = parsedConnectedAt
+		session.DisconnectedAt = parsedDisconnectedAt
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user sessions: %w", err)
+	}
+	return sessions, nil
+}
+
 // StartHousekeeper starts a background goroutine that purges sessions older than
 // the configured retention window. It stops when ctx is cancelled.
 //

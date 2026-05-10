@@ -346,6 +346,128 @@ func TestStorePurgeHistoricalRespectsCutoffBoundary(t *testing.T) {
 	}
 }
 
+func TestUserSessionSummaries(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	now := time.Now().UTC()
+	insert := func(username string, connectedAt time.Time, bytesIn, bytesOut int64) {
+		_, err := s.DB.ExecContext(ctx,
+			`INSERT INTO historical_sessions (username, connected_at, disconnected_at, bytes_in, bytes_out, duration_seconds, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			username, connectedAt.Format(time.RFC3339), connectedAt.Add(time.Hour).Format(time.RFC3339),
+			bytesIn, bytesOut, 3600, "ingested", now.Format(time.RFC3339),
+		)
+		if err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+	}
+
+	// Two sessions for "alice" within window
+	insert("alice", now.Add(-2*time.Hour), 100, 200)
+	insert("alice", now.Add(-1*time.Hour), 300, 400)
+	// One session for "bob" within window
+	insert("bob", now.Add(-3*time.Hour), 50, 150)
+	// One old session outside window (should be excluded)
+	insert("alice", now.Add(-48*time.Hour), 9999, 9999)
+
+	since := now.Add(-24 * time.Hour)
+	summaries, err := s.UserSessionSummaries(ctx, since)
+	if err != nil {
+		t.Fatalf("UserSessionSummaries: %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("got %d summaries, want 2", len(summaries))
+	}
+
+	// alice has more total bytes, should be first
+	alice := summaries[0]
+	if alice.Username != "alice" {
+		t.Fatalf("summaries[0].Username = %q, want alice", alice.Username)
+	}
+	if alice.SessionCount != 2 {
+		t.Fatalf("alice.SessionCount = %d, want 2", alice.SessionCount)
+	}
+	if alice.TotalBytesIn != 400 {
+		t.Fatalf("alice.TotalBytesIn = %d, want 400", alice.TotalBytesIn)
+	}
+	if alice.TotalBytesOut != 600 {
+		t.Fatalf("alice.TotalBytesOut = %d, want 600", alice.TotalBytesOut)
+	}
+	if alice.AvgBytesIn != 200 {
+		t.Fatalf("alice.AvgBytesIn = %d, want 200", alice.AvgBytesIn)
+	}
+	if alice.AvgBytesOut != 300 {
+		t.Fatalf("alice.AvgBytesOut = %d, want 300", alice.AvgBytesOut)
+	}
+
+	bob := summaries[1]
+	if bob.Username != "bob" {
+		t.Fatalf("summaries[1].Username = %q, want bob", bob.Username)
+	}
+	if bob.SessionCount != 1 {
+		t.Fatalf("bob.SessionCount = %d, want 1", bob.SessionCount)
+	}
+}
+
+func TestUserSessions(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	now := time.Now().UTC()
+	insert := func(username string, connectedAt time.Time, bytesIn, bytesOut int64) {
+		_, err := s.DB.ExecContext(ctx,
+			`INSERT INTO historical_sessions (username, connected_at, disconnected_at, bytes_in, bytes_out, duration_seconds, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			username, connectedAt.Format(time.RFC3339), connectedAt.Add(time.Hour).Format(time.RFC3339),
+			bytesIn, bytesOut, 3600, "ingested", now.Format(time.RFC3339),
+		)
+		if err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+	}
+
+	insert("alice", now.Add(-2*time.Hour), 100, 200)
+	insert("alice", now.Add(-1*time.Hour), 300, 400)
+	insert("bob", now.Add(-1*time.Hour), 50, 150)
+	// Outside window
+	insert("alice", now.Add(-48*time.Hour), 9999, 9999)
+
+	since := now.Add(-24 * time.Hour)
+
+	aliceSessions, err := s.UserSessions(ctx, "alice", since)
+	if err != nil {
+		t.Fatalf("UserSessions alice: %v", err)
+	}
+	if len(aliceSessions) != 2 {
+		t.Fatalf("alice got %d sessions, want 2", len(aliceSessions))
+	}
+	// Chronological order: oldest first
+	if !aliceSessions[0].ConnectedAt.Before(aliceSessions[1].ConnectedAt) {
+		t.Fatal("sessions not in chronological order")
+	}
+	for _, s := range aliceSessions {
+		if s.Username != "alice" {
+			t.Fatalf("session username = %q, want alice", s.Username)
+		}
+	}
+
+	bobSessions, err := s.UserSessions(ctx, "bob", since)
+	if err != nil {
+		t.Fatalf("UserSessions bob: %v", err)
+	}
+	if len(bobSessions) != 1 {
+		t.Fatalf("bob got %d sessions, want 1", len(bobSessions))
+	}
+
+	// Unknown user returns empty slice
+	unknown, err := s.UserSessions(ctx, "nobody", since)
+	if err != nil {
+		t.Fatalf("UserSessions unknown: %v", err)
+	}
+	if len(unknown) != 0 {
+		t.Fatalf("unknown user got %d sessions, want 0", len(unknown))
+	}
+}
+
 func TestGetSettingReturnsEmptyWhenNotSet(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
