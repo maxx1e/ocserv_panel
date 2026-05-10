@@ -332,19 +332,6 @@ func TestCollectorService_RemoveCollectorByIface_NonExistentIsNoop(t *testing.T)
 	}
 }
 
-// fakeFileReaderForVPN is a test double that returns pre-configured file contents.
-type fakeFileReaderForVPN struct {
-	files map[string]string
-}
-
-func (r *fakeFileReaderForVPN) ReadFile(path string) ([]byte, error) {
-	data, ok := r.files[path]
-	if !ok {
-		return nil, fmt.Errorf("file not found: %s", path)
-	}
-	return []byte(data), nil
-}
-
 type fakeCollector struct {
 	result CollectResult
 }
