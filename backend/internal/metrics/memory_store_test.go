@@ -250,3 +250,85 @@ func TestMemoryStoreRejectsNonFiniteSampleValues(t *testing.T) {
 		})
 	}
 }
+
+func TestMemoryStore_QueryLatestLabels(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+
+	err := store.Append(ctx, []Sample{
+		{
+			Name:      MetricNetInterfaceRXBytes,
+			Labels:    map[string]string{"interface": "eth0"},
+			Timestamp: now,
+			Value:     100,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	labels, err := store.QueryLatestLabels(ctx, MetricNetInterfaceRXBytes)
+	if err != nil {
+		t.Fatalf("QueryLatestLabels: %v", err)
+	}
+	if labels["interface"] != "eth0" {
+		t.Fatalf("labels[interface] = %q, want eth0", labels["interface"])
+	}
+}
+
+func TestMemoryStore_QueryLatestLabels_NoData(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+
+	labels, err := store.QueryLatestLabels(ctx, MetricNetInterfaceRXBytes)
+	if err != nil {
+		t.Fatalf("QueryLatestLabels on empty store: %v", err)
+	}
+	if len(labels) != 0 {
+		t.Fatalf("expected empty labels map, got %v", labels)
+	}
+}
+
+func TestMemoryStore_QueryLatestLabels_ReturnsLatestTimestamp(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+
+	err := store.Append(ctx, []Sample{
+		{
+			Name:      MetricNetInterfaceRXBytes,
+			Labels:    map[string]string{"interface": "eth0"},
+			Timestamp: now,
+			Value:     100,
+		},
+		{
+			Name:      MetricNetInterfaceRXBytes,
+			Labels:    map[string]string{"interface": "eth1"},
+			Timestamp: now.Add(time.Minute),
+			Value:     200,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	labels, err := store.QueryLatestLabels(ctx, MetricNetInterfaceRXBytes)
+	if err != nil {
+		t.Fatalf("QueryLatestLabels: %v", err)
+	}
+	if labels["interface"] != "eth1" {
+		t.Fatalf("labels[interface] = %q, want eth1 (latest timestamp)", labels["interface"])
+	}
+}
+
+func TestMemoryStore_QueryLatestLabels_ClosedStore(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	store.Close()
+
+	_, err := store.QueryLatestLabels(ctx, MetricNetInterfaceRXBytes)
+	if !errors.Is(err, ErrStoreClosed) {
+		t.Fatalf("QueryLatestLabels error = %v, want %v", err, ErrStoreClosed)
+	}
+}

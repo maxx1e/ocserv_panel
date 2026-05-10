@@ -242,6 +242,7 @@ func NewAppRouter(
 	mux.Handle("/api/monitoring/catalog", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringCatalog)))
 	mux.Handle("/api/monitoring/overview", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringOverview)))
 	mux.Handle("/api/monitoring/series", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringSeries)))
+	mux.Handle("GET /api/monitoring/system-info", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringSystemInfo)))
 	mux.HandleFunc("/api/settings/restart-status", appHandler.handleRestartStatus)
 	mux.HandleFunc("/api/settings/restart", appHandler.handleRestart)
 	mux.HandleFunc("/api/settings", appHandler.handleSettingsSectionsGet)
@@ -579,6 +580,13 @@ func (a *App) handleMonitoringSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *App) handleMonitoringSystemInfo(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	writeJSON(w, http.StatusOK, a.buildSystemInfo(r.Context()))
 }
 
 func (a *App) authenticate(w http.ResponseWriter, r *http.Request) (auth.Principal, bool) {

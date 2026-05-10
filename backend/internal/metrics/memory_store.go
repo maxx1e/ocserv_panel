@@ -118,6 +118,33 @@ func (s *MemoryStore) QueryRange(ctx context.Context, query Query) (Series, erro
 	return series, nil
 }
 
+func (s *MemoryStore) QueryLatestLabels(ctx context.Context, metric MetricName) (map[string]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	var latest *Sample
+	for i := range s.samples {
+		sample := &s.samples[i]
+		if sample.Name != metric {
+			continue
+		}
+		if latest == nil || sample.Timestamp.After(latest.Timestamp) {
+			latest = sample
+		}
+	}
+	if latest == nil {
+		return map[string]string{}, nil
+	}
+	return cloneLabels(latest.Labels), nil
+}
+
 func (s *MemoryStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

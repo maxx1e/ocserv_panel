@@ -171,6 +171,42 @@ func (s *TSDBStore) Close() error {
 	return nil
 }
 
+func (s *TSDBStore) QueryLatestLabels(ctx context.Context, metric MetricName) (map[string]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	now := time.Now().UTC()
+	querier, err := s.db.Querier(now.Add(-time.Hour).UnixMilli(), now.UnixMilli())
+	if err != nil {
+		return map[string]string{}, nil
+	}
+	defer querier.Close()
+
+	matchers := []*labels.Matcher{
+		labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, string(metric)),
+	}
+	sets := querier.Select(ctx, false, nil, matchers...)
+	for sets.Next() {
+		series := sets.At()
+		lbls := series.Labels()
+		result := make(map[string]string, lbls.Len())
+		lbls.Range(func(l labels.Label) {
+			if l.Name != labels.MetricName {
+				result[l.Name] = l.Value
+			}
+		})
+		return result, nil
+	}
+	return map[string]string{}, nil
+}
+
 func labelsForSample(sample Sample) labels.Labels {
 	labelMap := cloneLabels(sample.Labels)
 	labelMap[labels.MetricName] = string(sample.Name)

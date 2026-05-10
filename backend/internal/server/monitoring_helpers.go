@@ -1,7 +1,13 @@
 package server
 
 import (
+	"context"
+	"math"
+	"os"
+	"runtime"
+
 	"ocserv_panel/backend/internal/metrics"
+	"ocserv_panel/backend/internal/monitoring"
 	"time"
 )
 
@@ -11,6 +17,40 @@ type monitoringOverviewResponse struct {
 	GeneratedAt time.Time                  `json:"generatedAt"`
 	Catalog     []metrics.MetricDefinition `json:"catalog"`
 	Series      []metrics.Series           `json:"series"`
+}
+
+// systemInfoResponse is the response for GET /api/monitoring/system-info.
+type systemInfoResponse struct {
+	CPUCores      int      `json:"cpuCores"`
+	MemoryTotalGB float64  `json:"memoryTotalGB"`
+	NetInterface  string   `json:"netInterface"`
+	VPNInterfaces []string `json:"vpnInterfaces"`
+}
+
+func (a *App) buildSystemInfo(ctx context.Context) systemInfoResponse {
+	info := systemInfoResponse{
+		CPUCores:      runtime.NumCPU(),
+		VPNInterfaces: []string{},
+	}
+
+	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
+		if totalKB, _, parseErr := monitoring.ParseMeminfo(string(data)); parseErr == nil && totalKB > 0 {
+			gb := float64(totalKB) / (1024 * 1024)
+			info.MemoryTotalGB = math.Round(gb*10) / 10
+		}
+	}
+
+	if lbls, err := a.metricStore.QueryLatestLabels(ctx, metrics.MetricNetInterfaceRXBytes); err == nil {
+		info.NetInterface = lbls["interface"]
+	}
+
+	if lbls, err := a.metricStore.QueryLatestLabels(ctx, metrics.MetricVPNInterfaceRXBytes); err == nil {
+		if iface := lbls["interface"]; iface != "" {
+			info.VPNInterfaces = []string{iface}
+		}
+	}
+
+	return info
 }
 
 // catalogList returns metric definitions for the monitoring catalog.

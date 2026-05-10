@@ -754,6 +754,10 @@ func (s *failingStore) QueryRange(context.Context, metrics.Query) (metrics.Serie
 	return metrics.Series{}, nil
 }
 
+func (s *failingStore) QueryLatestLabels(_ context.Context, _ metrics.MetricName) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 func (s *failingStore) Close() error {
 	return nil
 }

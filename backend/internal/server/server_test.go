@@ -1161,3 +1161,56 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 	h.createOwner(t, "owner", "owner-password")
 	return h
 }
+
+func TestSystemInfoEndpointRequiresAuthentication(t *testing.T) {
+	h := newTestHarness(t)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/system-info", nil, "")
+	assertStatus(t, rec, http.StatusUnauthorized)
+}
+
+func TestSystemInfoEndpointReturnsSystemMetadata(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	cookie := h.login(t, "owner", "owner-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/system-info", nil, cookie)
+
+	assertStatus(t, rec, http.StatusOK)
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+	assertMapHasFields(t, body, "cpuCores", "memoryTotalGB", "netInterface", "vpnInterfaces")
+
+	cores, ok := body["cpuCores"].(float64)
+	if !ok || cores < 1 {
+		t.Fatalf("cpuCores = %v, want >= 1", body["cpuCores"])
+	}
+	if _, ok := body["memoryTotalGB"].(float64); !ok {
+		t.Fatalf("memoryTotalGB should be float64, got %T", body["memoryTotalGB"])
+	}
+	if _, ok := body["netInterface"].(string); !ok {
+		t.Fatalf("netInterface should be string, got %T", body["netInterface"])
+	}
+	if _, ok := body["vpnInterfaces"].([]any); !ok {
+		t.Fatalf("vpnInterfaces should be array, got %T", body["vpnInterfaces"])
+	}
+}
+
+func TestSystemInfoEndpointAccessibleByViewer(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	h.createViewer(t, "viewer", "viewer-password")
+	viewerCookie := h.login(t, "viewer", "viewer-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/system-info", nil, viewerCookie)
+	assertStatus(t, rec, http.StatusOK)
+}
+
+func TestSystemInfoEndpointDeniedWithoutDashboardRead(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	h.createUserWithoutRoles(t, "limited", "limited-password")
+	cookie := h.login(t, "limited", "limited-password")
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/system-info", nil, cookie)
+	assertStatus(t, rec, http.StatusForbidden)
+}

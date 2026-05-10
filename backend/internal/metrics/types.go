@@ -154,6 +154,7 @@ type Query struct {
 type Store interface {
 	Append(ctx context.Context, samples []Sample) error
 	QueryRange(ctx context.Context, query Query) (Series, error)
+	QueryLatestLabels(ctx context.Context, metric MetricName) (map[string]string, error)
 	Close() error
 }
 

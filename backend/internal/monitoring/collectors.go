@@ -349,6 +349,12 @@ func available(samples []metrics.Sample) CollectResult {
 	}
 }
 
+// ParseMeminfo exports the internal meminfo parser for use by other packages.
+// It returns total and available memory in kilobytes.
+func ParseMeminfo(data string) (uint64, uint64, error) {
+	return parseMeminfo(data)
+}
+
 func unavailable(message string) CollectResult {
 	return CollectResult{
 		Samples: []metrics.Sample{},
