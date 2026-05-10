@@ -1,4 +1,4 @@
-package ocserv
+package parse
 
 import (
 	"net"
@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// isNetmaskNotation checks if a value is in "ip/dotted-quad-mask" format (e.g., "10.0.0.0/255.255.255.0").
+// IsNetmaskNotation checks if a value is in "ip/dotted-quad-mask" format (e.g., "10.0.0.0/255.255.255.0").
 // Returns the ip and mask parts if detected. Returns false for prefix notation like "10.0.0.0/24".
-func isNetmaskNotation(value string) (ip, mask string, ok bool) {
+func IsNetmaskNotation(value string) (ip, mask string, ok bool) {
 	parts := strings.SplitN(value, "/", 2)
 	if len(parts) != 2 {
 		return "", "", false
@@ -26,9 +26,9 @@ func isNetmaskNotation(value string) (ip, mask string, ok bool) {
 	return ip, mask, true
 }
 
-// netmaskToCIDR converts an IP and dotted-quad mask to CIDR notation.
+// NetmaskToCIDR converts an IP and dotted-quad mask to CIDR notation.
 // Returns ("", false) if the mask is non-contiguous (invalid).
-func netmaskToCIDR(ip, mask string) (string, bool) {
+func NetmaskToCIDR(ip, mask string) (string, bool) {
 	maskIP := net.ParseIP(mask)
 	if maskIP == nil {
 		return "", false

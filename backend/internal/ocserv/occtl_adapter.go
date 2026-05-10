@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"ocserv_panel/backend/internal/ocserv/cmd"
+	"ocserv_panel/backend/internal/ocserv/parse"
 	"ocserv_panel/backend/internal/validation"
 )
 
@@ -78,13 +79,13 @@ func (a *OcctlAdapter) ListSessions(ctx context.Context) ([]Session, error) {
 	}
 
 	// Try JSON parsing first (native occtl format).
-	sessions, err := parseSessionsJSON([]byte(out))
+	sessions, err := parse.SessionsJSON([]byte(out))
 	if err == nil {
 		return sessions, nil
 	}
 
 	// Fall back to text parsing.
-	sessions, err = parseSessionsText(out)
+	sessions, err = parse.SessionsText(out)
 	if err != nil {
 		return nil, fmt.Errorf("parse sessions output: %w", err)
 	}
@@ -161,7 +162,7 @@ func (a *OcctlAdapter) GetSessionDetails(ctx context.Context, id string) (*Sessi
 
 	// Try native occtl JSON format first (field names like "Session", "Remote IP", etc.).
 	// The native format uses "Session" as the ID field — if that's populated, it's native format.
-	sd, err := parseSessionDetailJSON([]byte(out))
+	sd, err := parse.SessionDetailJSON([]byte(out))
 	if err == nil && sd.ID != "" {
 		return sd, nil
 	}
@@ -193,7 +194,7 @@ func (a *OcctlAdapter) GetSessionDetails(ctx context.Context, id string) (*Sessi
 	}
 
 	// Fall back to text parsing.
-	sd, err = parseSessionDetailText(out)
+	sd, err = parse.SessionDetailText(out)
 	if err != nil {
 		return nil, fmt.Errorf("parse session detail %s: %w", id, err)
 	}
@@ -276,7 +277,7 @@ func (a *OcctlAdapter) GetServerStatus(ctx context.Context) (*ServerStatus, erro
 		}
 		return nil, fmt.Errorf("get server status: %s", strings.TrimSpace(result.Stderr))
 	}
-	status, err := parseStatusJSON([]byte(strings.TrimSpace(result.Stdout)))
+	status, err := parse.StatusJSON([]byte(strings.TrimSpace(result.Stdout)))
 	if err != nil {
 		return nil, fmt.Errorf("parse server status: %w", err)
 	}
@@ -307,12 +308,12 @@ func (a *OcctlAdapter) ListConnectedUsers(ctx context.Context) ([]ConnectedUser,
 	}
 
 	// Try JSON first
-	users, err := parseUsersJSON([]byte(out))
+	users, err := parse.UsersJSON([]byte(out))
 	if err == nil {
 		return users, nil
 	}
 	// Fall back to text parsing
-	users, err = parseUsersText(out)
+	users, err = parse.UsersText(out)
 	if err != nil {
 		return nil, fmt.Errorf("parse connected users: %w", err)
 	}
@@ -347,13 +348,13 @@ func (a *OcctlAdapter) GetUserDetails(ctx context.Context, username string) ([]U
 	}
 
 	// Try JSON first (occtl -j -n returns JSON array of user connections).
-	conns, err := parseUserDetailJSON([]byte(out))
+	conns, err := parse.UserDetailJSON([]byte(out))
 	if err == nil {
 		return conns, nil
 	}
 
 	// Fall back to text parsing.
-	conns, err = parseUserDetailOutput(result.Stdout)
+	conns, err = parse.UserDetailOutput(result.Stdout)
 	if err != nil {
 		return nil, fmt.Errorf("parse user details %s: %w", username, err)
 	}
@@ -390,10 +391,10 @@ func (a *OcctlAdapter) GetConnectionByID(ctx context.Context, id int) (*UserConn
 	}
 
 	// Parse using the same user detail JSON parser (output format is identical).
-	conns, err := parseUserDetailJSON([]byte(out))
+	conns, err := parse.UserDetailJSON([]byte(out))
 	if err != nil {
 		// Fall back to text parsing.
-		conns, err = parseUserDetailOutput(out)
+		conns, err = parse.UserDetailOutput(out)
 		if err != nil {
 			return nil, fmt.Errorf("parse connection by id %d: %w", id, err)
 		}
@@ -427,7 +428,7 @@ func (a *OcctlAdapter) ListEvents(ctx context.Context) ([]ConnectionEvent, error
 		return []ConnectionEvent{}, nil
 	}
 
-	events, err := parseEventsJSON([]byte(out))
+	events, err := parse.EventsJSON([]byte(out))
 	if err != nil {
 		return nil, fmt.Errorf("parse events: %w", err)
 	}
@@ -451,7 +452,7 @@ func (a *OcctlAdapter) ListRoutes(ctx context.Context) ([]UserRoute, error) {
 		return nil, fmt.Errorf("list routes: %s", strings.TrimSpace(result.Stderr))
 	}
 
-	routes, err := parseRoutesText(result.Stdout)
+	routes, err := parse.RoutesText(result.Stdout)
 	if err != nil {
 		return nil, fmt.Errorf("parse routes: %w", err)
 	}
@@ -480,7 +481,7 @@ func (a *OcctlAdapter) ListBannedIPs(ctx context.Context) ([]BannedIP, error) {
 		return []BannedIP{}, nil
 	}
 
-	bans, err := parseBannedIPsJSON([]byte(out))
+	bans, err := parse.BannedIPsJSON([]byte(out))
 	if err != nil {
 		return nil, fmt.Errorf("parse banned ips: %w", err)
 	}
@@ -509,7 +510,7 @@ func (a *OcctlAdapter) ListBanPoints(ctx context.Context) ([]BanPointEntry, erro
 		return []BanPointEntry{}, nil
 	}
 
-	points, err := parseBanPointsJSON([]byte(out))
+	points, err := parse.BanPointsJSON([]byte(out))
 	if err != nil {
 		return nil, fmt.Errorf("parse ban points: %w", err)
 	}

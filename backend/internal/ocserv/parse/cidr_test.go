@@ -1,7 +1,9 @@
-package ocserv
+package parse_test
 
 import (
 	"testing"
+
+	"ocserv_panel/backend/internal/ocserv/parse"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -25,7 +27,7 @@ func TestIsNetmaskNotation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			ip, mask, ok := isNetmaskNotation(tt.input)
+			ip, mask, ok := parse.IsNetmaskNotation(tt.input)
 			assert.Equal(t, tt.wantOK, ok)
 			if ok {
 				assert.Equal(t, tt.wantIP, ip)
@@ -54,7 +56,7 @@ func TestNetmaskToCIDR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.ip+"/"+tt.mask, func(t *testing.T) {
-			result, ok := netmaskToCIDR(tt.ip, tt.mask)
+			result, ok := parse.NetmaskToCIDR(tt.ip, tt.mask)
 			assert.Equal(t, tt.wantOK, ok)
 			if ok {
 				assert.Equal(t, tt.want, result)

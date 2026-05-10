@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"ocserv_panel/backend/internal/ocserv/parse"
 )
 
 // ConfigIssueSeverity rates the importance of a configuration issue.
@@ -175,8 +177,8 @@ func (v *ConfigValidator) checkCIDR(key, value string, lineNum int, rawLine stri
 	_ = rawLine // used for documentation; FixedValue is constructed from key + cidr
 
 	// Check for netmask notation first (e.g., 10.0.0.0/255.255.255.0)
-	if ip, mask, ok := isNetmaskNotation(value); ok {
-		cidr, valid := netmaskToCIDR(ip, mask)
+	if ip, mask, ok := parse.IsNetmaskNotation(value); ok {
+		cidr, valid := parse.NetmaskToCIDR(ip, mask)
 		if valid {
 			return []ConfigIssue{{
 				Line:       lineNum,
