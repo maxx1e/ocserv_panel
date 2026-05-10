@@ -37,8 +37,8 @@
   );
 </script>
 
-<!-- Active sessions + Donut + Storage -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+<!-- Donut + Storage -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
   <div>
     <Card.Root>
       <Card.Header>
@@ -49,11 +49,6 @@
       </Card.Content>
     </Card.Root>
   </div>
-  <CardStats
-    title="Active sessions"
-    value={String(summary.activeSessionCount ?? 0)}
-    icon={Users}
-  />
   <HealthCard
     title="Storage Metrics"
     items={storageItems}

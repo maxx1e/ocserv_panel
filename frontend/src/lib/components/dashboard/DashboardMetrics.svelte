@@ -50,18 +50,13 @@
   const NET_TX = 'net_interface_tx_bytes';
   const VPN_RX = 'vpn_interface_rx_bytes';
   const VPN_TX = 'vpn_interface_tx_bytes';
-  const ACTIVE_SESSIONS = 'active_sessions';
-  const CONCURRENT_SESSIONS = 'concurrent_sessions';
-
   const chartDefinitions: ChartDefinition[] = [
     { metric: HOST_CPU, title: 'CPU utilization' },
     { metric: HOST_MEMORY, title: 'Memory utilization' },
     { metric: NET_RX, title: 'Network inbound' },
     { metric: NET_TX, title: 'Network outbound' },
     { metric: VPN_RX, title: 'VPN inbound' },
-    { metric: VPN_TX, title: 'VPN outbound' },
-    { metric: ACTIVE_SESSIONS, title: 'Active sessions' },
-    { metric: CONCURRENT_SESSIONS, title: 'Concurrent sessions' }
+    { metric: VPN_TX, title: 'VPN outbound' }
   ];
 
   function metricSeries(metric: string): MonitoringSeries | undefined {

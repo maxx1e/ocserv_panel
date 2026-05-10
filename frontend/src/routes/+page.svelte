@@ -6,7 +6,6 @@
   import DashboardHealth from '$lib/components/dashboard/DashboardHealth.svelte';
   import DashboardMetrics from '$lib/components/dashboard/DashboardMetrics.svelte';
   import DashboardSessions from '$lib/components/dashboard/DashboardSessions.svelte';
-  import DashboardActivity from '$lib/components/dashboard/DashboardActivity.svelte';
 
   import {
     getDashboardSummary,
@@ -46,9 +45,6 @@
   let healthRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
   let activeUserSessions = $state<ActiveUserSessionsResult | null>(null);
-
-  // --- Derived ---
-  const recentAudit = $derived(summary?.recentAudit ?? []);
 
   const STORAGE_TOOLTIPS: Record<string, Record<string, { title: string; description: string; action: string }>> = {
     sqlite: {
@@ -253,8 +249,6 @@
     onWindowChange={handleMonitoringWindowChange}
     onRefresh={() => reloadMonitoring()}
   />
-
-  <DashboardActivity recentAudit={recentAudit} />
 
 {:else}
   <div class="bg-red-50 border border-red-200 rounded-lg p-6">
