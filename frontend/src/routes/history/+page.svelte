@@ -306,7 +306,7 @@
     const d = Math.floor(secs / 86400);
     const h = Math.floor((secs % 86400) / 3600);
     const m = Math.floor((secs % 3600) / 60);
-    if (d > 0) return `${d}d ${h}h`;
+    if (d > 0) return `${d}d ${h}h ${m}m`;
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
   }
@@ -452,18 +452,27 @@
     </div>
 
     {#if userSummariesError}
-      <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4" role="alert">
-        <p class="text-red-700 text-sm">{userSummariesError}</p>
+      <div class="flex items-center gap-3 py-4">
+        <p class="text-red-600 text-sm">{userSummariesError}</p>
+        <button
+          class="text-sm text-blue-600 hover:underline"
+          onclick={() => reloadUserSummaries(monitoringWindow)}
+        >Retry</button>
       </div>
     {/if}
 
     {#if userSummariesLoading && userSummaries.length === 0}
-      <div class="flex items-center justify-center py-12">
-        <div class="text-center">
-          <div class="w-6 h-6 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin mx-auto mb-2"></div>
-          <p class="text-slate-500 text-sm">Loading user sessions…</p>
-        </div>
-      </div>
+      <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <tbody class="divide-y divide-slate-100">
+          {#each Array(5) as _}
+            <tr>
+              {#each Array(8) as _}
+                <td class="px-4 py-3"><div class="h-4 bg-slate-200 rounded animate-pulse w-20"></div></td>
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
     {:else if userSummaries.length === 0}
       <p class="text-sm text-slate-500">No sessions in this period.</p>
     {:else}
