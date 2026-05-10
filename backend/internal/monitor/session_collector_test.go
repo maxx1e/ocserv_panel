@@ -1,11 +1,12 @@
 package monitor
 
 import (
-	"ocserv_panel/backend/internal/vpn/sessions"
 	"context"
+	"sync"
 	"testing"
 	"time"
 
+	"ocserv_panel/backend/internal/vpn/sessions"
 )
 
 func TestSessionCollector_CollectsActiveSessions(t *testing.T) {
@@ -96,5 +97,82 @@ func TestSessionCollector_ContextCanceled(t *testing.T) {
 
 	if result.Status != CollectStatusUnavailable {
 		t.Fatalf("status = %q, want %q", result.Status, CollectStatusUnavailable)
+	}
+}
+
+type fakeNotifier struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (n *fakeNotifier) NotifySessionChange() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.calls++
+}
+
+func (n *fakeNotifier) count() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.calls
+}
+
+func TestSessionCollector_NotifierCalledOnCountChange(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	manager := sessions.NewFakeManager()
+	manager.ServerStatusResult = &sessions.ServerStatus{ActiveSessions: 3}
+
+	notifier := &fakeNotifier{}
+	collector := NewSessionCollectorWithNotifier(manager, notifier)
+
+	// First collect: lastCount is 0, active is 3 — count changed.
+	collector.Collect(context.Background(), now)
+	if notifier.count() != 1 {
+		t.Fatalf("notifier calls = %d, want 1 after first collect", notifier.count())
+	}
+
+	// Second collect: same count (3) — no notification.
+	collector.Collect(context.Background(), now.Add(time.Second))
+	if notifier.count() != 1 {
+		t.Fatalf("notifier calls = %d, want still 1 after same count", notifier.count())
+	}
+
+	// Third collect: count changed to 5.
+	manager.ServerStatusResult = &sessions.ServerStatus{ActiveSessions: 5}
+	collector.Collect(context.Background(), now.Add(2*time.Second))
+	if notifier.count() != 2 {
+		t.Fatalf("notifier calls = %d, want 2 after count increase", notifier.count())
+	}
+}
+
+func TestSessionCollector_NotifierNotCalledOnError(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	manager := sessions.NewFakeManager()
+	manager.ServerStatusErr = context.DeadlineExceeded
+
+	notifier := &fakeNotifier{}
+	collector := NewSessionCollectorWithNotifier(manager, notifier)
+	collector.Collect(context.Background(), now)
+
+	if notifier.count() != 0 {
+		t.Fatalf("notifier calls = %d, want 0 on error", notifier.count())
+	}
+}
+
+func TestSessionCollector_NilNotifierIsSafe(t *testing.T) {
+	t.Parallel()
+
+	manager := sessions.NewFakeManager()
+	manager.ServerStatusResult = &sessions.ServerStatus{ActiveSessions: 2}
+
+	// NewSessionCollectorWithNotifier(provider, nil) must not panic.
+	collector := NewSessionCollectorWithNotifier(manager, nil)
+	result := collector.Collect(context.Background(), time.Now())
+	if result.Status != CollectStatusAvailable {
+		t.Fatalf("status = %q, want available", result.Status)
 	}
 }
