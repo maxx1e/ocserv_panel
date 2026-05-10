@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 function formatUptime(upSince: string | undefined): string {
   if (!upSince) return '—';
@@ -36,13 +36,17 @@ function relativeDate(iso: string | undefined): string {
   if (diffDays === 0) return 'today';
   if (diffDays < 2) return `${diffDays}d ago`;
   if (diffDays < 30) return `${diffDays}d ago`;
-  return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
 }
 
 describe('formatUptime', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-10T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('returns — for undefined', () => {
@@ -66,8 +70,7 @@ describe('formatUptime', () => {
   it('formats days and hours when uptime >= 1 day', () => {
     const upSince = new Date('2026-05-04T07:29:00Z').toISOString();
     const result = formatUptime(upSince);
-    expect(result).toMatch(/^\d+d \d+h$/);
-    expect(result).toContain('6d');
+    expect(result).toBe('6d 4h');
   });
 });
 
@@ -101,6 +104,10 @@ describe('relativeDate', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-10T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('returns — for undefined', () => {
