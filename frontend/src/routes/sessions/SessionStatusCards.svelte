@@ -26,10 +26,63 @@
     return `${totalMin}m`;
   }
 
+  function formatDuration(seconds: number | undefined): string {
+    if (!seconds) return '—';
+    if (seconds >= 3600) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      return `${h}h ${m}m`;
+    }
+    if (seconds >= 60) return `${Math.floor(seconds / 60)}m`;
+    return `${seconds}s`;
+  }
+
+  function relativeDate(iso: string | undefined): string {
+    if (!iso) return '—';
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) return '—';
+    const diffMs = Date.now() - date.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMin / 60);
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays === 0) return 'today';
+    return `${diffDays}d ago`;
+  }
+
   const isOnline = $derived(status?.status === 'online');
-  const uptimeStr = $derived(formatUptime(status?.upSince));
-  const trafficStr = $derived(
-    status ? `${formatBytes(status.rxBytes)} / ${formatBytes(status.txBytes)}` : '—'
+
+  const serviceValue = $derived(
+    loading ? '...' : (isOnline ? formatUptime(status?.upSince) : 'Offline')
+  );
+  const serviceSubtitle = $derived(
+    isOnline && status?.serverPid ? `PID: ${status.serverPid}` : undefined
+  );
+
+  const sessionsValue = $derived(loading ? '...' : String(status?.activeSessions ?? 0));
+  const sessionsSubtitle = $derived(
+    status
+      ? `${status.sessionsHandled} handled · avg ${formatDuration(status.avgSessionTimeSeconds)}`
+      : undefined
+  );
+
+  const authValue = $derived(loading ? '...' : String(status?.authFailures ?? 0));
+  const authSubtitle = $derived(
+    status
+      ? `Avg: ${status.avgAuthTimeSeconds}s · Max: ${status.maxAuthTimeSeconds}s`
+      : undefined
+  );
+
+  const networkValue = $derived(
+    loading
+      ? '...'
+      : status
+        ? `${formatBytes(status.rxBytes)} / ${formatBytes(status.txBytes)}`
+        : '—'
+  );
+  const networkSubtitle = $derived(
+    status
+      ? `MTU ${status.minMtu}–${status.maxMtu} · reset ${relativeDate(status.lastStatsReset)}`
+      : undefined
   );
 </script>
 
@@ -40,28 +93,28 @@
 {:else}
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
     <CardStats
-      title="Server"
-      value={loading ? '...' : (isOnline ? 'Online' : 'Offline')}
-      subtitle={isOnline ? `Uptime: ${uptimeStr}` : undefined}
+      title="Service"
+      value={serviceValue}
+      subtitle={serviceSubtitle}
       icon={Server}
       statusValue={isOnline ? 'online' : 'offline'}
     />
     <CardStats
-      title="Active Sessions"
-      value={loading ? '...' : String(status?.activeSessions ?? 0)}
-      subtitle={status ? `${status.sessionsHandled} handled this period` : undefined}
+      title="Sessions"
+      value={sessionsValue}
+      subtitle={sessionsSubtitle}
       icon={Users}
     />
     <CardStats
-      title="Auth Failures"
-      value={loading ? '...' : String(status?.authFailures ?? 0)}
-      subtitle={status?.avgAuthTimeSeconds ? `Avg auth: ${status.avgAuthTimeSeconds}s` : undefined}
+      title="Auth"
+      value={authValue}
+      subtitle={authSubtitle}
       icon={ShieldAlert}
     />
     <CardStats
-      title="Traffic (Period)"
-      value={loading ? '...' : trafficStr}
-      subtitle="RX / TX — updates on disconnect"
+      title="Network"
+      value={networkValue}
+      subtitle={networkSubtitle}
       icon={ArrowUpDown}
     />
   </div>
