@@ -573,6 +573,20 @@ func (r *cancelAfterReadFileReader) ReadFile(path string) ([]byte, error) {
 	return []byte(value), nil
 }
 
+func TestInterfaceCollector_IfaceGetter(t *testing.T) {
+	t.Parallel()
+
+	c := NewInterfaceCollector(
+		&fakeFileReader{files: map[string][]string{}},
+		"vpns0",
+		MetricVPNInterfaceRXBytes,
+		MetricVPNInterfaceTXBytes,
+	)
+	if got := c.Iface(); got != "vpns0" {
+		t.Fatalf("Iface() = %q, want %q", got, "vpns0")
+	}
+}
+
 func assertReadPaths(t *testing.T, got []string, want []string) {
 	t.Helper()
 

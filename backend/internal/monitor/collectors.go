@@ -260,6 +260,9 @@ func (c *InterfaceCollector) readCounter(ctx context.Context, name string) (uint
 	return value, nil
 }
 
+// Iface returns the network interface name this collector monitors.
+func (c *InterfaceCollector) Iface() string { return c.iface }
+
 type cpuSnapshot struct {
 	busy  uint64
 	total uint64
