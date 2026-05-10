@@ -11,6 +11,7 @@ import (
 
 	"ocserv_panel/backend/internal/app"
 	"ocserv_panel/backend/internal/auth"
+	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/metrics"
 	"ocserv_panel/backend/internal/ocserv"
 	"ocserv_panel/backend/internal/rbac"
@@ -38,21 +39,27 @@ func NewRouter() http.Handler {
 
 // App wires HTTP handlers to application services.
 type App struct {
-	authService       *app.AuthService
-	dashboardService  *app.DashboardService
-	monitoringService *app.MonitoringService
-	settingsService   *app.SettingsService
-	ocservService     *app.OcservService
-	healthService     *app.HealthService
-	logTailService    *app.LogTailService
-	configService     *app.ConfigManagementService
-	adminUserService  *app.AdminUserService
-	auditLogService   *app.AuditLogService
-	authorizer        rbac.Authorizer
-	loginLimiter      *auth.RateLimiter
-	cookieSecure      bool
-	refreshInterval   int
-	now               func() time.Time
+	authService      *app.AuthService
+	dashboardService *app.DashboardService
+	settingsService  *app.SettingsService
+	ocservService    *app.OcservService
+	configService    *app.ConfigManagementService
+	adminUserService *app.AdminUserService
+	auditLogService  *app.AuditLogService
+	authorizer       rbac.Authorizer
+	loginLimiter     *auth.RateLimiter
+	cookieSecure     bool
+	refreshInterval  int
+	now              func() time.Time
+
+	// Direct dependencies for monitoring/health/log handlers (collapsed thin services).
+	metricStore   metrics.Store
+	metricCatalog *metrics.Catalog
+	logFileReader app.LogFileReader
+	cfgFn         func() config.Config
+	adminCounter  app.AdminCounter
+	readiness     *ocserv.ReadinessChecker
+	tsdbPath      string
 }
 
 // AppOptions configures NewAppRouter.
@@ -177,11 +184,15 @@ type purgeHistoryResponse struct {
 func NewAppRouter(
 	authService *app.AuthService,
 	dashboardService *app.DashboardService,
-	monitoringService *app.MonitoringService,
+	metricStore metrics.Store,
+	metricCatalog *metrics.Catalog,
 	settingsService *app.SettingsService,
 	ocservService *app.OcservService,
-	healthService *app.HealthService,
-	logTailService *app.LogTailService,
+	logFileReader app.LogFileReader,
+	cfgFn func() config.Config,
+	adminCounter app.AdminCounter,
+	readiness *ocserv.ReadinessChecker,
+	tsdbPath string,
 	configService *app.ConfigManagementService,
 	adminUserService *app.AdminUserService,
 	auditLogService *app.AuditLogService,
@@ -194,21 +205,25 @@ func NewAppRouter(
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	appHandler := &App{
-		authService:       authService,
-		dashboardService:  dashboardService,
-		monitoringService: monitoringService,
-		settingsService:   settingsService,
-		ocservService:     ocservService,
-		healthService:     healthService,
-		logTailService:    logTailService,
-		configService:     configService,
-		adminUserService:  adminUserService,
-		auditLogService:   auditLogService,
-		authorizer:        authorizer,
-		loginLimiter:      opts.LoginLimiter,
-		cookieSecure:      opts.CookieSecure,
-		refreshInterval:   opts.RefreshInterval,
-		now:               now,
+		authService:      authService,
+		dashboardService: dashboardService,
+		settingsService:  settingsService,
+		ocservService:    ocservService,
+		configService:    configService,
+		adminUserService: adminUserService,
+		auditLogService:  auditLogService,
+		authorizer:       authorizer,
+		loginLimiter:     opts.LoginLimiter,
+		cookieSecure:     opts.CookieSecure,
+		refreshInterval:  opts.RefreshInterval,
+		now:              now,
+		metricStore:      metricStore,
+		metricCatalog:    metricCatalog,
+		logFileReader:    logFileReader,
+		cfgFn:            cfgFn,
+		adminCounter:     adminCounter,
+		readiness:        readiness,
+		tsdbPath:         tsdbPath,
 	}
 
 	mux := http.NewServeMux()
@@ -490,12 +505,11 @@ func (a *App) handleMonitoringCatalog(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	catalog, err := a.monitoringService.Catalog(r.Context(), principal)
-	if err != nil {
-		a.writeAppError(w, err)
+	if !a.authorizer.Allowed(principalRoles(principal), rbac.PermissionReadDashboard) {
+		writeError(w, http.StatusForbidden, "permission denied")
 		return
 	}
-	writeJSON(w, http.StatusOK, catalog)
+	writeJSON(w, http.StatusOK, a.catalogList())
 }
 
 func (a *App) handleMonitoringOverview(w http.ResponseWriter, r *http.Request) {
@@ -506,13 +520,42 @@ func (a *App) handleMonitoringOverview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !a.authorizer.Allowed(principalRoles(principal), rbac.PermissionReadDashboard) {
+		writeError(w, http.StatusForbidden, "permission denied")
+		return
+	}
+
 	window := queryValueDefault(r, "window", "1h")
-	overview, err := a.monitoringService.Overview(r.Context(), principal, window)
+	step := defaultMonitoringStep(window)
+	windowDuration, stepDuration, err := metrics.ValidateWindowAndStep(window, step)
 	if err != nil {
 		a.writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, overview)
+
+	now := a.now().UTC()
+	series := make([]metrics.Series, 0, len(monitoringOverviewMetrics))
+	for _, name := range monitoringOverviewMetrics {
+		item, err := a.metricStore.QueryRange(r.Context(), metrics.Query{
+			Metric: name,
+			Labels: map[string]string{},
+			Start:  now.Add(-windowDuration),
+			End:    now,
+			Step:   stepDuration,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		series = append(series, item)
+	}
+
+	writeJSON(w, http.StatusOK, monitoringOverviewResponse{
+		Window:      window,
+		GeneratedAt: now,
+		Catalog:     a.catalogList(),
+		Series:      series,
+	})
 }
 
 func (a *App) handleMonitoringSeries(w http.ResponseWriter, r *http.Request) {
@@ -523,6 +566,11 @@ func (a *App) handleMonitoringSeries(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !a.authorizer.Allowed(principalRoles(principal), rbac.PermissionReadDashboard) {
+		writeError(w, http.StatusForbidden, "permission denied")
+		return
+	}
+
 	metric := r.URL.Query().Get("metric")
 	if metric == "" {
 		writeError(w, http.StatusBadRequest, "invalid request")
@@ -530,12 +578,31 @@ func (a *App) handleMonitoringSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	window := queryValueDefault(r, "window", "1h")
 	step := queryValueDefault(r, "step", "60s")
-	series, err := a.monitoringService.Series(r.Context(), principal, metrics.MetricName(metric), window, step)
+
+	metricName := metrics.MetricName(metric)
+	if err := metrics.ValidateMetric(metricName); err != nil {
+		a.writeAppError(w, err)
+		return
+	}
+	windowDuration, stepDuration, err := metrics.ValidateWindowAndStep(window, step)
 	if err != nil {
 		a.writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, series)
+
+	now := a.now().UTC()
+	result, err := a.metricStore.QueryRange(r.Context(), metrics.Query{
+		Metric: metricName,
+		Labels: map[string]string{},
+		Start:  now.Add(-windowDuration),
+		End:    now,
+		Step:   stepDuration,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *App) authenticate(w http.ResponseWriter, r *http.Request) (auth.Principal, bool) {

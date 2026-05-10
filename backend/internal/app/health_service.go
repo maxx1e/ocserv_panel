@@ -8,14 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ocserv_panel/backend/internal/auth"
 	"ocserv_panel/backend/internal/config"
 	"ocserv_panel/backend/internal/ocserv"
-	"ocserv_panel/backend/internal/rbac"
 )
 
-// adminCounter is a minimal store interface for HealthService.
-type adminCounter interface {
+// AdminCounter is a minimal store interface for health checks.
+type AdminCounter interface {
 	AdminCount(context.Context) (int64, error)
 }
 
@@ -82,57 +80,12 @@ const (
 	tsdbCriticalBytes   int64 = 5 * 1024 * 1024 * 1024 // 5 GiB
 )
 
-// HealthService builds the system health snapshot.
-type HealthService struct {
-	readiness  *ocserv.ReadinessChecker
-	store      adminCounter
-	cfgFn      func() config.Config
-	authorizer rbac.Authorizer
-	tsdbPath   string
-}
-
-// NewHealthService returns a HealthService.
-// readiness may be nil; VPN server fields will be reported as unknown when nil.
-func NewHealthService(
-	readiness *ocserv.ReadinessChecker,
-	store adminCounter,
-	cfgFn func() config.Config,
-	authorizer rbac.Authorizer,
-	tsdbPath string,
-) *HealthService {
-	return &HealthService{
-		readiness:  readiness,
-		store:      store,
-		cfgFn:      cfgFn,
-		authorizer: authorizer,
-		tsdbPath:   tsdbPath,
-	}
-}
-
-// SystemHealth returns the current system health snapshot.
-func (s *HealthService) SystemHealth(ctx context.Context, principal auth.Principal) (SystemHealthResult, error) {
-	if !principal.Authenticated() {
-		return SystemHealthResult{}, ErrUnauthenticated
-	}
-	if !s.authorizer.Allowed(principalRoles(principal), rbac.PermissionReadDashboard) {
-		return SystemHealthResult{}, ErrPermissionDenied
-	}
-
-	cfg := s.cfgFn()
-
-	vpn := s.buildVPNHealth(ctx)
-	panel := s.buildPanelHealth(ctx, cfg)
-	logs := s.buildLogsHealth(cfg)
-	storage := s.buildStorageHealth(cfg)
-
-	return SystemHealthResult{VPNServer: vpn, Panel: panel, Logs: logs, Storage: storage}, nil
-}
-
-func (s *HealthService) buildVPNHealth(ctx context.Context) VPNServerHealth {
-	if s.readiness == nil {
+// BuildVPNHealth builds the VPN server health status from a readiness checker.
+func BuildVPNHealth(ctx context.Context, readiness *ocserv.ReadinessChecker) VPNServerHealth {
+	if readiness == nil {
 		return VPNServerHealth{SystemdStatus: "unknown"}
 	}
-	r, err := s.readiness.Check(ctx)
+	r, err := readiness.Check(ctx)
 	if err != nil {
 		return VPNServerHealth{SystemdStatus: "unknown"}
 	}
@@ -155,8 +108,9 @@ func (s *HealthService) buildVPNHealth(ctx context.Context) VPNServerHealth {
 	}
 }
 
-func (s *HealthService) buildPanelHealth(ctx context.Context, cfg config.Config) PanelHealth {
-	count, err := s.store.AdminCount(ctx)
+// BuildPanelHealth builds the panel health status.
+func BuildPanelHealth(ctx context.Context, store AdminCounter, cfg config.Config) PanelHealth {
+	count, err := store.AdminCount(ctx)
 	if err != nil {
 		count = 0
 	}
@@ -171,6 +125,59 @@ func (s *HealthService) buildPanelHealth(ctx context.Context, cfg config.Config)
 		ConfigPresent:  configPresent,
 		ConfigPath:     configPath,
 		WebuiUserCount: count,
+	}
+}
+
+// BuildLogsHealth builds the logs health status.
+func BuildLogsHealth(cfg config.Config) LogsHealth {
+	enabled := cfg.Monitoring.LogFileReadEnabled
+	ocservPath := cfg.Installation.OcservLogPath
+	panelPath := cfg.Installation.PanelLogPath
+
+	ocservPresent := false
+	panelPresent := false
+	if enabled {
+		ocservPresent = fileStatExists(ocservPath)
+		panelPresent = fileStatExists(panelPath)
+	}
+	return LogsHealth{
+		OcservLogEnabled: enabled,
+		OcservLogPresent: ocservPresent,
+		OcservLogPath:    ocservPath,
+		PanelLogEnabled:  enabled,
+		PanelLogPresent:  panelPresent,
+		PanelLogPath:     panelPath,
+	}
+}
+
+// BuildStorageHealth builds the storage health status.
+func BuildStorageHealth(cfg config.Config, tsdbPath string) StorageHealth {
+	// SQLite
+	dbPath := resolveDBPath(cfg)
+	sqliteSize := fileSize(dbPath)
+	sqliteStatus := storageStatus(sqliteSize, sqliteWarnBytes, sqliteCriticalBytes)
+
+	// TSDB
+	tsdbSize := dirSize(tsdbPath)
+	tsdbStatus := storageStatus(tsdbSize, tsdbWarnBytes, tsdbCriticalBytes)
+	tsdbDisplayPath := tsdbPath
+	if tsdbDisplayPath == "" {
+		tsdbDisplayPath = "(in-memory)"
+	}
+
+	return StorageHealth{
+		SQLite: StorageItemHealth{
+			Engine:    "sqlite",
+			SizeBytes: sqliteSize,
+			Status:    sqliteStatus,
+			Path:      maskPath(dbPath, 1),
+		},
+		TSDB: StorageItemHealth{
+			Engine:    "tsdb",
+			SizeBytes: tsdbSize,
+			Status:    tsdbStatus,
+			Path:      maskPath(tsdbDisplayPath, 2),
+		},
 	}
 }
 
@@ -196,57 +203,6 @@ func resolveDBPath(cfg config.Config) string {
 		path = filepath.Join(cfg.Installation.DataDir, path)
 	}
 	return path
-}
-
-func (s *HealthService) buildLogsHealth(cfg config.Config) LogsHealth {
-	enabled := cfg.Monitoring.LogFileReadEnabled
-	ocservPath := cfg.Installation.OcservLogPath
-	panelPath := cfg.Installation.PanelLogPath
-
-	ocservPresent := false
-	panelPresent := false
-	if enabled {
-		ocservPresent = fileStatExists(ocservPath)
-		panelPresent = fileStatExists(panelPath)
-	}
-	return LogsHealth{
-		OcservLogEnabled: enabled,
-		OcservLogPresent: ocservPresent,
-		OcservLogPath:    ocservPath,
-		PanelLogEnabled:  enabled,
-		PanelLogPresent:  panelPresent,
-		PanelLogPath:     panelPath,
-	}
-}
-
-func (s *HealthService) buildStorageHealth(cfg config.Config) StorageHealth {
-	// SQLite
-	dbPath := resolveDBPath(cfg)
-	sqliteSize := fileSize(dbPath)
-	sqliteStatus := storageStatus(sqliteSize, sqliteWarnBytes, sqliteCriticalBytes)
-
-	// TSDB
-	tsdbSize := dirSize(s.tsdbPath)
-	tsdbStatus := storageStatus(tsdbSize, tsdbWarnBytes, tsdbCriticalBytes)
-	tsdbDisplayPath := s.tsdbPath
-	if tsdbDisplayPath == "" {
-		tsdbDisplayPath = "(in-memory)"
-	}
-
-	return StorageHealth{
-		SQLite: StorageItemHealth{
-			Engine:    "sqlite",
-			SizeBytes: sqliteSize,
-			Status:    sqliteStatus,
-			Path:      maskPath(dbPath, 1),
-		},
-		TSDB: StorageItemHealth{
-			Engine:    "tsdb",
-			SizeBytes: tsdbSize,
-			Status:    tsdbStatus,
-			Path:      maskPath(tsdbDisplayPath, 2),
-		},
-	}
 }
 
 // fileStatExists returns true if the path exists (file or directory).

@@ -139,8 +139,6 @@ func main() {
 		}
 		return liveCfg
 	}
-	healthService := app.NewHealthService(readinessChecker, persistence, healthCfgFn, rbac.NewDefaultAuthorizer(), tsdbPathFromEnv())
-	logTailService := app.NewLogTailService(healthCfgFn, app.OSLogFileReader{}, rbac.NewDefaultAuthorizer())
 
 	// Audit log viewing service
 	panelFileReader := logs.NewFileLogReader(cfg.Installation.PanelLogPath, logs.SourcePanel)
@@ -188,15 +186,15 @@ func main() {
 			log.Error().Err(err).Msg("close metric store failed")
 		}
 	}()
-	monitoringService := app.NewMonitoringService(metricStore, rbac.NewDefaultAuthorizer(), nil, recorder)
+	metricCatalog := metrics.DefaultCatalog()
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker, metricStore)
 	collectors := configuredCollectors(monitoring.OSReader{}, cfg.Monitoring)
 
 	// Add session collector using the ocserv session manager.
 	sessionCollector := monitoring.NewSessionCollector(sessionManager)
 	collectors = append(collectors, sessionCollector)
-	monitoringService.SetMetricState(metrics.MetricActiveSessions, metrics.StateCollecting, "")
-	monitoringService.SetMetricState(metrics.MetricConcurrentSessions, metrics.StateCollecting, "")
+	metricCatalog.SetState(metrics.MetricActiveSessions, metrics.StateCollecting, "")
+	metricCatalog.SetState(metrics.MetricConcurrentSessions, metrics.StateCollecting, "")
 
 	// Use config-based collector interval with fallback.
 	collectorInterval := time.Duration(cfg.Monitoring.CollectorInterval) * time.Second
@@ -217,8 +215,8 @@ func main() {
 
 	if vpnConfigured {
 		collectorService.MarkVPNPresent()
-		monitoringService.SetMetricState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
-		monitoringService.SetMetricState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
+		metricCatalog.SetState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
+		metricCatalog.SetState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
 	} else {
 		// Enable periodic re-discovery of VPN interface.
 		collectorService.SetVPNDiscoverer(
@@ -239,11 +237,15 @@ func main() {
 		Handler: server.NewAppRouter(
 			authService,
 			dashboardService,
-			monitoringService,
+			metricStore,
+			metricCatalog,
 			settingsService,
 			ocservService,
-			healthService,
-			logTailService,
+			app.OSLogFileReader{},
+			healthCfgFn,
+			persistence,
+			readinessChecker,
+			tsdbPathFromEnv(),
 			configMgmtService,
 			adminUserService,
 			auditLogService,

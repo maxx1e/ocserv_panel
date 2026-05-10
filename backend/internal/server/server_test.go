@@ -592,12 +592,10 @@ func TestRepresentativeWrongMethodsReturn405(t *testing.T) {
 }
 
 type testHarness struct {
-	database       *sql.DB
-	store          *store.Store
-	router         http.Handler
-	ocservFake     *ocserv.FakeManager
-	healthService  *app.HealthService
-	logTailService *app.LogTailService
+	database   *sql.DB
+	store      *store.Store
+	router     http.Handler
+	ocservFake *ocserv.FakeManager
 }
 
 func newTestHarness(t *testing.T) *testHarness {
@@ -626,7 +624,8 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	recorder := audit.NewSQLiteRecorder(s)
 	authService := app.NewAuthService(s, recorder)
 	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
-	monitoringService := app.NewMonitoringService(metrics.NewMemoryStore(), rbac.NewDefaultAuthorizer(), nil, recorder)
+	memStore := metrics.NewMemoryStore()
+	catalog := metrics.DefaultCatalog()
 	cfg := config.Defaults()
 	settingsService := app.NewSettingsService(&cfg, "", s, recorder, rbac.NewDefaultAuthorizer())
 	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
@@ -636,8 +635,6 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	fakeRunner2 := cmd.NewFakeCommandRunner()
 	fakeSvcMgr2 := service.NewFakeServiceManager(service.ServiceInactive)
 	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
-	healthSvc := app.NewHealthService(testChecker, s, testCfgFn, rbac.NewDefaultAuthorizer(), "")
-	logTailSvc := app.NewLogTailService(testCfgFn, app.FakeLogFileReader{}, rbac.NewDefaultAuthorizer())
 
 	// Config management service for tests
 	confDir := t.TempDir()
@@ -658,19 +655,21 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	)
 
 	return &testHarness{
-		database:       database,
-		store:          s,
-		ocservFake:     fakeManager,
-		healthService:  healthSvc,
-		logTailService: logTailSvc,
+		database:   database,
+		store:      s,
+		ocservFake: fakeManager,
 		router: NewAppRouter(
 			authService,
 			dashboardService,
-			monitoringService,
+			memStore,
+			catalog,
 			settingsService,
 			ocservSvc,
-			healthSvc,
-			logTailSvc,
+			app.FakeLogFileReader{},
+			testCfgFn,
+			s,
+			testChecker,
+			"",
 			configMgmtSvc,
 			app.NewAdminUserService(s, recorder, rbac.NewDefaultAuthorizer(), nil),
 			nil,
@@ -1107,7 +1106,8 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 	recorder := audit.NewSQLiteRecorder(s)
 	authService := app.NewAuthService(s, recorder)
 	dashboardService := app.NewDashboardService(s, recorder, rbac.NewDefaultAuthorizer(), nil)
-	monitoringService := app.NewMonitoringService(metrics.NewMemoryStore(), rbac.NewDefaultAuthorizer(), nil, recorder)
+	memStore := metrics.NewMemoryStore()
+	catalog := metrics.DefaultCatalog()
 	settingsService := app.NewSettingsService(&initialCfg, cfgPath, s, recorder, rbac.NewDefaultAuthorizer())
 	ocservSvc, fakeManager := newTestOcservServiceWithFake(s, recorder)
 
@@ -1115,8 +1115,6 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 	fakeRunner2 := cmd.NewFakeCommandRunner()
 	fakeSvcMgr2 := service.NewFakeServiceManager(service.ServiceInactive)
 	testChecker := ocserv.NewReadinessChecker(func() ocserv.ReadinessConfig { return ocserv.ReadinessConfig{} }, fakeRunner2, fakeSvcMgr2)
-	healthSvc := app.NewHealthService(testChecker, s, tempCfgFn, rbac.NewDefaultAuthorizer(), "")
-	logTailSvc := app.NewLogTailService(tempCfgFn, app.FakeLogFileReader{}, rbac.NewDefaultAuthorizer())
 
 	// Config management service for temp-config harness
 	confDir2 := t.TempDir()
@@ -1137,19 +1135,21 @@ func newTestHarnessWithTempConfig(t *testing.T) *testHarness {
 	)
 
 	h := &testHarness{
-		database:       database,
-		store:          s,
-		ocservFake:     fakeManager,
-		healthService:  healthSvc,
-		logTailService: logTailSvc,
+		database:   database,
+		store:      s,
+		ocservFake: fakeManager,
 		router: NewAppRouter(
 			authService,
 			dashboardService,
-			monitoringService,
+			memStore,
+			catalog,
 			settingsService,
 			ocservSvc,
-			healthSvc,
-			logTailSvc,
+			app.FakeLogFileReader{},
+			tempCfgFn,
+			s,
+			testChecker,
+			"",
 			configMgmtSvc2,
 			app.NewAdminUserService(s, recorder, rbac.NewDefaultAuthorizer(), nil),
 			nil,
