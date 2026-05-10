@@ -22,12 +22,14 @@ import (
 	"ocserv_panel/backend/internal/db"
 	"ocserv_panel/backend/internal/logging"
 	"ocserv_panel/backend/internal/logs"
-	"ocserv_panel/backend/internal/metrics"
-	"ocserv_panel/backend/internal/monitoring"
-	"ocserv_panel/backend/internal/ocserv"
-	"ocserv_panel/backend/internal/ocserv/cmd"
-	ocservconfig "ocserv_panel/backend/internal/ocserv/config"
-	"ocserv_panel/backend/internal/ocserv/service"
+	"ocserv_panel/backend/internal/monitor"
+	
+	"ocserv_panel/backend/internal/vpn/sessions"
+	"ocserv_panel/backend/internal/vpn/users"
+	"ocserv_panel/backend/internal/vpn/health"
+	"ocserv_panel/backend/internal/vpn/exec"
+	vpnconfig "ocserv_panel/backend/internal/vpn/config"
+	"ocserv_panel/backend/internal/vpn/service"
 	"ocserv_panel/backend/internal/rbac"
 	"ocserv_panel/backend/internal/server"
 	"ocserv_panel/backend/internal/store"
@@ -106,15 +108,15 @@ func main() {
 	settingsService := app.NewSettingsService(&cfg, configPath, persistence, recorder, rbac.NewDefaultAuthorizer())
 
 	// Build ocserv integration components from config.
-	runner := cmd.NewOSCommandRunner()
+	runner := exec.NewOSCommandRunner()
 	svcManager := service.NewSystemdManager(cfg.Service.SystemdUnitName, runner)
-	readinessChecker := ocserv.NewReadinessChecker(
-		func() ocserv.ReadinessConfig {
+	readinessChecker := health.NewReadinessChecker(
+		func() health.ReadinessConfig {
 			liveCfg, err := config.Load(configPath)
 			if err != nil {
 				liveCfg = cfg
 			}
-			return ocserv.ReadinessConfig{
+			return health.ReadinessConfig{
 				OcservBinPath:    liveCfg.Installation.OcservBinPath,
 				OcctlBinPath:     liveCfg.Installation.OcctlBinPath,
 				OcpasswdBinPath:  liveCfg.Installation.OcpasswdBinPath,
@@ -127,9 +129,9 @@ func main() {
 		runner,
 		svcManager,
 	)
-	sessionManager := ocserv.NewOcctlAdapter(cfg.Installation.OcctlBinPath, cfg.Installation.OcservSocketPath, runner)
-	passwdManager := ocserv.NewOcpasswdAdapter(cfg.Installation.OcpasswdBinPath, cfg.Installation.OcpasswdFilePath, cfg.Installation.OcservConfigPath, runner)
-	configValidator := ocservconfig.NewConfigValidator(cfg.Installation.OcservConfigPath)
+	sessionManager := sessions.NewOcctlAdapter(cfg.Installation.OcctlBinPath, cfg.Installation.OcservSocketPath, runner)
+	passwdManager := users.NewOcpasswdAdapter(cfg.Installation.OcpasswdBinPath, cfg.Installation.OcpasswdFilePath, cfg.Installation.OcservConfigPath, runner)
+	configValidator := vpnconfig.NewConfigValidator(cfg.Installation.OcservConfigPath)
 	ocservService := app.NewOcservService(readinessChecker, sessionManager, passwdManager, svcManager, configValidator, recorder, rbac.NewDefaultAuthorizer())
 
 	healthCfgFn := func() config.Config {
@@ -153,15 +155,15 @@ func main() {
 		rbac.NewDefaultAuthorizer(),
 	)
 
-	configFiles := ocservconfig.NewConfigFileManager(cfg.Installation.OcservConfigPath, 10)
-	configReloader := ocservconfig.NewConfigReloader(runner, cfg.Installation.OcctlBinPath)
-	networkInspector := ocserv.NewNetworkInspectorWithConfig(runner, "/proc/sys", cfg.Installation.OcservConfigPath)
+	configFiles := vpnconfig.NewConfigFileManager(cfg.Installation.OcservConfigPath, 10)
+	configReloader := vpnconfig.NewConfigReloader(runner, cfg.Installation.OcctlBinPath)
+	networkInspector := health.NewNetworkInspectorWithConfig(runner, "/proc/sys", cfg.Installation.OcservConfigPath)
 	configMgmtService := app.NewConfigManagementService(
 		configFiles,
 		configValidator,
 		configReloader,
 		networkInspector,
-		ocservconfig.NewRestartDetector(),
+		vpnconfig.NewRestartDetector(),
 		recorder,
 		rbac.NewDefaultAuthorizer(),
 	)
@@ -180,21 +182,25 @@ func main() {
 	)
 	go housekeepingScheduler.Run(ctx)
 
+	// Start session ingester: polls ocserv for active sessions and persists to historical_sessions.
+	sessionIngester := app.NewSessionIngester(persistence, sessionManager)
+	go sessionIngester.Run(ctx)
+
 	metricStore := openMetricStore()
 	defer func() {
 		if err := metricStore.Close(); err != nil {
 			log.Error().Err(err).Msg("close metric store failed")
 		}
 	}()
-	metricCatalog := metrics.DefaultCatalog()
+	metricCatalog := monitor.DefaultCatalog()
 	dashboardService := app.NewDashboardService(persistence, recorder, rbac.NewDefaultAuthorizer(), readinessChecker, metricStore)
-	collectors := configuredCollectors(monitoring.OSReader{}, cfg.Monitoring)
+	collectors := configuredCollectors(monitor.OSReader{}, cfg.Monitoring)
 
 	// Add session collector using the ocserv session manager.
-	sessionCollector := monitoring.NewSessionCollector(sessionManager)
+	sessionCollector := monitor.NewSessionCollector(sessionManager)
 	collectors = append(collectors, sessionCollector)
-	metricCatalog.SetState(metrics.MetricActiveSessions, metrics.StateCollecting, "")
-	metricCatalog.SetState(metrics.MetricConcurrentSessions, metrics.StateCollecting, "")
+	metricCatalog.SetState(monitor.MetricActiveSessions, monitor.StateCollecting, "")
+	metricCatalog.SetState(monitor.MetricConcurrentSessions, monitor.StateCollecting, "")
 
 	// Use config-based collector interval with fallback.
 	collectorInterval := time.Duration(cfg.Monitoring.CollectorInterval) * time.Second
@@ -205,7 +211,7 @@ func main() {
 	// Check if VPN is already configured (from config or env).
 	vpnConfigured := strings.TrimSpace(cfg.Monitoring.VPNInterface) != "" || strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE")) != ""
 
-	collectorService := monitoring.NewCollectorService(
+	collectorService := monitor.NewCollectorService(
 		metricStore,
 		collectors,
 		collectorInterval,
@@ -219,15 +225,15 @@ func main() {
 			vpnIface = strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE"))
 		}
 		collectorService.MarkVPNPresent(vpnIface)
-		metricCatalog.SetState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
-		metricCatalog.SetState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
+		metricCatalog.SetState(monitor.MetricVPNInterfaceRXBytes, monitor.StateCollecting, "")
+		metricCatalog.SetState(monitor.MetricVPNInterfaceTXBytes, monitor.StateCollecting, "")
 	} else {
 		// Enable periodic re-discovery of VPN interface.
 		collectorService.SetVPNDiscoverer(
-			func() ([]string, error) { return monitoring.DiscoverAllVPNInterfaces() },
-			monitoring.OSReader{},
-			metrics.MetricVPNInterfaceRXBytes,
-			metrics.MetricVPNInterfaceTXBytes,
+			func() ([]string, error) { return monitor.DiscoverAllVPNInterfaces() },
+			monitor.OSReader{},
+			monitor.MetricVPNInterfaceRXBytes,
+			monitor.MetricVPNInterfaceTXBytes,
 		)
 	}
 	go collectorService.Run(ctx)
@@ -322,10 +328,10 @@ func tsdbPathFromEnv() string {
 	return envOrDefault("OCSERV_PANEL_TSDB_PATH", filepath.Join("data", "metrics"))
 }
 
-func openMetricStore() metrics.Store {
+func openMetricStore() monitor.Store {
 	tsdbPath := tsdbPathFromEnv()
 	retention := 30 * 24 * time.Hour
-	metricStore, err := metrics.OpenTSDBStore(tsdbPath, retention)
+	metricStore, err := monitor.OpenTSDBStore(tsdbPath, retention)
 	if err == nil {
 		log.Info().Str("type", "tsdb").Str("path", tsdbPath).Str("retention", "30d").Msg("metrics store ready")
 		return metricStore
@@ -333,13 +339,13 @@ func openMetricStore() metrics.Store {
 
 	log.Warn().Err(err).Msg("open metrics tsdb failed; using in-memory metrics store")
 
-	return metrics.NewMemoryStore()
+	return monitor.NewMemoryStore()
 }
 
-func configuredCollectors(reader monitoring.FileReader, monCfg config.MonitoringConfig) []monitoring.Collector {
-	collectors := []monitoring.Collector{
-		monitoring.NewCPUCollector(reader),
-		monitoring.NewMemoryCollector(reader),
+func configuredCollectors(reader monitor.FileReader, monCfg config.MonitoringConfig) []monitor.Collector {
+	collectors := []monitor.Collector{
+		monitor.NewCPUCollector(reader),
+		monitor.NewMemoryCollector(reader),
 	}
 
 	// Network interface: config > env > auto-discovery
@@ -348,7 +354,7 @@ func configuredCollectors(reader monitoring.FileReader, monCfg config.Monitoring
 		netIface = strings.TrimSpace(os.Getenv("OCSERV_PANEL_NET_IFACE"))
 	}
 	if netIface == "" {
-		if discovered, err := monitoring.DiscoverDefaultInterface(); err != nil {
+		if discovered, err := monitor.DiscoverDefaultInterface(); err != nil {
 			log.Warn().Err(err).Msg("default interface discovery failed")
 		} else if discovered != "" {
 			log.Info().Str("interface", discovered).Msg("default interface discovered")
@@ -358,11 +364,11 @@ func configuredCollectors(reader monitoring.FileReader, monCfg config.Monitoring
 		}
 	}
 	if netIface != "" {
-		collectors = append(collectors, monitoring.NewInterfaceCollector(
+		collectors = append(collectors, monitor.NewInterfaceCollector(
 			reader,
 			netIface,
-			metrics.MetricNetInterfaceRXBytes,
-			metrics.MetricNetInterfaceTXBytes,
+			monitor.MetricNetInterfaceRXBytes,
+			monitor.MetricNetInterfaceTXBytes,
 		))
 	}
 
@@ -372,11 +378,11 @@ func configuredCollectors(reader monitoring.FileReader, monCfg config.Monitoring
 		vpnIface = strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE"))
 	}
 	if vpnIface != "" {
-		collectors = append(collectors, monitoring.NewInterfaceCollector(
+		collectors = append(collectors, monitor.NewInterfaceCollector(
 			reader,
 			vpnIface,
-			metrics.MetricVPNInterfaceRXBytes,
-			metrics.MetricVPNInterfaceTXBytes,
+			monitor.MetricVPNInterfaceRXBytes,
+			monitor.MetricVPNInterfaceTXBytes,
 		))
 	}
 
@@ -408,7 +414,7 @@ func resolveMigrationsDir() string {
 	return filepath.Join("..", "migrations")
 }
 
-// zerologAdapter implements monitoring.Logger using the global zerolog logger.
+// zerologAdapter implements monitor.Logger using the global zerolog logger.
 type zerologAdapter struct{}
 
 func (zerologAdapter) Debug(msg string, args ...any) {

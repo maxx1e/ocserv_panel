@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"ocserv_panel/backend/internal/config"
-	"ocserv_panel/backend/internal/metrics"
-	"ocserv_panel/backend/internal/monitoring"
+	"ocserv_panel/backend/internal/monitor"
+	
 )
 
 func TestEnvOrDefault(t *testing.T) {
@@ -99,18 +99,18 @@ func TestConfiguredCollectors(t *testing.T) {
 		}
 
 		collect := prime.Add(time.Second)
-		var allSamples []metrics.Sample
+		var allSamples []monitor.Sample
 		for _, c := range collectors {
 			result := c.Collect(context.Background(), collect)
-			if result.Status == monitoring.CollectStatusAvailable {
+			if result.Status == monitor.CollectStatusAvailable {
 				allSamples = append(allSamples, result.Samples...)
 			}
 		}
 
-		assertHasSampleForInterface(t, allSamples, metrics.MetricNetInterfaceRXBytes, "eth0")
-		assertHasSampleForInterface(t, allSamples, metrics.MetricNetInterfaceTXBytes, "eth0")
-		assertHasSampleForInterface(t, allSamples, metrics.MetricVPNInterfaceRXBytes, "vpns0")
-		assertHasSampleForInterface(t, allSamples, metrics.MetricVPNInterfaceTXBytes, "vpns0")
+		assertHasSampleForInterface(t, allSamples, monitor.MetricNetInterfaceRXBytes, "eth0")
+		assertHasSampleForInterface(t, allSamples, monitor.MetricNetInterfaceTXBytes, "eth0")
+		assertHasSampleForInterface(t, allSamples, monitor.MetricVPNInterfaceRXBytes, "vpns0")
+		assertHasSampleForInterface(t, allSamples, monitor.MetricVPNInterfaceTXBytes, "vpns0")
 	})
 }
 
@@ -168,7 +168,7 @@ func TestResolveMigrationsDirHonorsEnvAndFallbacks(t *testing.T) {
 
 type fakeFileReader map[string][]byte
 
-var _ monitoring.FileReader = fakeFileReader{}
+var _ monitor.FileReader = fakeFileReader{}
 
 func (r fakeFileReader) ReadFile(path string) ([]byte, error) {
 	data := r[path]
@@ -178,8 +178,8 @@ func (r fakeFileReader) ReadFile(path string) ([]byte, error) {
 
 func assertHasSampleForInterface(
 	t *testing.T,
-	samples []metrics.Sample,
-	name metrics.MetricName,
+	samples []monitor.Sample,
+	name monitor.MetricName,
 	iface string,
 ) {
 	t.Helper()
