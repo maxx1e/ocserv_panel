@@ -1,5 +1,7 @@
 <script lang="ts">
   import MetricChart from '$lib/components/ui/MetricChart.svelte';
+  import MultiLineChart from '$lib/components/ui/MultiLineChart.svelte';
+  import type { LineData } from '$lib/components/ui/MultiLineChart.svelte';
   import { ArrowDown, ArrowUp, Cpu, MemoryStick } from 'lucide-svelte';
   import CardStats from '$lib/components/ui/CardStats.svelte';
   import * as Card from '$lib/components/ui/card/index';
@@ -16,7 +18,8 @@
   import type {
     MonitoringOverview,
     MonitoringSeries,
-    MonitoringWindow
+    MonitoringWindow,
+    SystemInfo
   } from '$lib/api';
 
   type ChartDefinition = {
@@ -31,6 +34,7 @@
     monitoringWindow: MonitoringWindow;
     onWindowChange: (window: string) => void;
     onRefresh: () => void;
+    systemInfo: SystemInfo | null;
   };
 
   let {
@@ -39,7 +43,8 @@
     monitoringError,
     monitoringWindow,
     onWindowChange,
-    onRefresh
+    onRefresh,
+    systemInfo
   }: Props = $props();
 
   const MONITORING_WINDOWS: MonitoringWindow[] = ['15m', '1h', '6h', '24h'];
@@ -54,9 +59,7 @@
     { metric: HOST_CPU, title: 'CPU utilization' },
     { metric: HOST_MEMORY, title: 'Memory utilization' },
     { metric: NET_RX, title: 'Network inbound' },
-    { metric: NET_TX, title: 'Network outbound' },
-    { metric: VPN_RX, title: 'VPN inbound' },
-    { metric: VPN_TX, title: 'VPN outbound' }
+    { metric: NET_TX, title: 'Network outbound' }
   ];
 
   function metricSeries(metric: string): MonitoringSeries | undefined {
@@ -92,6 +95,40 @@
       .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }
+
+  function chartDataForMetricAndInterface(metric: string, iface: string): { timestamp: Date; value: number }[] {
+    const series = monitoring?.series?.find(
+      s => s.metric === metric && s.labels['interface'] === iface
+    );
+    if (!series) return [];
+    return series.points
+      .filter(p => Number.isFinite(Date.parse(p.timestamp)) && Number.isFinite(p.value))
+      .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
+
+  const vpnInterfaceNames = $derived(
+    [...new Set(
+      (monitoring?.series ?? [])
+        .filter(s => s.metric === VPN_RX)
+        .map(s => s.labels['interface'])
+        .filter((v): v is string => Boolean(v))
+    )]
+  );
+
+  const vpnRXLines = $derived<LineData[]>(
+    vpnInterfaceNames.map(iface => ({
+      name: iface,
+      data: chartDataForMetricAndInterface(VPN_RX, iface),
+    }))
+  );
+
+  const vpnTXLines = $derived<LineData[]>(
+    vpnInterfaceNames.map(iface => ({
+      name: iface,
+      data: chartDataForMetricAndInterface(VPN_TX, iface),
+    }))
+  );
 
   const unavailableChips = $derived<Chip[]>(
     chartDefinitions
@@ -140,6 +177,7 @@
       icon={Cpu}
       unavailable={metricState(HOST_CPU) === 'unavailable'}
       hint={unavailableReason(HOST_CPU)}
+      subtitle={systemInfo ? `${systemInfo.cpuCores} cores` : undefined}
     />
     <CardStats
       title="Memory"
@@ -147,6 +185,7 @@
       icon={MemoryStick}
       unavailable={metricState(HOST_MEMORY) === 'unavailable'}
       hint={unavailableReason(HOST_MEMORY)}
+      subtitle={systemInfo?.memoryTotalGB ? `${systemInfo.memoryTotalGB} GB total` : undefined}
     />
     <CardStats
       title="Network inbound"
@@ -154,6 +193,7 @@
       icon={ArrowDown}
       unavailable={metricState(NET_RX) === 'unavailable'}
       hint={unavailableReason(NET_RX)}
+      subtitle={systemInfo?.netInterface || undefined}
     />
     <CardStats
       title="Network outbound"
@@ -161,6 +201,7 @@
       icon={ArrowUp}
       unavailable={metricState(NET_TX) === 'unavailable'}
       hint={unavailableReason(NET_TX)}
+      subtitle={systemInfo?.netInterface || undefined}
     />
   </div>
 
@@ -207,6 +248,28 @@
             </Card.Root>
           {/if}
         {/each}
+        <Card.Root>
+          <Card.Header>
+            <div>
+              <Card.Title>VPN inbound</Card.Title>
+              <Card.Description>Last {monitoringWindow}</Card.Description>
+            </div>
+          </Card.Header>
+          <Card.Content>
+            <MultiLineChart lines={vpnRXLines} metric={VPN_RX} height={160} />
+          </Card.Content>
+        </Card.Root>
+        <Card.Root>
+          <Card.Header>
+            <div>
+              <Card.Title>VPN outbound</Card.Title>
+              <Card.Description>Last {monitoringWindow}</Card.Description>
+            </div>
+          </Card.Header>
+          <Card.Content>
+            <MultiLineChart lines={vpnTXLines} metric={VPN_TX} height={160} />
+          </Card.Content>
+        </Card.Root>
       </div>
     {/key}
     <UnavailableChips chips={unavailableChips} />

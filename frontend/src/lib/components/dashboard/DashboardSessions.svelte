@@ -9,7 +9,8 @@
   import type {
     ActiveUserSessionsResult,
     DashboardSummary,
-    SystemHealth
+    SystemHealth,
+    SystemInfo
   } from '$lib/api';
 
   type Props = {
@@ -19,9 +20,10 @@
     healthCheckedAt: Date | null;
     healthLoading: boolean;
     health: SystemHealth | null;
+    systemInfo: SystemInfo | null;
   };
 
-  let { summary, activeUserSessions, storageItems, healthCheckedAt, healthLoading, health }: Props = $props();
+  let { summary, activeUserSessions, storageItems, healthCheckedAt, healthLoading, health, systemInfo }: Props = $props();
 
   const DONUT_COLORS = [
     '#6366f1', '#10b981', '#f59e0b', '#ec4899',
@@ -35,6 +37,15 @@
       color: DONUT_COLORS[i % DONUT_COLORS.length],
     }))
   );
+
+  const trafficSubtitle = $derived((): string | undefined => {
+    if (!systemInfo?.netInterface) return undefined;
+    const parts = [systemInfo.netInterface];
+    if (systemInfo.vpnInterfaces?.length) {
+      parts.push(...systemInfo.vpnInterfaces);
+    }
+    return parts.join(' + ');
+  });
 </script>
 
 <!-- Donut + Storage -->
@@ -78,16 +89,19 @@
         title="Total received"
         value={formatBytes(summary.analytics?.totalBytesIn)}
         icon={ArrowDown}
+        subtitle={systemInfo?.netInterface || undefined}
       />
       <CardStats
         title="Total sent"
         value={formatBytes(summary.analytics?.totalBytesOut)}
         icon={ArrowUp}
+        subtitle={systemInfo?.netInterface || undefined}
       />
       <CardStats
         title="Total traffic"
         value={formatBytes((summary.analytics?.totalBytesIn ?? 0) + (summary.analytics?.totalBytesOut ?? 0))}
         icon={Server}
+        subtitle={trafficSubtitle()}
       />
     </div>
   {:else}
