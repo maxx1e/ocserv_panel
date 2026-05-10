@@ -214,13 +214,17 @@ func main() {
 	)
 
 	if vpnConfigured {
-		collectorService.MarkVPNPresent()
+		vpnIface := strings.TrimSpace(cfg.Monitoring.VPNInterface)
+		if vpnIface == "" {
+			vpnIface = strings.TrimSpace(os.Getenv("OCSERV_PANEL_VPN_IFACE"))
+		}
+		collectorService.MarkVPNPresent(vpnIface)
 		metricCatalog.SetState(metrics.MetricVPNInterfaceRXBytes, metrics.StateCollecting, "")
 		metricCatalog.SetState(metrics.MetricVPNInterfaceTXBytes, metrics.StateCollecting, "")
 	} else {
 		// Enable periodic re-discovery of VPN interface.
 		collectorService.SetVPNDiscoverer(
-			func() (string, string, error) { return monitoring.DiscoverVPNInterface() },
+			func() ([]string, error) { return monitoring.DiscoverAllVPNInterfaces() },
 			monitoring.OSReader{},
 			metrics.MetricVPNInterfaceRXBytes,
 			metrics.MetricVPNInterfaceTXBytes,

@@ -13,10 +13,9 @@ const (
 	vpnRediscoveryInterval   = 60 * time.Second
 )
 
-// VPNDiscovererFunc attempts to find a VPN interface.
-// It returns (interfaceName, source, error). An empty interfaceName
-// indicates no VPN interface was found.
-type VPNDiscovererFunc func() (string, string, error)
+// VPNMultiDiscovererFunc attempts to find all active VPN interfaces.
+// It returns a slice of interface names (may be empty) and an error.
+type VPNMultiDiscovererFunc func() ([]string, error)
 
 type Logger interface {
 	Debug(msg string, args ...any)
@@ -29,13 +28,13 @@ type CollectorService struct {
 	logger   Logger
 	now      func() time.Time
 
-	mu             sync.Mutex
-	collectors     []Collector
-	vpnDiscoverer  VPNDiscovererFunc
-	vpnReader      FileReader
-	vpnRXMetric    metrics.MetricName
-	vpnTXMetric    metrics.MetricName
-	hasVPN         bool
+	mu            sync.Mutex
+	collectors    []Collector
+	vpnDiscoverer VPNMultiDiscovererFunc
+	vpnReader     FileReader
+	vpnRXMetric   metrics.MetricName
+	vpnTXMetric   metrics.MetricName
+	discoveredVPN map[string]bool
 }
 
 func NewCollectorService(
@@ -68,10 +67,10 @@ func NewCollectorService(
 }
 
 // SetVPNDiscoverer configures periodic VPN interface re-discovery.
-// When set, the Run loop will periodically call fn to look for a VPN
-// interface and, if found, create a new InterfaceCollector for it.
+// When set, the Run loop will periodically call fn to look for VPN
+// interfaces and, if found, create new InterfaceCollectors for them.
 func (s *CollectorService) SetVPNDiscoverer(
-	fn VPNDiscovererFunc,
+	fn VPNMultiDiscovererFunc,
 	reader FileReader,
 	rxMetric, txMetric metrics.MetricName,
 ) {
@@ -83,19 +82,22 @@ func (s *CollectorService) SetVPNDiscoverer(
 	s.vpnTXMetric = txMetric
 }
 
-// HasVPNCollector reports whether a VPN interface collector has been added.
+// HasVPNCollector reports whether any VPN interface collector has been added.
 func (s *CollectorService) HasVPNCollector() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.hasVPN
+	return len(s.discoveredVPN) > 0
 }
 
-// MarkVPNPresent marks the VPN collector as already present, for example
+// MarkVPNPresent marks a specific VPN interface as already present, for example
 // when a VPN interface was discovered at startup before the Run loop.
-func (s *CollectorService) MarkVPNPresent() {
+func (s *CollectorService) MarkVPNPresent(iface string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.hasVPN = true
+	if s.discoveredVPN == nil {
+		s.discoveredVPN = make(map[string]bool)
+	}
+	s.discoveredVPN[iface] = true
 }
 
 func (s *CollectorService) CollectOnce(ctx context.Context) {
@@ -103,7 +105,7 @@ func (s *CollectorService) CollectOnce(ctx context.Context) {
 		return
 	}
 
-	// Snapshot collectors under lock to avoid races with maybeDiscoverVPN.
+	// Snapshot collectors under lock to avoid races with maybeDiscoverAllVPN.
 	s.mu.Lock()
 	snapshot := make([]Collector, len(s.collectors))
 	copy(snapshot, s.collectors)
@@ -158,15 +160,16 @@ func (s *CollectorService) Run(ctx context.Context) {
 		case <-collectTicker.C:
 			s.CollectOnce(ctx)
 		case <-vpnTickerChan(vpnTicker):
-			s.maybeDiscoverVPN()
+			s.maybeDiscoverAllVPN()
 		}
 	}
 }
 
-// maybeDiscoverVPN checks for a VPN interface and adds a collector if found.
-func (s *CollectorService) maybeDiscoverVPN() {
+// maybeDiscoverAllVPN checks for VPN interfaces and adds collectors for any
+// newly discovered ones.
+func (s *CollectorService) maybeDiscoverAllVPN() {
 	s.mu.Lock()
-	if s.hasVPN || s.vpnDiscoverer == nil {
+	if s.vpnDiscoverer == nil {
 		s.mu.Unlock()
 		return
 	}
@@ -176,27 +179,30 @@ func (s *CollectorService) maybeDiscoverVPN() {
 	txMetric := s.vpnTXMetric
 	s.mu.Unlock()
 
-	iface, source, err := discoverer()
+	ifaces, err := discoverer()
 	if err != nil {
 		s.logger.Warn("vpn discovery error", "error", err)
 		return
 	}
-	if iface == "" {
-		s.logger.Debug("vpn discovery found no interface")
+	if len(ifaces) == 0 {
+		s.logger.Debug("vpn discovery found no interfaces")
 		return
 	}
 
-	s.logger.Debug("vpn interface discovered", "interface", iface, "source", source)
-
-	collector := NewInterfaceCollector(reader, iface, rxMetric, txMetric)
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.hasVPN {
-		return // Another goroutine already added it.
+	if s.discoveredVPN == nil {
+		s.discoveredVPN = make(map[string]bool)
 	}
-	s.collectors = append(s.collectors, collector)
-	s.hasVPN = true
+	for _, iface := range ifaces {
+		if s.discoveredVPN[iface] {
+			continue
+		}
+		s.logger.Debug("vpn interface discovered", "interface", iface)
+		collector := NewInterfaceCollector(reader, iface, rxMetric, txMetric)
+		s.collectors = append(s.collectors, collector)
+		s.discoveredVPN[iface] = true
+	}
 }
 
 // vpnTickerChan returns the ticker channel or nil if the ticker is nil.
