@@ -375,3 +375,32 @@ func TestOcservServiceConfigIssuesDeniedForUnauthenticated(t *testing.T) {
 		t.Fatalf("expected ErrUnauthenticated, got %v", err)
 	}
 }
+
+func TestRestartPanelServiceDeniedForUnauthenticated(t *testing.T) {
+	t.Parallel()
+	svc, _, _, _ := newTestOcservService(t, service.ServiceActive)
+	err := svc.RestartPanelService(context.Background(), auth.Principal{})
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("expected ErrUnauthenticated, got %v", err)
+	}
+}
+
+func TestRestartPanelServiceDeniedForViewer(t *testing.T) {
+	t.Parallel()
+	svc, _, _, _ := newTestOcservService(t, service.ServiceActive)
+	err := svc.RestartPanelService(context.Background(), viewerPrincipal())
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("expected ErrPermissionDenied, got %v", err)
+	}
+}
+
+func TestRestartPanelServiceAllowedForOwner(t *testing.T) {
+	t.Parallel()
+	svc, _, _, fakeSvc := newTestOcservService(t, service.ServiceActive)
+	if err := svc.RestartPanelService(context.Background(), ownerPrincipal()); err != nil {
+		t.Fatalf("expected owner to restart panel, got %v", err)
+	}
+	if fakeSvc.RestartCount() != 1 {
+		t.Fatalf("expected 1 restart call, got %d", fakeSvc.RestartCount())
+	}
+}

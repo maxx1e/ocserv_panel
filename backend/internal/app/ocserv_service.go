@@ -116,6 +116,21 @@ func (s *OcservService) RestartService(ctx context.Context, principal auth.Princ
 	return nil
 }
 
+// RestartPanelService restarts the panel service itself via systemd.
+// After this call the process will be signalled to stop; systemd will restart it.
+func (s *OcservService) RestartPanelService(ctx context.Context, principal auth.Principal) error {
+	if err := s.requirePerm(ctx, principal, rbac.PermissionSettingsRestart, "settings.restart"); err != nil {
+		return err
+	}
+	actorID := principal.ID
+	if err := s.svc.Restart(ctx); err != nil {
+		_ = s.record(ctx, &actorID, "settings.restart", "service", "", audit.OutcomeFailure, err.Error(), nil)
+		return fmt.Errorf("restart panel service: %w", err)
+	}
+	_ = s.record(ctx, &actorID, "settings.restart", "service", "", audit.OutcomeSuccess, "panel service restart initiated", nil)
+	return nil
+}
+
 // ListSessions returns active ocserv sessions.
 func (s *OcservService) ListSessions(ctx context.Context, principal auth.Principal) ([]sessions.Session, error) {
 	if err := s.requirePerm(ctx, principal, rbac.PermissionOcservSessionsRead, "ocserv.sessions.list"); err != nil {
