@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import MetricChart from '$lib/components/ui/MetricChart.svelte';
+  import MultiLineChart from '$lib/components/ui/MultiLineChart.svelte';
+  import type { LineData } from '$lib/components/ui/MultiLineChart.svelte';
   import { ArrowDown, ArrowUp, Server, Users, BarChart2, List, Shield, Settings } from 'lucide-svelte';
 
   import CardStats from '$lib/components/ui/CardStats.svelte';
@@ -46,7 +48,7 @@
     type BanEvent,
     type BanEventPage
   } from '$lib/api';
-  import { formatBytes, metricByName, seriesByMetric } from '$lib/monitoring';
+  import { formatBytes, metricByName, seriesByMetric, allSeriesForMetric } from '$lib/monitoring';
 
   // --- Constants ---
   const HISTORY_WINDOWS: MonitoringWindow[] = ['24h', '7d', '30d'];
@@ -70,8 +72,6 @@
     { metric: HOST_MEMORY, title: 'Memory utilization' },
     { metric: NET_RX, title: 'Network inbound' },
     { metric: NET_TX, title: 'Network outbound' },
-    { metric: VPN_RX, title: 'VPN inbound' },
-    { metric: VPN_TX, title: 'VPN outbound' },
     { metric: ACTIVE_SESSIONS, title: 'Active sessions' },
     { metric: CONNECTION_RATE, title: 'Connection rate' },
     { metric: CONCURRENT_SESSIONS, title: 'Concurrent sessions' }
@@ -188,6 +188,30 @@
       .filter(chart => !shouldShowChart(chart.metric))
       .map(chart => ({ name: chart.title, reason: unavailableReason(chart.metric) }))
   );
+
+  // VPN per-interface multi-line chart data
+  const vpnRXLines = $derived<LineData[]>(
+    allSeriesForMetric(monitoring, VPN_RX).map(s => ({
+      name: s.labels?.['interface'] ?? s.metric,
+      data: (s.points ?? [])
+        .filter(p => Number.isFinite(Date.parse(p.timestamp)) && Number.isFinite(p.value))
+        .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
+        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+    }))
+  );
+
+  const vpnTXLines = $derived<LineData[]>(
+    allSeriesForMetric(monitoring, VPN_TX).map(s => ({
+      name: s.labels?.['interface'] ?? s.metric,
+      data: (s.points ?? [])
+        .filter(p => Number.isFinite(Date.parse(p.timestamp)) && Number.isFinite(p.value))
+        .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
+        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+    }))
+  );
+
+  const hasVpnRXData = $derived(vpnRXLines.some(l => l.data.length > 0));
+  const hasVpnTXData = $derived(vpnTXLines.some(l => l.data.length > 0));
 
   // --- Lifecycle ---
   onMount(() => {
@@ -646,6 +670,40 @@
                 </Card.Root>
               {/if}
             {/each}
+            {#if hasVpnRXData}
+              <Card.Root>
+                <Card.Header>
+                  <div>
+                    <Card.Title>VPN inbound</Card.Title>
+                    <Card.Description>Last {monitoringWindow}</Card.Description>
+                  </div>
+                </Card.Header>
+                <Card.Content>
+                  {#if vpnRXLines.length > 1}
+                    <MultiLineChart lines={vpnRXLines} metric={VPN_RX} height={160} />
+                  {:else}
+                    <MetricChart data={vpnRXLines[0].data} metric={VPN_RX} height={160} />
+                  {/if}
+                </Card.Content>
+              </Card.Root>
+            {/if}
+            {#if hasVpnTXData}
+              <Card.Root>
+                <Card.Header>
+                  <div>
+                    <Card.Title>VPN outbound</Card.Title>
+                    <Card.Description>Last {monitoringWindow}</Card.Description>
+                  </div>
+                </Card.Header>
+                <Card.Content>
+                  {#if vpnTXLines.length > 1}
+                    <MultiLineChart lines={vpnTXLines} metric={VPN_TX} height={160} />
+                  {:else}
+                    <MetricChart data={vpnTXLines[0].data} metric={VPN_TX} height={160} />
+                  {/if}
+                </Card.Content>
+              </Card.Root>
+            {/if}
           </div>
         {/key}
         <UnavailableChips chips={unavailableChips} />

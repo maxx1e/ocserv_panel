@@ -101,6 +101,14 @@ export function seriesByMetric(
   return overview.series.find((series) => series.metric === metric);
 }
 
+export function allSeriesForMetric(
+  overview: MonitoringOverview | undefined | null,
+  metric: string
+): MonitoringSeries[] {
+  if (!Array.isArray(overview?.series)) return [];
+  return overview.series.filter((series) => series.metric === metric);
+}
+
 export function latestPoint(series: MonitoringSeries | undefined | null): MonitoringPoint | undefined {
   if (!Array.isArray(series?.points)) return undefined;
   return series.points.at(-1);
