@@ -4,7 +4,6 @@
   import EmptyState from '$lib/components/ui/EmptyState.svelte';
   import UnbanConfirmDialog from './UnbanConfirmDialog.svelte';
   import { ShieldBan } from 'lucide-svelte';
-  import { formatRelativeTime } from '$lib/utils/format';
   import {
     getBannedIPs,
     getBanPoints,
@@ -158,8 +157,7 @@
             <thead>
               <tr>
                 <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">IP Address</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Points</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Since</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Score</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Status</th>
                 {#if isOwner}
                   <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">Action</th>
@@ -170,8 +168,7 @@
               {#each points as entry}
                 <tr class="hover:bg-slate-50">
                   <td class="px-4 py-3 text-sm font-mono text-slate-700">{entry.ip}</td>
-                  <td class="px-4 py-3 text-sm text-slate-700">{entry.points}</td>
-                  <td class="px-4 py-3 text-sm text-slate-700">{formatRelativeTime(entry.since)}</td>
+                  <td class="px-4 py-3 text-sm text-slate-700">{entry.score}</td>
                   <td class="px-4 py-3">
                     {#if bannedSet.has(entry.ip)}
                       <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">Banned</span>

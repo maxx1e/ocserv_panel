@@ -11,6 +11,9 @@ export type OcservSession = {
   userAgent: string;
   device: string;
   reconnectCount: number;
+  state: string;
+  groupname: string;
+  vhost: string;
 };
 
 export type OcservSessionDetail = {
@@ -29,6 +32,9 @@ export type OcservSessionDetail = {
   routes: string[];
   dns: string[];
   reconnectCount: number;
+  state: string;
+  groupname: string;
+  vhost: string;
 };
 
 export type OcservStatus = {
@@ -131,8 +137,7 @@ export type BannedIP = {
 
 export type BanPointEntry = {
   ip: string;
-  points: number;
-  since: string;
+  score: number;
 };
 
 export type OcservReadiness = {
