@@ -33,14 +33,14 @@
   );
 
   const stats = $derived(seriesStats(allPoints));
-  const latest = $derived(allPoints.length > 0 ? allPoints[allPoints.length - 1].value : null);
-
-  // Trend: difference between latest value and the window average, formatted
-  const trendValue = $derived(
-    latest !== null && stats.avg !== 0
-      ? latest - stats.avg
+  const latest = $derived(
+    allPoints.length > 0
+      ? allPoints.reduce((max, p) => p.timestamp > max.timestamp ? p : max).value
       : null
   );
+
+  // Trend: difference between latest value and the window average, formatted
+  const trendValue = $derived(latest !== null ? latest - stats.avg : null);
   const trendFormatted = $derived(
     trendValue !== null
       ? `${trendValue >= 0 ? '▲' : '▼'} ${formatMetricValue(metric, Math.abs(trendValue))} vs avg`
@@ -68,7 +68,7 @@
         {formatMetricValue(metric, latest)}
       </div>
       {#if trendFormatted}
-        {#if trendValue !== null && trendValue >= 0}
+        {#if (trendValue ?? 0) > 0}
           <div class="text-[10px] mt-0.5" style="color: {dotColor}">
             {trendFormatted}
           </div>
