@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,6 +172,42 @@ type historicalSessionResponse struct {
 	BytesIn         int64     `json:"bytesIn"`
 	BytesOut        int64     `json:"bytesOut"`
 	Source          string    `json:"source"`
+	State           string    `json:"state"`
+}
+
+type listSessionsResponse struct {
+	Sessions []historicalSessionResponse `json:"sessions"`
+	Total    int64                       `json:"total"`
+	Page     int                         `json:"page"`
+	Limit    int                         `json:"limit"`
+}
+
+type trafficBucket struct {
+	Timestamp time.Time `json:"timestamp"`
+	BytesIn   int64     `json:"bytesIn"`
+	BytesOut  int64     `json:"bytesOut"`
+}
+
+type userTrafficResponse struct {
+	Username string          `json:"username"`
+	Window   string          `json:"window"`
+	Buckets  []trafficBucket `json:"buckets"`
+}
+
+type banEventResponse struct {
+	ID         int64      `json:"id"`
+	IP         string     `json:"ip"`
+	Score      int        `json:"score"`
+	Reason     string     `json:"reason"`
+	BannedAt   time.Time  `json:"bannedAt"`
+	UnbannedAt *time.Time `json:"unbannedAt"`
+}
+
+type listBanEventsResponse struct {
+	Events []banEventResponse `json:"events"`
+	Total  int64              `json:"total"`
+	Page   int                `json:"page"`
+	Limit  int                `json:"limit"`
 }
 
 type updateSettingRequest struct {
@@ -256,6 +293,9 @@ func NewAppRouter(
 	mux.HandleFunc("/api/history/purge", appHandler.handleHistoryPurge)
 	mux.Handle("GET /api/history/users/{username}", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleHistoryUserSessions)))
 	mux.Handle("GET /api/history/users", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleHistoryUsers)))
+	mux.Handle("GET /api/history/sessions", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleHistorySessions)))
+	mux.Handle("GET /api/history/users/{username}/traffic", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleHistoryUserTraffic)))
+	mux.Handle("GET /api/history/bans", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleHistoryBans)))
 	mux.Handle("/api/monitoring/catalog", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringCatalog)))
 	mux.Handle("/api/monitoring/overview", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringOverview)))
 	mux.Handle("/api/monitoring/series", appHandler.requirePermission(rbac.PermissionReadDashboard)(http.HandlerFunc(appHandler.handleMonitoringSeries)))
@@ -572,9 +612,177 @@ func (a *App) handleHistoryUserSessions(w http.ResponseWriter, r *http.Request) 
 			BytesIn:         s.BytesIn,
 			BytesOut:        s.BytesOut,
 			Source:          s.Source,
+			State:           s.State,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *App) handleHistorySessions(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	window := queryValueDefault(r, "window", "24h")
+	since := a.now().UTC().Add(-historyWindowDuration(window))
+
+	page := 1
+	if p, err := strconv.Atoi(queryValueDefault(r, "page", "1")); err == nil && p > 0 {
+		page = p
+	}
+	limit := 25
+	if l, err := strconv.Atoi(queryValueDefault(r, "limit", "25")); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+	offset := (page - 1) * limit
+
+	sessions, total, err := a.store.ListSessions(r.Context(), since, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	resp := make([]historicalSessionResponse, 0, len(sessions))
+	for _, s := range sessions {
+		resp = append(resp, historicalSessionResponse{
+			ID:              s.ID,
+			Username:        s.Username,
+			ConnectedAt:     s.ConnectedAt,
+			DisconnectedAt:  s.DisconnectedAt,
+			DurationSeconds: s.DurationSeconds,
+			BytesIn:         s.BytesIn,
+			BytesOut:        s.BytesOut,
+			Source:          s.Source,
+			State:           s.State,
+		})
+	}
+	writeJSON(w, http.StatusOK, listSessionsResponse{
+		Sessions: resp,
+		Total:    total,
+		Page:     page,
+		Limit:    limit,
+	})
+}
+
+func (a *App) handleHistoryUserTraffic(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	username := r.PathValue("username")
+	if username == "" {
+		writeError(w, http.StatusBadRequest, "username is required")
+		return
+	}
+
+	window := queryValueDefault(r, "window", "24h")
+	windowDur := historyWindowDuration(window)
+	since := a.now().UTC().Add(-windowDur)
+
+	var bucketFormat string
+	var bucketDur time.Duration
+	switch window {
+	case "7d", "30d":
+		bucketFormat = "2006-01-02"
+		bucketDur = 24 * time.Hour
+	default:
+		bucketFormat = "2006-01-02T15"
+		bucketDur = time.Hour
+	}
+
+	sessions, err := a.store.UserSessions(r.Context(), username, since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	// Build time-bucketed aggregation.
+	type bucketKey = string
+	bucketMap := make(map[bucketKey]*trafficBucket)
+	for _, s := range sessions {
+		key := s.ConnectedAt.UTC().Format(bucketFormat)
+		b := bucketMap[key]
+		if b == nil {
+			var ts time.Time
+			switch window {
+			case "7d", "30d":
+				y, m, d := s.ConnectedAt.UTC().Date()
+				ts = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+			default:
+				ts = s.ConnectedAt.UTC().Truncate(time.Hour)
+			}
+			b = &trafficBucket{Timestamp: ts}
+			bucketMap[key] = b
+		}
+		b.BytesIn += s.BytesIn
+		b.BytesOut += s.BytesOut
+	}
+
+	// Build zero-filled ordered slice covering the full window.
+	numBuckets := int(windowDur / bucketDur)
+	buckets := make([]trafficBucket, 0, numBuckets)
+	for i := 0; i < numBuckets; i++ {
+		var ts time.Time
+		switch window {
+		case "7d", "30d":
+			y, m, d := since.UTC().AddDate(0, 0, i).Date()
+			ts = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+		default:
+			ts = since.UTC().Truncate(time.Hour).Add(time.Duration(i) * time.Hour)
+		}
+		key := ts.Format(bucketFormat)
+		if b, ok := bucketMap[key]; ok {
+			buckets = append(buckets, *b)
+		} else {
+			buckets = append(buckets, trafficBucket{Timestamp: ts})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, userTrafficResponse{
+		Username: username,
+		Window:   window,
+		Buckets:  buckets,
+	})
+}
+
+func (a *App) handleHistoryBans(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	page := 1
+	if p, err := strconv.Atoi(queryValueDefault(r, "page", "1")); err == nil && p > 0 {
+		page = p
+	}
+	limit := 25
+	if l, err := strconv.Atoi(queryValueDefault(r, "limit", "25")); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+	offset := (page - 1) * limit
+
+	events, total, err := a.store.ListBanEvents(r.Context(), limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	resp := make([]banEventResponse, 0, len(events))
+	for _, e := range events {
+		resp = append(resp, banEventResponse{
+			ID:         e.ID,
+			IP:         e.IP,
+			Score:      e.Score,
+			Reason:     e.Reason,
+			BannedAt:   e.BannedAt,
+			UnbannedAt: e.UnbannedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, listBanEventsResponse{
+		Events: resp,
+		Total:  total,
+		Page:   page,
+		Limit:  limit,
+	})
 }
 
 func (a *App) handleMonitoringCatalog(w http.ResponseWriter, r *http.Request) {
@@ -918,6 +1126,7 @@ func historyAnalyticsToResponse(result app.HistoryAnalyticsResult) historyAnalyt
 			BytesIn:         session.BytesIn,
 			BytesOut:        session.BytesOut,
 			Source:          session.Source,
+			State:           session.State,
 		})
 	}
 	return historyAnalyticsResponse{Summary: analyticsSummaryToResponse(result.Summary), RecentSessions: recent}
