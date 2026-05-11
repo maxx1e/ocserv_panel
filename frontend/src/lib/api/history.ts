@@ -8,6 +8,7 @@ export type HistoricalSession = {
   disconnectedAt?: string;
   startedAt?: string;
   endedAt?: string;
+  state?: string;
   durationSeconds?: number;
   rxBytes?: number;
   txBytes?: number;
@@ -54,4 +55,55 @@ export function purgeHistory(retentionDays: 30 | 90 | 180 | 365, confirmation: '
     method: 'POST',
     body: { retentionDays, confirmation }
   });
+}
+
+export type HistoricalSessionPage = {
+  sessions: HistoricalSession[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export type TrafficBucket = {
+  timestamp: string;
+  bytesIn: number;
+  bytesOut: number;
+};
+
+export type UserTrafficResponse = {
+  username: string;
+  window: string;
+  buckets: TrafficBucket[];
+};
+
+export type BanEvent = {
+  id: number;
+  ip: string;
+  score: number;
+  reason: string;
+  bannedAt: string;
+  unbannedAt: string | null;
+};
+
+export type BanEventPage = {
+  events: BanEvent[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export function listSessions(window: string, page = 1, limit = 25): Promise<HistoricalSessionPage> {
+  return apiFetch<HistoricalSessionPage>(
+    `/api/history/sessions?window=${encodeURIComponent(window)}&page=${page}&limit=${limit}`
+  );
+}
+
+export function getUserTraffic(username: string, window: string): Promise<UserTrafficResponse> {
+  return apiFetch<UserTrafficResponse>(
+    `/api/history/users/${encodeURIComponent(username)}/traffic?window=${encodeURIComponent(window)}`
+  );
+}
+
+export function listHistoricalBans(page = 1, limit = 25): Promise<BanEventPage> {
+  return apiFetch<BanEventPage>(`/api/history/bans?page=${page}&limit=${limit}`);
 }
