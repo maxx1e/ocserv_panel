@@ -676,7 +676,7 @@
         {#if activeSessionsLoading && activeSessions.length === 0}
           <p class="text-xs text-green-700">Loading...</p>
         {:else if activeSessions.length === 0}
-          <p class="text-xs text-green-700">No active sessions right now.</p>
+          <p class="text-xs text-green-700">No active sessions right now</p>
         {:else}
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
@@ -694,7 +694,7 @@
                   <tr>
                     <td class="py-1.5 pr-4 font-mono text-xs text-green-900 font-semibold">{s.username}</td>
                     <td class="py-1.5 pr-4 text-xs text-green-800">{s.device}</td>
-                    <td class="py-1.5 pr-4 text-xs text-green-800">{formatAbsoluteTime(s.since)}</td>
+                    <td class="py-1.5 pr-4 text-xs text-green-800">{formatDuration(Math.floor((Date.now() - new Date(s.since).getTime()) / 1000))}</td>
                     <td class="py-1.5 pr-4 text-xs text-green-800">{s.remoteIp}</td>
                     <td class="py-1.5 text-xs text-green-800">{s.vpnIp}</td>
                   </tr>
