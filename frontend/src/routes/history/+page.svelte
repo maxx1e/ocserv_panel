@@ -1,20 +1,14 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import ChartCard from '$lib/components/ui/ChartCard.svelte';
-  import MetricChart from '$lib/components/ui/MetricChart.svelte';
   import type { LineData } from '$lib/components/ui/MultiLineChart.svelte';
   import { Users, BarChart2, List, Shield, Settings } from 'lucide-svelte';
-  import * as Card from '$lib/components/ui/card/index';
-  import CardTable from '$lib/components/ui/CardTable.svelte';
-  import CardSettings from '$lib/components/ui/CardSettings.svelte';
-  import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
+  import CardSettings from '$lib/components/ui/CardSettings.svelte';  import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
   import UnavailableChips from '$lib/components/ui/UnavailableChips.svelte';
-  import PaginatedTable from '$lib/components/ui/PaginatedTable.svelte';
   import UserSessionDrawer from '$lib/components/history/UserSessionDrawer.svelte';
   import UnbanConfirmDialog from '../sessions/UnbanConfirmDialog.svelte';
   import type { Chip } from '$lib/components/ui/UnavailableChips.svelte';
   import { formatAbsoluteTime } from '$lib/utils/format';
-  import { paginate } from '$lib/utils/pagination';
 
   import {
     getHistoryUsers,
@@ -124,8 +118,8 @@
   let userSummaries = $state<UserSessionSummary[]>([]);
   let userSummariesLoading = $state(false);
   let userSummariesError = $state('');
-  let userSummariesPage = $state(1);
-  let selectedUser = $state<string | null>(null);
+  let expandedUser = $state<string | null>(null);
+  let usersSearch = $state('');
   let userTraffic = $state<UserTrafficResponse | null>(null);
   let userTrafficLoading = $state(false);
 
@@ -178,7 +172,14 @@
     });
     return arr;
   })());
-  const pagedUserSummaries = $derived(paginate(sortedUserSummaries, userSummariesPage, 10));
+  const activeUsernames = $derived(new Set(activeSessions.map(s => s.username)));
+  const filteredUserSummaries = $derived(
+    usersSearch
+      ? sortedUserSummaries.filter(u =>
+          u.username.toLowerCase().includes(usersSearch.toLowerCase())
+        )
+      : sortedUserSummaries
+  );
   const unavailableChips = $derived<Chip[]>(
     chartDefinitions
       .filter(chart => !shouldShowChart(chart.metric))
@@ -326,7 +327,6 @@
 
   // --- Users tab ---
   async function reloadUserSummaries(window: MonitoringWindow = usersWindow) {
-    userSummariesPage = 1;
     userSummariesLoading = true;
     userSummariesError = '';
     try {
@@ -343,22 +343,18 @@
     const window = nextWindow as MonitoringWindow;
     if (!HISTORY_WINDOWS.includes(window) || window === usersWindow) return;
     usersWindow = window;
-    selectedUser = null;
+    expandedUser = null;
     userTraffic = null;
     void reloadUserSummaries(window);
   }
 
-  function setSortField(field: SortField) {
-    if (usersSortField === field) {
-      usersSortDir = usersSortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      usersSortField = field;
-      usersSortDir = 'desc';
-    }
-  }
-
   async function loadUserTraffic(username: string) {
-    selectedUser = username;
+    if (expandedUser === username) {
+      expandedUser = null;
+      userTraffic = null;
+      return;
+    }
+    expandedUser = username;
     userTrafficLoading = true;
     userTraffic = null;
     try {
@@ -790,153 +786,125 @@
   {:else if activeTab === 'users'}
     <!-- Users tab -->
     <section aria-labelledby="users-heading" class="space-y-4">
-      <div class="flex items-center justify-between flex-wrap gap-3">
-        <h2 id="users-heading" class="text-lg font-semibold text-slate-700">User sessions</h2>
+      <!-- Compact toolbar -->
+      <div class="flex items-center gap-3 flex-wrap">
         <WindowSelector
           value={usersWindow}
           windows={HISTORY_WINDOWS}
           onchange={handleUsersWindowChange}
         />
+        <input
+          type="search"
+          placeholder="Filter user..."
+          bind:value={usersSearch}
+          class="px-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 w-40"
+        />
+        <div class="flex items-center gap-2 ml-auto text-sm text-slate-500">
+          <label for="users-sort" class="text-xs font-medium">Sort:</label>
+          <select
+            id="users-sort"
+            bind:value={usersSortField}
+            onchange={() => { usersSortDir = 'desc'; }}
+            class="text-xs border border-slate-200 rounded-md px-2 py-1.5 bg-white text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200"
+          >
+            <option value="totalTraffic">Total traffic ↓</option>
+            <option value="totalBytesIn">Total received ↓</option>
+            <option value="totalBytesOut">Total sent ↓</option>
+            <option value="avgBytesIn">Avg download ↓</option>
+            <option value="avgBytesOut">Avg upload ↓</option>
+          </select>
+        </div>
       </div>
 
       {#if userSummariesError}
         <div class="flex items-center gap-3 py-4">
           <p class="text-red-600 text-sm">{userSummariesError}</p>
-          <button
-            class="text-sm text-blue-600 hover:underline"
-            onclick={() => reloadUserSummaries(usersWindow)}
-          >Retry</button>
+          <button class="text-sm text-blue-600 hover:underline" onclick={() => reloadUserSummaries(usersWindow)}>Retry</button>
         </div>
       {/if}
 
       {#if userSummariesLoading && userSummaries.length === 0}
-        <table class="min-w-full divide-y divide-slate-200 text-sm">
-          <tbody class="divide-y divide-slate-100">
-            {#each Array(5) as _}
-              <tr>
-                {#each Array(8) as _}
-                  <td class="px-4 py-3"><div class="h-4 bg-slate-200 rounded animate-pulse w-20"></div></td>
-                {/each}
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      {:else if userSummaries.length === 0}
+        <div class="space-y-2">
+          {#each Array(5) as _}
+            <div class="h-10 bg-slate-100 rounded animate-pulse"></div>
+          {/each}
+        </div>
+      {:else if filteredUserSummaries.length === 0}
         <p class="text-sm text-slate-500">No sessions in this period.</p>
       {:else}
-        <CardTable title="User sessions — last {usersWindow}">
-          <PaginatedTable
-            totalPages={pagedUserSummaries.totalPages}
-            currentPage={pagedUserSummaries.page}
-            onPageChange={(p) => (userSummariesPage = p)}
-          >
-            <table class="w-full text-sm">
-              <thead class="bg-slate-50">
-                <tr class="text-left text-slate-500 font-medium text-xs">
-                  <th class="px-6 py-3">User</th>
-                  <th class="px-6 py-3">Sessions</th>
-                  <th class="px-6 py-3">Total time</th>
-                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
-                      onclick={() => setSortField('avgBytesIn')}>
-                    Avg download
-                    {#if usersSortField === 'avgBytesIn'}
-                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
-                    {/if}
-                  </th>
-                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
-                      onclick={() => setSortField('avgBytesOut')}>
-                    Avg upload
-                    {#if usersSortField === 'avgBytesOut'}
-                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
-                    {/if}
-                  </th>
-                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
-                      onclick={() => setSortField('totalBytesIn')}>
-                    Total received
-                    {#if usersSortField === 'totalBytesIn'}
-                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
-                    {/if}
-                  </th>
-                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
-                      onclick={() => setSortField('totalBytesOut')}>
-                    Total sent
-                    {#if usersSortField === 'totalBytesOut'}
-                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
-                    {/if}
-                  </th>
-                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
-                      onclick={() => setSortField('totalTraffic')}>
-                    Total
-                    {#if usersSortField === 'totalTraffic'}
-                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
-                    {/if}
-                  </th>
+        <div class="rounded-lg border border-slate-200 overflow-hidden dark:border-slate-700">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-slate-800">
+              <tr class="text-left text-xs text-slate-500 font-medium">
+                <th class="px-4 py-3">User</th>
+                <th class="px-4 py-3">Sessions</th>
+                <th class="px-4 py-3">Total time</th>
+                <th class="px-4 py-3">↓ Total</th>
+                <th class="px-4 py-3">↑ Total</th>
+                <th class="px-4 py-3 text-blue-600 font-semibold">Total ↕</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+              {#each filteredUserSummaries as row (row.username)}
+                {@const initials = row.username.slice(0, 1).toUpperCase()}
+                {@const isActive = activeUsernames.has(row.username)}
+                {@const isExpanded = expandedUser === row.username}
+                <tr
+                  class="hover:bg-slate-50 cursor-pointer dark:hover:bg-slate-800/50 {isExpanded ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => loadUserTraffic(row.username)}
+                  onkeydown={(e) => { if (e.key === 'Enter') loadUserTraffic(row.username); }}
+                >
+                  <td class="px-4 py-3">
+                    <div class="flex items-center gap-2">
+                      <div class="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold flex-shrink-0">{initials}</div>
+                      <span class="text-slate-700 font-medium dark:text-slate-200">{row.username}</span>
+                      {#if isActive}
+                        <span class="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="Currently active"></span>
+                      {/if}
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{row.sessionCount}</td>
+                  <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatDuration(row.totalDurationSeconds)}</td>
+                  <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatBytes(row.totalBytesIn)}</td>
+                  <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatBytes(row.totalBytesOut)}</td>
+                  <td class="px-4 py-3 font-semibold text-slate-800 dark:text-slate-100">{formatBytes(row.totalBytesIn + row.totalBytesOut)}</td>
                 </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100">
-                {#each pagedUserSummaries.items as row (row.username)}
-                  <tr
-                    class="hover:bg-slate-50 cursor-pointer {selectedUser === row.username ? 'bg-blue-50' : ''}"
-                    role="button"
-                    tabindex="0"
-                    onclick={() => { loadUserTraffic(row.username); }}
-                    onkeydown={(e) => { if (e.key === 'Enter') { loadUserTraffic(row.username); } }}
-                  >
-                    <td class="px-6 py-3 text-slate-700 font-medium">{row.username}</td>
-                    <td class="px-6 py-3 text-slate-700">{row.sessionCount}</td>
-                    <td class="px-6 py-3 text-slate-700">{formatDuration(row.totalDurationSeconds)}</td>
-                    <td class="px-6 py-3 text-slate-700">{formatBytes(row.avgBytesIn)}</td>
-                    <td class="px-6 py-3 text-slate-700">{formatBytes(row.avgBytesOut)}</td>
-                    <td class="px-6 py-3 text-slate-700">{formatBytes(row.totalBytesIn)}</td>
-                    <td class="px-6 py-3 text-slate-700">{formatBytes(row.totalBytesOut)}</td>
-                    <td class="px-6 py-3 text-slate-700">{formatBytes(row.totalBytesIn + row.totalBytesOut)}</td>
+                {#if isExpanded}
+                  <tr>
+                    <td colspan="6" class="px-4 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-700">
+                      <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">Traffic — {row.username}</span>
+                        <button
+                          type="button"
+                          onclick={(e) => { e.stopPropagation(); expandedUser = null; userTraffic = null; }}
+                          class="text-slate-400 hover:text-slate-600 text-lg leading-none"
+                          aria-label="Close"
+                        >×</button>
+                      </div>
+                      {#if userTrafficLoading}
+                        <div class="py-6 text-center text-sm text-slate-500">Loading...</div>
+                      {:else if userTraffic && userTraffic.buckets.length > 0}
+                        {@const rxData = userTraffic.buckets.map(b => ({ timestamp: new Date(b.timestamp), value: b.bytesIn }))}
+                        {@const txData = userTraffic.buckets.map(b => ({ timestamp: new Date(b.timestamp), value: b.bytesOut }))}
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <ChartCard title="Download (RX)" metric="user_rx_bytes" data={rxData} window={usersWindow} height={140} />
+                          <ChartCard title="Upload (TX)" metric="user_tx_bytes" data={txData} window={usersWindow} height={140} />
+                        </div>
+                      {:else}
+                        <div class="py-6 text-center text-sm text-slate-400">No traffic data for this window</div>
+                      {/if}
+                    </td>
                   </tr>
-                {/each}
-              </tbody>
-            </table>
-          </PaginatedTable>
-        </CardTable>
-      {/if}
-
-      <!-- Per-user traffic chart -->
-      {#if selectedUser}
-        <div class="mt-4 space-y-2">
-          <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-200">Traffic — {selectedUser}</h3>
-          {#if userTrafficLoading}
-            <div class="py-8 text-center text-sm text-slate-500">Loading...</div>
-          {:else if userTraffic && userTraffic.buckets.length > 0}
-            {@const rxData = userTraffic.buckets.map(b => ({ timestamp: new Date(b.timestamp), value: b.bytesIn }))}
-            {@const txData = userTraffic.buckets.map(b => ({ timestamp: new Date(b.timestamp), value: b.bytesOut }))}
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Card.Root>
-                <Card.Header>
-                  <div>
-                    <Card.Title>RX (bytes in)</Card.Title>
-                    <Card.Description>Last {usersWindow}</Card.Description>
-                  </div>
-                </Card.Header>
-                <Card.Content>
-                  <MetricChart data={rxData} metric="net_interface_rx_bytes" height={140} />
-                </Card.Content>
-              </Card.Root>
-              <Card.Root>
-                <Card.Header>
-                  <div>
-                    <Card.Title>TX (bytes out)</Card.Title>
-                    <Card.Description>Last {usersWindow}</Card.Description>
-                  </div>
-                </Card.Header>
-                <Card.Content>
-                  <MetricChart data={txData} metric="net_interface_tx_bytes" height={140} />
-                </Card.Content>
-              </Card.Root>
-            </div>
-          {:else}
-            <div class="py-8 text-center text-sm text-slate-400">No traffic data for this window</div>
-          {/if}
+                {/if}
+              {/each}
+            </tbody>
+          </table>
         </div>
-      {:else}
-        <div class="mt-6 py-12 text-center text-sm text-slate-400">Select a user to view their traffic over time</div>
+        <div class="flex items-center justify-between text-sm text-slate-500">
+          <span>{filteredUserSummaries.length} users</span>
+        </div>
       {/if}
     </section>
 
