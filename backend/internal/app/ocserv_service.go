@@ -127,10 +127,10 @@ func (s *OcservService) RestartPanelService(ctx context.Context, principal auth.
 	}
 	actorID := principal.ID
 	if err := s.panelSvc.Restart(ctx); err != nil {
-		_ = s.record(ctx, &actorID, "settings.restart", "service", "", audit.OutcomeFailure, err.Error(), nil)
+		_ = s.record(ctx, &actorID, "settings.restart", "panel_service", "", audit.OutcomeFailure, err.Error(), nil)
 		return fmt.Errorf("restart panel service: %w", err)
 	}
-	_ = s.record(ctx, &actorID, "settings.restart", "service", "", audit.OutcomeSuccess, "panel service restart initiated", nil)
+	_ = s.record(ctx, &actorID, "settings.restart", "panel_service", "", audit.OutcomeSuccess, "panel service restart initiated", nil)
 	return nil
 }
 
