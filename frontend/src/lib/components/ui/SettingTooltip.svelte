@@ -24,7 +24,7 @@
 </script>
 
 {#if description}
-  <span class="relative inline-flex items-center ml-1" role="button" tabindex="-1" onmouseenter={handleMouseEnter} onmouseleave={handleMouseLeave}>
+  <span class="relative inline-flex items-center ml-1" role="tooltip" tabindex="0" aria-label="Help" onmouseenter={handleMouseEnter} onmouseleave={handleMouseLeave} onfocus={handleMouseEnter} onblur={handleMouseLeave}>
     <svg
       class="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 transition-colors cursor-help"
       fill="none"
