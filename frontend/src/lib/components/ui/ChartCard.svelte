@@ -68,9 +68,15 @@
         {formatMetricValue(metric, latest)}
       </div>
       {#if trendFormatted}
-        <div class="text-[10px] mt-0.5" style="color: {dotColor}">
-          {trendFormatted}
-        </div>
+        {#if trendValue !== null && trendValue >= 0}
+          <div class="text-[10px] mt-0.5" style="color: {dotColor}">
+            {trendFormatted}
+          </div>
+        {:else}
+          <div class="text-[10px] mt-0.5 text-slate-500">
+            {trendFormatted}
+          </div>
+        {/if}
       {/if}
     {:else}
       <div class="text-xl font-bold text-slate-300">—</div>
@@ -86,11 +92,11 @@
     {/if}
   </div>
 
-  <!-- Footer: min / max -->
+  <!-- Footer: min / max / window -->
   <div class="px-4 pb-3">
     {#if hasData}
       <p class="text-[10px] text-slate-400">
-        min {formatMetricValue(metric, stats.min)} · max {formatMetricValue(metric, stats.max)}
+        min {formatMetricValue(metric, stats.min)} · max {formatMetricValue(metric, stats.max)} · {w}
       </p>
     {:else}
       <p class="text-[10px] text-slate-400">No data</p>
