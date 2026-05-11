@@ -1,11 +1,10 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import ChartCard from '$lib/components/ui/ChartCard.svelte';
   import MetricChart from '$lib/components/ui/MetricChart.svelte';
-  import MultiLineChart from '$lib/components/ui/MultiLineChart.svelte';
   import type { LineData } from '$lib/components/ui/MultiLineChart.svelte';
   import { Users, BarChart2, List, Shield, Settings } from 'lucide-svelte';
   import * as Card from '$lib/components/ui/card/index';
-  import { mode } from 'mode-watcher';
   import CardTable from '$lib/components/ui/CardTable.svelte';
   import CardSettings from '$lib/components/ui/CardSettings.svelte';
   import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
@@ -594,59 +593,37 @@
           </div>
         </div>
       {:else}
-        {#key mode.current}
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {#each chartDefinitions as chart}
-              {#if shouldShowChart(chart.metric)}
-                <Card.Root>
-                  <Card.Header>
-                    <div>
-                      <Card.Title>{chart.title}</Card.Title>
-                      <Card.Description>Last {monitoringWindow}</Card.Description>
-                    </div>
-                  </Card.Header>
-                  <Card.Content>
-                    <MetricChart data={chartData(chart.metric)} metric={chart.metric} height={160} />
-                  </Card.Content>
-                </Card.Root>
-              {/if}
-            {/each}
-            {#if hasVpnRXData}
-              <Card.Root>
-                <Card.Header>
-                  <div>
-                    <Card.Title>VPN inbound</Card.Title>
-                    <Card.Description>Last {monitoringWindow}</Card.Description>
-                  </div>
-                </Card.Header>
-                <Card.Content>
-                  {#if vpnRXLines.length > 1}
-                    <MultiLineChart lines={vpnRXLines} metric={VPN_RX} height={160} />
-                  {:else}
-                    <MetricChart data={vpnRXLines[0].data} metric={VPN_RX} height={160} />
-                  {/if}
-                </Card.Content>
-              </Card.Root>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {#each chartDefinitions as chart}
+            {#if shouldShowChart(chart.metric)}
+              <ChartCard
+                title={chart.title}
+                metric={chart.metric}
+                data={chartData(chart.metric)}
+                window={monitoringWindow}
+                height={160}
+              />
             {/if}
-            {#if hasVpnTXData}
-              <Card.Root>
-                <Card.Header>
-                  <div>
-                    <Card.Title>VPN outbound</Card.Title>
-                    <Card.Description>Last {monitoringWindow}</Card.Description>
-                  </div>
-                </Card.Header>
-                <Card.Content>
-                  {#if vpnTXLines.length > 1}
-                    <MultiLineChart lines={vpnTXLines} metric={VPN_TX} height={160} />
-                  {:else}
-                    <MetricChart data={vpnTXLines[0].data} metric={VPN_TX} height={160} />
-                  {/if}
-                </Card.Content>
-              </Card.Root>
-            {/if}
-          </div>
-        {/key}
+          {/each}
+          {#if hasVpnRXData}
+            <ChartCard
+              title="VPN inbound"
+              metric={VPN_RX}
+              lines={vpnRXLines}
+              window={monitoringWindow}
+              height={160}
+            />
+          {/if}
+          {#if hasVpnTXData}
+            <ChartCard
+              title="VPN outbound"
+              metric={VPN_TX}
+              lines={vpnTXLines}
+              window={monitoringWindow}
+              height={160}
+            />
+          {/if}
+        </div>
         <UnavailableChips chips={unavailableChips} />
       {/if}
     </section>
