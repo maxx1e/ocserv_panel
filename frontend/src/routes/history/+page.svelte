@@ -14,7 +14,7 @@
   import UserSessionDrawer from '$lib/components/history/UserSessionDrawer.svelte';
   import UnbanConfirmDialog from '../sessions/UnbanConfirmDialog.svelte';
   import type { Chip } from '$lib/components/ui/UnavailableChips.svelte';
-  import { formatRelativeTime, formatAbsoluteTime } from '$lib/utils/format';
+  import { formatAbsoluteTime } from '$lib/utils/format';
   import { paginate } from '$lib/utils/pagination';
 
   import {
