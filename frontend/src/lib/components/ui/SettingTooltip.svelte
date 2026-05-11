@@ -24,7 +24,17 @@
 </script>
 
 {#if description}
-  <span class="relative inline-flex items-center ml-1" role="tooltip" tabindex="0" aria-label="Help" onmouseenter={handleMouseEnter} onmouseleave={handleMouseLeave} onfocus={handleMouseEnter} onblur={handleMouseLeave}>
+  <span
+    class="relative inline-flex items-center ml-1"
+    role="button"
+    tabindex="0"
+    aria-label="Help"
+    aria-describedby="setting-tooltip"
+    onmouseenter={handleMouseEnter}
+    onmouseleave={handleMouseLeave}
+    onfocus={handleMouseEnter}
+    onblur={handleMouseLeave}
+  >
     <svg
       class="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 transition-colors cursor-help"
       fill="none"
@@ -39,6 +49,7 @@
     </svg>
     {#if showTooltip}
       <div
+        id="setting-tooltip"
         class="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 px-3 py-2 text-xs text-white bg-slate-800 rounded-lg shadow-lg"
         role="tooltip"
       >
