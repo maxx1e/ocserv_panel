@@ -1356,3 +1356,110 @@ func TestHistoryUsersViewerCanRead(t *testing.T) {
 	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users", nil, cookie)
 	assertStatus(t, rec, http.StatusOK)
 }
+
+func TestHistoryBansWindowFilter24h(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+
+	now := time.Now().UTC()
+	// Insert a recent ban (2h ago) and an old ban (48h ago).
+	recentBan := now.Add(-2 * time.Hour)
+	oldBan := now.Add(-48 * time.Hour)
+	_, err := h.database.ExecContext(context.Background(),
+		`INSERT INTO ban_events (ip, score, reason, banned_at, created_at) VALUES (?, ?, ?, ?, ?)`,
+		"192.168.1.1", 100, "brute force", recentBan.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert recent ban: %v", err)
+	}
+	_, err = h.database.ExecContext(context.Background(),
+		`INSERT INTO ban_events (ip, score, reason, banned_at, created_at) VALUES (?, ?, ?, ?, ?)`,
+		"192.168.1.2", 80, "scan", oldBan.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert old ban: %v", err)
+	}
+
+	cookie := h.login(t, "owner", "owner-password")
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/bans?window=24h&limit=25", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body listBanEventsResponse
+	decodeJSON(t, rec, &body)
+	if body.Total != 1 {
+		t.Fatalf("total = %d, want 1 (only recent ban within 24h)", body.Total)
+	}
+	if len(body.Events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(body.Events))
+	}
+	if body.Events[0].IP != "192.168.1.1" {
+		t.Errorf("IP = %q, want 192.168.1.1", body.Events[0].IP)
+	}
+}
+
+func TestHistoryBansWindowFilterAll(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+
+	now := time.Now().UTC()
+	// Insert a recent ban and an old ban.
+	recentBan := now.Add(-2 * time.Hour)
+	oldBan := now.Add(-48 * time.Hour)
+	_, err := h.database.ExecContext(context.Background(),
+		`INSERT INTO ban_events (ip, score, reason, banned_at, created_at) VALUES (?, ?, ?, ?, ?)`,
+		"192.168.1.1", 100, "brute force", recentBan.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert recent ban: %v", err)
+	}
+	_, err = h.database.ExecContext(context.Background(),
+		`INSERT INTO ban_events (ip, score, reason, banned_at, created_at) VALUES (?, ?, ?, ?, ?)`,
+		"192.168.1.2", 80, "scan", oldBan.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert old ban: %v", err)
+	}
+
+	cookie := h.login(t, "owner", "owner-password")
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/bans?window=all&limit=25", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body listBanEventsResponse
+	decodeJSON(t, rec, &body)
+	if body.Total != 2 {
+		t.Fatalf("total = %d, want 2 (all bans returned)", body.Total)
+	}
+	if len(body.Events) != 2 {
+		t.Fatalf("events len = %d, want 2", len(body.Events))
+	}
+}
+
+func TestHistoryBansDefaultWindowIsAll(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+
+	now := time.Now().UTC()
+	// Insert an old ban (48h ago).
+	oldBan := now.Add(-48 * time.Hour)
+	_, err := h.database.ExecContext(context.Background(),
+		`INSERT INTO ban_events (ip, score, reason, banned_at, created_at) VALUES (?, ?, ?, ?, ?)`,
+		"192.168.1.2", 80, "scan", oldBan.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert old ban: %v", err)
+	}
+
+	cookie := h.login(t, "owner", "owner-password")
+	// No window param — should default to "all" and return the old ban.
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/bans?limit=25", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body listBanEventsResponse
+	decodeJSON(t, rec, &body)
+	if body.Total != 1 {
+		t.Fatalf("total = %d, want 1 (default all should include old ban)", body.Total)
+	}
+	if len(body.Events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(body.Events))
+	}
+}

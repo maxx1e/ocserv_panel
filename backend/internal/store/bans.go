@@ -50,16 +50,25 @@ func (s *Store) CloseBanEvent(ctx context.Context, ip string, unbanAt time.Time)
 }
 
 // ListBanEvents returns ban events newest-first with total count.
-func (s *Store) ListBanEvents(ctx context.Context, limit, offset int) ([]BanEvent, int64, error) {
+// When since is non-nil only events with banned_at >= since are included.
+func (s *Store) ListBanEvents(ctx context.Context, limit, offset int, since *time.Time) ([]BanEvent, int64, error) {
+	whereClause := ""
+	args := []any{}
+	if since != nil {
+		whereClause = " WHERE banned_at >= ?"
+		args = append(args, since.UTC().Format(time.RFC3339))
+	}
+
 	var total int64
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM ban_events`).Scan(&total); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM ban_events`+whereClause, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count ban events: %w", err)
 	}
 
+	dataArgs := append(args, limit, offset)
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, ip, score, reason, banned_at, unbanned_at, created_at
-		 FROM ban_events ORDER BY banned_at DESC, id DESC LIMIT ? OFFSET ?`,
-		limit, offset,
+		 FROM ban_events`+whereClause+` ORDER BY banned_at DESC, id DESC LIMIT ? OFFSET ?`,
+		dataArgs...,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query ban events: %w", err)

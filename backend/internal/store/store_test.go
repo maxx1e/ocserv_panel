@@ -726,7 +726,7 @@ func TestBanEvents_InsertAndList(t *testing.T) {
 		t.Fatalf("insert 2: %v", err)
 	}
 
-	events, total, err := s.ListBanEvents(ctx, 10, 0)
+	events, total, err := s.ListBanEvents(ctx, 10, 0, nil)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -759,7 +759,7 @@ func TestBanEvents_CloseEvent(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	events, _, err := s.ListBanEvents(ctx, 10, 0)
+	events, _, err := s.ListBanEvents(ctx, 10, 0, nil)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -798,6 +798,77 @@ func TestBanEvents_OpenBanEvents(t *testing.T) {
 	}
 	if open[0].IP != "1.2.3.4" {
 		t.Errorf("IP = %q, want 1.2.3.4", open[0].IP)
+	}
+}
+
+func TestBanEvents_ListFiltersBySince(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	now := time.Now().UTC()
+	// Insert events at varying ages:
+	// old: 48h ago, mid: 12h ago, recent: 1h ago
+	old := now.Add(-48 * time.Hour)
+	mid := now.Add(-12 * time.Hour)
+	recent := now.Add(-1 * time.Hour)
+	if err := s.InsertBanEvent(ctx, "10.0.0.1", 80, "old", old); err != nil {
+		t.Fatalf("insert old: %v", err)
+	}
+	if err := s.InsertBanEvent(ctx, "10.0.0.2", 90, "mid", mid); err != nil {
+		t.Fatalf("insert mid: %v", err)
+	}
+	if err := s.InsertBanEvent(ctx, "10.0.0.3", 100, "recent", recent); err != nil {
+		t.Fatalf("insert recent: %v", err)
+	}
+
+	// With nil since, all events returned.
+	events, total, err := s.ListBanEvents(ctx, 10, 0, nil)
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("total (nil since) = %d, want 3", total)
+	}
+	if len(events) != 3 {
+		t.Errorf("len (nil since) = %d, want 3", len(events))
+	}
+
+	// With since = 24h ago, only mid and recent should be returned.
+	cutoff := now.Add(-24 * time.Hour)
+	events, total, err = s.ListBanEvents(ctx, 10, 0, &cutoff)
+	if err != nil {
+		t.Fatalf("list with since: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total (24h since) = %d, want 2", total)
+	}
+	if len(events) != 2 {
+		t.Errorf("len (24h since) = %d, want 2", len(events))
+	}
+	// Newest first
+	if len(events) >= 2 {
+		if events[0].IP != "10.0.0.3" {
+			t.Errorf("first IP = %q, want 10.0.0.3", events[0].IP)
+		}
+		if events[1].IP != "10.0.0.2" {
+			t.Errorf("second IP = %q, want 10.0.0.2", events[1].IP)
+		}
+	}
+
+	// With since = 6h ago, only recent should be returned.
+	cutoff2 := now.Add(-6 * time.Hour)
+	events, total, err = s.ListBanEvents(ctx, 10, 0, &cutoff2)
+	if err != nil {
+		t.Fatalf("list with 6h since: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("total (6h since) = %d, want 1", total)
+	}
+	if len(events) != 1 {
+		t.Errorf("len (6h since) = %d, want 1", len(events))
+	}
+	if len(events) == 1 && events[0].IP != "10.0.0.3" {
+		t.Errorf("IP = %q, want 10.0.0.3", events[0].IP)
 	}
 }
 

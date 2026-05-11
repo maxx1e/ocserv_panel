@@ -756,7 +756,14 @@ func (a *App) handleHistoryBans(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * limit
 
-	events, total, err := a.store.ListBanEvents(r.Context(), limit, offset)
+	window := queryValueDefault(r, "window", "all")
+	var since *time.Time
+	if window != "all" {
+		t := a.now().UTC().Add(-historyWindowDuration(window))
+		since = &t
+	}
+
+	events, total, err := a.store.ListBanEvents(r.Context(), limit, offset, since)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
