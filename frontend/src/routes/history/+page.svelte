@@ -131,6 +131,11 @@
   let userTraffic = $state<UserTrafficResponse | null>(null);
   let userTrafficLoading = $state(false);
 
+  // --- Users tab sorting ---
+  type SortField = 'totalBytesIn' | 'totalBytesOut' | 'totalTraffic' | 'avgBytesIn' | 'avgBytesOut';
+  let usersSortField = $state<SortField>('totalTraffic');
+  let usersSortDir = $state<'asc' | 'desc'>('desc');
+
   // --- Bans tab state ---
   let bansPage = $state(1);
   let bansData = $state<BanEventPage | null>(null);
@@ -163,7 +168,20 @@
   const sampleWarning = $derived(sampleDataWarning(analytics));
   const totals = $derived(calculateTotals(analytics?.summary));
   const purgeEnabled = $derived(isOwner && confirmation === 'PURGE' && !purgeSubmitting);
-  const pagedUserSummaries = $derived(paginate(userSummaries, userSummariesPage, 10));
+  const sortedUserSummaries = $derived((() => {
+    const arr = [...userSummaries];
+    arr.sort((a, b) => {
+      let av = 0, bv = 0;
+      if (usersSortField === 'totalBytesIn') { av = a.totalBytesIn; bv = b.totalBytesIn; }
+      else if (usersSortField === 'totalBytesOut') { av = a.totalBytesOut; bv = b.totalBytesOut; }
+      else if (usersSortField === 'totalTraffic') { av = a.totalBytesIn + a.totalBytesOut; bv = b.totalBytesIn + b.totalBytesOut; }
+      else if (usersSortField === 'avgBytesIn') { av = a.avgBytesIn; bv = b.avgBytesIn; }
+      else if (usersSortField === 'avgBytesOut') { av = a.avgBytesOut; bv = b.avgBytesOut; }
+      return usersSortDir === 'asc' ? av - bv : bv - av;
+    });
+    return arr;
+  })());
+  const pagedUserSummaries = $derived(paginate(sortedUserSummaries, userSummariesPage, 10));
   const unavailableChips = $derived<Chip[]>(
     chartDefinitions
       .filter(chart => !shouldShowChart(chart.metric))
@@ -298,17 +316,12 @@
     void reloadUserSummaries(window);
   }
 
-  async function handleUserRowClick(username: string) {
-    drawerUsername = username;
-    drawerWindow = usersWindow;
-    drawerSessions = [];
-    drawerLoading = true;
-    try {
-      drawerSessions = await getHistoryUserSessions(username, usersWindow);
-    } catch {
-      drawerSessions = [];
-    } finally {
-      drawerLoading = false;
+  function setSortField(field: SortField) {
+    if (usersSortField === field) {
+      usersSortDir = usersSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      usersSortField = field;
+      usersSortDir = 'desc';
     }
   }
 
@@ -768,11 +781,41 @@
                   <th class="px-6 py-3">User</th>
                   <th class="px-6 py-3">Sessions</th>
                   <th class="px-6 py-3">Total time</th>
-                  <th class="px-6 py-3">Avg download</th>
-                  <th class="px-6 py-3">Avg upload</th>
-                  <th class="px-6 py-3">Total received</th>
-                  <th class="px-6 py-3">Total sent</th>
-                  <th class="px-6 py-3">Total</th>
+                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
+                      onclick={() => setSortField('avgBytesIn')}>
+                    Avg download
+                    {#if usersSortField === 'avgBytesIn'}
+                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
+                    {/if}
+                  </th>
+                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
+                      onclick={() => setSortField('avgBytesOut')}>
+                    Avg upload
+                    {#if usersSortField === 'avgBytesOut'}
+                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
+                    {/if}
+                  </th>
+                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
+                      onclick={() => setSortField('totalBytesIn')}>
+                    Total received
+                    {#if usersSortField === 'totalBytesIn'}
+                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
+                    {/if}
+                  </th>
+                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
+                      onclick={() => setSortField('totalBytesOut')}>
+                    Total sent
+                    {#if usersSortField === 'totalBytesOut'}
+                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
+                    {/if}
+                  </th>
+                  <th class="px-6 py-3 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100"
+                      onclick={() => setSortField('totalTraffic')}>
+                    Total
+                    {#if usersSortField === 'totalTraffic'}
+                      <span class="ml-1">{usersSortDir === 'desc' ? '↓' : '↑'}</span>
+                    {/if}
+                  </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100">
@@ -781,8 +824,8 @@
                     class="hover:bg-slate-50 cursor-pointer {selectedUser === row.username ? 'bg-blue-50' : ''}"
                     role="button"
                     tabindex="0"
-                    onclick={() => { handleUserRowClick(row.username); loadUserTraffic(row.username); }}
-                    onkeydown={(e) => { if (e.key === 'Enter') { handleUserRowClick(row.username); loadUserTraffic(row.username); } }}
+                    onclick={() => { loadUserTraffic(row.username); }}
+                    onkeydown={(e) => { if (e.key === 'Enter') { loadUserTraffic(row.username); } }}
                   >
                     <td class="px-6 py-3 text-slate-700 font-medium">{row.username}</td>
                     <td class="px-6 py-3 text-slate-700">{row.sessionCount}</td>
