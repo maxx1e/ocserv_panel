@@ -714,6 +714,93 @@ func TestListSessions_ReturnsPagedResults(t *testing.T) {
 	}
 }
 
+func TestBanEvents_InsertAndList(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	now := time.Now().UTC()
+	if err := s.InsertBanEvent(ctx, "1.2.3.4", 100, "auth failure", now); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := s.InsertBanEvent(ctx, "5.6.7.8", 50, "too many attempts", now.Add(-time.Hour)); err != nil {
+		t.Fatalf("insert 2: %v", err)
+	}
+
+	events, total, err := s.ListBanEvents(ctx, 10, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total = %d, want 2", total)
+	}
+	if len(events) != 2 {
+		t.Errorf("len = %d, want 2", len(events))
+	}
+	// Newest first
+	if events[0].IP != "1.2.3.4" {
+		t.Errorf("first IP = %q, want 1.2.3.4", events[0].IP)
+	}
+	if events[0].UnbannedAt != nil {
+		t.Error("unbanned_at should be nil for active ban")
+	}
+}
+
+func TestBanEvents_CloseEvent(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	now := time.Now().UTC()
+	if err := s.InsertBanEvent(ctx, "1.2.3.4", 100, "auth failure", now); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	unbanTime := now.Add(time.Hour)
+	if err := s.CloseBanEvent(ctx, "1.2.3.4", unbanTime); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	events, _, err := s.ListBanEvents(ctx, 10, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("len = %d, want 1", len(events))
+	}
+	if events[0].UnbannedAt == nil {
+		t.Fatal("unbanned_at should be set")
+	}
+	if !events[0].UnbannedAt.UTC().Truncate(time.Second).Equal(unbanTime.Truncate(time.Second)) {
+		t.Errorf("unbanned_at = %v, want %v", events[0].UnbannedAt, unbanTime)
+	}
+}
+
+func TestBanEvents_OpenBanEvents(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	now := time.Now().UTC()
+	if err := s.InsertBanEvent(ctx, "1.2.3.4", 100, "a", now); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := s.InsertBanEvent(ctx, "5.6.7.8", 50, "b", now); err != nil {
+		t.Fatalf("insert 2: %v", err)
+	}
+	if err := s.CloseBanEvent(ctx, "5.6.7.8", now.Add(time.Minute)); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	open, err := s.OpenBanEvents(ctx)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("len = %d, want 1", len(open))
+	}
+	if open[0].IP != "1.2.3.4" {
+		t.Errorf("IP = %q, want 1.2.3.4", open[0].IP)
+	}
+}
+
 func TestListSessions_FiltersBySince(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
