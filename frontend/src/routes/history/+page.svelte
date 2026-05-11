@@ -27,10 +27,12 @@
     listSessions,
     listHistoricalBans,
     getUserTraffic,
+    getConnectedUsers,
     unbanIP,
     principalFromAuth,
     purgeHistory,
     updateSetting,
+    type ConnectedUser,
     type HistoricalSession,
     type HistoricalSessionPage,
     type MonitoringOverview,
@@ -114,6 +116,8 @@
   let sessionsLoading = $state(false);
   let sessionsError = $state('');
   let sessionsSearch = $state('');
+  let activeSessions = $state<ConnectedUser[]>([]);
+  let activeSessionsLoading = $state(false);
 
   // --- Users tab state ---
   let usersWindow = $state<MonitoringWindow>('24h');
@@ -212,6 +216,7 @@
       if (document.visibilityState === 'visible') {
         if (activeTab === 'monitoring') void reloadMonitoring();
         if (activeTab === 'users') void reloadUserSummaries();
+        if (activeTab === 'sessions') void loadActiveSessions();
       }
     }, 15_000);
   });
@@ -232,7 +237,7 @@
   }
 
   function loadTabData(tab: TabId) {
-    if (tab === 'sessions') void loadSessions();
+    if (tab === 'sessions') { void loadSessions(); void loadActiveSessions(); }
     else if (tab === 'users') void reloadUserSummaries(usersWindow);
     else if (tab === 'bans') void loadBans();
     else if (tab === 'settings') void loadSettings();
@@ -297,6 +302,17 @@
       sessionsError = e instanceof Error ? e.message : 'Failed to load sessions';
     } finally {
       sessionsLoading = false;
+    }
+  }
+
+  async function loadActiveSessions() {
+    activeSessionsLoading = true;
+    try {
+      activeSessions = await getConnectedUsers();
+    } catch {
+      activeSessions = [];
+    } finally {
+      activeSessionsLoading = false;
     }
   }
 
@@ -630,7 +646,8 @@
 
   {:else if activeTab === 'sessions'}
     <!-- Sessions tab -->
-    <div class="space-y-4">
+    <div class="space-y-6">
+      <!-- Toolbar -->
       <div class="flex items-center justify-between flex-wrap gap-3">
         <WindowSelector
           value={sessionsWindow}
@@ -645,7 +662,51 @@
         />
       </div>
 
-      {#if sessionsLoading}
+      <!-- Section A: Currently Active -->
+      <div class="bg-green-50 border border-green-200 rounded-xl p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+          </span>
+          <span class="text-sm font-semibold text-green-800">
+            Currently active ({activeSessions.length})
+          </span>
+        </div>
+        {#if activeSessionsLoading && activeSessions.length === 0}
+          <p class="text-xs text-green-700">Loading...</p>
+        {:else if activeSessions.length === 0}
+          <p class="text-xs text-green-700">No active sessions right now.</p>
+        {:else}
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs text-green-700 font-semibold">
+                  <th class="pb-1 pr-4">Username</th>
+                  <th class="pb-1 pr-4">Device</th>
+                  <th class="pb-1 pr-4">Connected since</th>
+                  <th class="pb-1 pr-4">Remote IP</th>
+                  <th class="pb-1 pr-4">VPN IP</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-green-100">
+                {#each activeSessions as s (s.id)}
+                  <tr>
+                    <td class="py-1.5 pr-4 font-mono text-xs text-green-900 font-semibold">{s.username}</td>
+                    <td class="py-1.5 pr-4 text-xs text-green-800">{s.device}</td>
+                    <td class="py-1.5 pr-4 text-xs text-green-800">{formatAbsoluteTime(s.since)}</td>
+                    <td class="py-1.5 pr-4 text-xs text-green-800">{s.remoteIp}</td>
+                    <td class="py-1.5 text-xs text-green-800">{s.vpnIp}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Section B: History -->
+      {#if sessionsLoading && !sessionsData}
         <div class="text-sm text-slate-500 py-8 text-center">Loading sessions...</div>
       {:else if sessionsError}
         <div class="text-sm text-red-600 py-4">{sessionsError}</div>
@@ -653,69 +714,74 @@
         {@const filteredSessions = sessionsData.sessions.filter(s =>
           !sessionsSearch || (s.username ?? '').toLowerCase().includes(sessionsSearch.toLowerCase())
         )}
-        <div class="rounded-lg border border-slate-200 overflow-hidden dark:border-slate-700">
-          <table class="w-full text-sm">
-            <thead class="bg-slate-50 border-b border-slate-200 dark:bg-slate-800 dark:border-slate-700">
-              <tr>
-                <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Username</th>
-                <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Connected</th>
-                <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Disconnected</th>
-                <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Duration</th>
-                <th class="px-4 py-2 text-right font-medium text-slate-600 dark:text-slate-400">RX</th>
-                <th class="px-4 py-2 text-right font-medium text-slate-600 dark:text-slate-400">TX</th>
-                <th class="px-4 py-2 text-center font-medium text-slate-600 dark:text-slate-400">State</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
-              {#each filteredSessions as session}
-                {@const stateColors: Record<string, string> = {
-                  authenticated: 'bg-green-100 text-green-700',
-                  connected: 'bg-green-100 text-green-700',
-                  disconnected: 'bg-slate-100 text-slate-600',
-                  timed_out: 'bg-amber-100 text-amber-700',
-                  error: 'bg-red-100 text-red-700',
-                }}
-                <tr
-                  class="hover:bg-slate-50 cursor-pointer dark:hover:bg-slate-800/50"
-                  onclick={() => session.username && openSessionDrawer(session.username, sessionsWindow)}
-                >
-                  <td class="px-4 py-2 font-mono text-xs text-slate-800 dark:text-slate-200">{session.username ?? '—'}</td>
-                  <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">{formatAbsoluteTime(session.connectedAt ?? session.startedAt)}</td>
-                  <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">
-                    {#if session.state === 'authenticated' || session.state === 'connected'}
-                      <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">Active</span>
-                    {:else}
-                      {formatAbsoluteTime(session.disconnectedAt ?? session.endedAt)}
-                    {/if}
-                  </td>
-                  <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">{formatDuration(session.durationSeconds ?? 0)}</td>
-                  <td class="px-4 py-2 text-right text-xs">{formatBytes(session.bytesIn ?? session.rxBytes ?? 0)}</td>
-                  <td class="px-4 py-2 text-right text-xs">{formatBytes(session.bytesOut ?? session.txBytes ?? 0)}</td>
-                  <td class="px-4 py-2 text-center">
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium {stateColors[session.state ?? 'disconnected'] ?? 'bg-slate-100 text-slate-600'}">
-                      {session.state ?? 'disconnected'}
-                    </span>
-                  </td>
+        <div>
+          <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+            History — last {sessionsWindow} ({sessionsData.total} sessions)
+          </p>
+          <div class="rounded-lg border border-slate-200 overflow-hidden dark:border-slate-700">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 border-b border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                <tr>
+                  <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Username</th>
+                  <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Connected</th>
+                  <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Ended</th>
+                  <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Duration</th>
+                  <th class="px-4 py-2 text-right font-medium text-slate-600 dark:text-slate-400">RX</th>
+                  <th class="px-4 py-2 text-right font-medium text-slate-600 dark:text-slate-400">TX</th>
+                  <th class="px-4 py-2 text-center font-medium text-slate-600 dark:text-slate-400">State</th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-        <!-- Pagination -->
-        <div class="flex items-center justify-between text-sm text-slate-500">
-          <span>{sessionsData.total} total sessions</span>
-          <div class="flex gap-2">
-            <button
-              disabled={sessionsPage <= 1}
-              onclick={() => { sessionsPage--; void loadSessions(); }}
-              class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-            >Previous</button>
-            <span class="px-3 py-1">Page {sessionsPage}</span>
-            <button
-              disabled={sessionsPage * sessionsData.limit >= sessionsData.total}
-              onclick={() => { sessionsPage++; void loadSessions(); }}
-              class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-            >Next</button>
+              </thead>
+              <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                {#each filteredSessions as session}
+                  {@const stateColors: Record<string, string> = {
+                    authenticated: 'bg-green-100 text-green-700',
+                    connected: 'bg-green-100 text-green-700',
+                    disconnected: 'bg-slate-100 text-slate-600',
+                    timed_out: 'bg-amber-100 text-amber-700',
+                    error: 'bg-red-100 text-red-700',
+                  }}
+                  <tr
+                    class="hover:bg-slate-50 cursor-pointer dark:hover:bg-slate-800/50"
+                    onclick={() => session.username && openSessionDrawer(session.username, sessionsWindow)}
+                  >
+                    <td class="px-4 py-2 font-mono text-xs text-slate-800 dark:text-slate-200">{session.username ?? '—'}</td>
+                    <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">{formatAbsoluteTime(session.connectedAt ?? session.startedAt)}</td>
+                    <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">
+                      {#if session.state === 'authenticated' || session.state === 'connected'}
+                        <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">Active</span>
+                      {:else}
+                        {formatAbsoluteTime(session.disconnectedAt ?? session.endedAt)}
+                      {/if}
+                    </td>
+                    <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">{formatDuration(session.durationSeconds ?? 0)}</td>
+                    <td class="px-4 py-2 text-right text-xs">{formatBytes(session.bytesIn ?? session.rxBytes ?? 0)}</td>
+                    <td class="px-4 py-2 text-right text-xs">{formatBytes(session.bytesOut ?? session.txBytes ?? 0)}</td>
+                    <td class="px-4 py-2 text-center">
+                      <span class="px-2 py-0.5 rounded-full text-xs font-medium {stateColors[session.state ?? 'disconnected'] ?? 'bg-slate-100 text-slate-600'}">
+                        {session.state ?? 'disconnected'}
+                      </span>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          <!-- Pagination -->
+          <div class="flex items-center justify-between text-sm text-slate-500 mt-3">
+            <span>{sessionsData.total} total sessions</span>
+            <div class="flex gap-2">
+              <button
+                disabled={sessionsPage <= 1}
+                onclick={() => { sessionsPage--; void loadSessions(); }}
+                class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              >Previous</button>
+              <span class="px-3 py-1">Page {sessionsPage}</span>
+              <button
+                disabled={sessionsPage * sessionsData.limit >= sessionsData.total}
+                onclick={() => { sessionsPage++; void loadSessions(); }}
+                class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              >Next</button>
+            </div>
           </div>
         </div>
       {/if}
