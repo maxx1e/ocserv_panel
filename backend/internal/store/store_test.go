@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -498,6 +499,126 @@ func TestSetAndGetSetting(t *testing.T) {
 	}
 }
 
+func TestUpsertActiveSession_InsertAndUpdate(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	connectedAt := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+
+	rec := ActiveSessionRecord{
+		OcservSessionID: "AbCdEf",
+		Username:        "alice",
+		ConnectedAt:     connectedAt,
+		DisconnectedAt:  now,
+		DurationSeconds: 7200,
+		BytesIn:         1024,
+		BytesOut:        2048,
+		Source:          "ingested",
+	}
+
+	// First insert
+	if err := s.UpsertActiveSession(ctx, rec); err != nil {
+		t.Fatalf("upsert first: %v", err)
+	}
+
+	// Verify insertion
+	sessions, err := s.HistoricalSessions(ctx, 100)
+	if err != nil {
+		t.Fatalf("query sessions: %v", err)
+	}
+	var found bool
+	for _, sess := range sessions {
+		if sess.Username == "alice" && sess.BytesIn == 1024 {
+			found = true
+			if sess.DurationSeconds != 7200 {
+				t.Fatalf("duration = %d, want 7200", sess.DurationSeconds)
+			}
+			if sess.Source != "ingested" {
+				t.Fatalf("source = %q, want ingested", sess.Source)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("inserted session not found")
+	}
+
+	// Update with more bytes and longer duration
+	rec.BytesIn = 4096
+	rec.BytesOut = 8192
+	rec.DurationSeconds = 9000
+	rec.DisconnectedAt = now.Add(30 * time.Minute)
+
+	if err := s.UpsertActiveSession(ctx, rec); err != nil {
+		t.Fatalf("upsert update: %v", err)
+	}
+
+	// Verify update (not duplicate)
+	var count int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM historical_sessions WHERE ocserv_session_id = ?`, "AbCdEf").Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 row for session AbCdEf, got %d", count)
+	}
+
+	var bytesIn, bytesOut, duration int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT bytes_in, bytes_out, duration_seconds FROM historical_sessions WHERE ocserv_session_id = ?`, "AbCdEf").Scan(&bytesIn, &bytesOut, &duration); err != nil {
+		t.Fatalf("select updated fields: %v", err)
+	}
+	if bytesIn != 4096 {
+		t.Fatalf("bytes_in = %d, want 4096", bytesIn)
+	}
+	if bytesOut != 8192 {
+		t.Fatalf("bytes_out = %d, want 8192", bytesOut)
+	}
+	if duration != 9000 {
+		t.Fatalf("duration = %d, want 9000", duration)
+	}
+}
+
+func TestUpsertActiveSession_RejectsEmptySessionID(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	rec := ActiveSessionRecord{
+		OcservSessionID: "",
+		Username:        "alice",
+		ConnectedAt:     time.Now().UTC(),
+		DisconnectedAt:  time.Now().UTC(),
+		DurationSeconds: 100,
+		BytesIn:         50,
+		BytesOut:        100,
+		Source:          "ingested",
+	}
+
+	err := s.UpsertActiveSession(ctx, rec)
+	if err == nil {
+		t.Fatal("expected error for empty session ID, got nil")
+	}
+}
+
+func TestUpsertActiveSession_RejectsEmptyUsername(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	rec := ActiveSessionRecord{
+		OcservSessionID: "SomeID",
+		Username:        "",
+		ConnectedAt:     time.Now().UTC(),
+		DisconnectedAt:  time.Now().UTC(),
+		DurationSeconds: 100,
+		BytesIn:         50,
+		BytesOut:        100,
+		Source:          "ingested",
+	}
+
+	err := s.UpsertActiveSession(ctx, rec)
+	if err == nil {
+		t.Fatal("expected error for empty username, got nil")
+	}
+}
+
 func TestSetSettingUpserts(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
@@ -515,5 +636,118 @@ func TestSetSettingUpserts(t *testing.T) {
 	}
 	if value != "180" {
 		t.Fatalf("GetSetting = %q, want %q after upsert", value, "180")
+	}
+}
+
+func TestUpsertActiveSession_PersistsState(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	rec := ActiveSessionRecord{
+		OcservSessionID: "abc123",
+		Username:        "alice",
+		ConnectedAt:     time.Now().UTC().Add(-time.Hour),
+		DisconnectedAt:  time.Now().UTC(),
+		DurationSeconds: 3600,
+		BytesIn:         1000,
+		BytesOut:        2000,
+		Source:          "ingested",
+		State:           "authenticated",
+	}
+	if err := s.UpsertActiveSession(ctx, rec); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	sessions, err := s.UserSessions(ctx, "alice", time.Now().UTC().Add(-2*time.Hour))
+	if err != nil {
+		t.Fatalf("user sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	if sessions[0].State != "authenticated" {
+		t.Errorf("state = %q, want %q", sessions[0].State, "authenticated")
+	}
+}
+
+func TestListSessions_ReturnsPagedResults(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	base := time.Now().UTC().Add(-10 * time.Hour)
+	for i := 0; i < 5; i++ {
+		if err := s.UpsertActiveSession(ctx, ActiveSessionRecord{
+			OcservSessionID: fmt.Sprintf("sid%d", i),
+			Username:        fmt.Sprintf("user%d", i),
+			ConnectedAt:     base.Add(time.Duration(i) * time.Hour),
+			DisconnectedAt:  base.Add(time.Duration(i)*time.Hour + 30*time.Minute),
+			DurationSeconds: 1800,
+			BytesIn:         int64(i * 1000),
+			BytesOut:        int64(i * 2000),
+			Source:          "ingested",
+			State:           "disconnected",
+		}); err != nil {
+			t.Fatalf("upsert %d: %v", i, err)
+		}
+	}
+
+	sessions, total, err := s.ListSessions(ctx, base.Add(-time.Hour), 3, 0)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if total != 5 {
+		t.Errorf("total = %d, want 5", total)
+	}
+	if len(sessions) != 3 {
+		t.Errorf("got %d sessions, want 3", len(sessions))
+	}
+
+	sessions2, total2, err := s.ListSessions(ctx, base.Add(-time.Hour), 3, 3)
+	if err != nil {
+		t.Fatalf("list sessions page 2: %v", err)
+	}
+	if total2 != 5 {
+		t.Errorf("total2 = %d, want 5", total2)
+	}
+	if len(sessions2) != 2 {
+		t.Errorf("got %d sessions page 2, want 2", len(sessions2))
+	}
+}
+
+func TestListSessions_FiltersBySince(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	// base is 30h ago so that:
+	//   fid0: base+0h  = now-30h  -> before since (now-25h), excluded
+	//   fid1: base+12h = now-18h  -> after  since (now-25h), included
+	//   fid2: base+24h = now-6h   -> after  since (now-25h), included
+	base := time.Now().UTC().Add(-30 * time.Hour)
+	for i := 0; i < 3; i++ {
+		if err := s.UpsertActiveSession(ctx, ActiveSessionRecord{
+			OcservSessionID: fmt.Sprintf("fid%d", i),
+			Username:        "bob",
+			ConnectedAt:     base.Add(time.Duration(i*12) * time.Hour),
+			DisconnectedAt:  base.Add(time.Duration(i*12)*time.Hour + time.Hour),
+			DurationSeconds: 3600,
+			BytesIn:         100,
+			BytesOut:        200,
+			Source:          "ingested",
+			State:           "disconnected",
+		}); err != nil {
+			t.Fatalf("upsert %d: %v", i, err)
+		}
+	}
+
+	since := time.Now().UTC().Add(-25 * time.Hour)
+	sessions, total, err := s.ListSessions(ctx, since, 10, 0)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total = %d, want 2", total)
+	}
+	if len(sessions) != 2 {
+		t.Errorf("len = %d, want 2", len(sessions))
 	}
 }

@@ -37,6 +37,7 @@ type HistoricalSession struct {
 	BytesIn         int64
 	BytesOut        int64
 	Source          string
+	State           string
 }
 
 // AnalyticsSummary summarizes persisted historical session analytics.
@@ -52,7 +53,7 @@ func (s *Store) HistoricalSessions(ctx context.Context, limit int) ([]Historical
 	if limit <= 0 {
 		return []HistoricalSession{}, nil
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source FROM historical_sessions ORDER BY disconnected_at DESC, id DESC LIMIT ?`, limit)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source, state FROM historical_sessions ORDER BY disconnected_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query historical sessions: %w", err)
 	}
@@ -62,7 +63,7 @@ func (s *Store) HistoricalSessions(ctx context.Context, limit int) ([]Historical
 	for rows.Next() {
 		var session HistoricalSession
 		var connectedAt, disconnectedAt string
-		if err := rows.Scan(&session.ID, &session.Username, &connectedAt, &disconnectedAt, &session.DurationSeconds, &session.BytesIn, &session.BytesOut, &session.Source); err != nil {
+		if err := rows.Scan(&session.ID, &session.Username, &connectedAt, &disconnectedAt, &session.DurationSeconds, &session.BytesIn, &session.BytesOut, &session.Source, &session.State); err != nil {
 			return nil, fmt.Errorf("scan historical session: %w", err)
 		}
 		parsedConnectedAt, err := parseTime(connectedAt)
@@ -105,6 +106,62 @@ func (s *Store) PurgeHistoricalBefore(ctx context.Context, cutoff time.Time) (in
 		return 0, fmt.Errorf("read purged historical session count: %w", err)
 	}
 	return deleted, nil
+}
+
+// ActiveSessionRecord holds data for a single active ocserv session to be upserted.
+type ActiveSessionRecord struct {
+	OcservSessionID string
+	Username        string
+	ConnectedAt     time.Time
+	DisconnectedAt  time.Time
+	DurationSeconds int64
+	BytesIn         int64
+	BytesOut        int64
+	Source          string // "ingested"
+	State           string // "authenticated", "disconnected", "timed_out", "error"
+}
+
+// UpsertActiveSession inserts or updates a historical session row keyed by
+// ocserv_session_id. On conflict (same ocserv session), only the mutable fields
+// (disconnected_at, duration_seconds, bytes_in, bytes_out, state) are updated.
+func (s *Store) UpsertActiveSession(ctx context.Context, rec ActiveSessionRecord) error {
+	if rec.OcservSessionID == "" {
+		return fmt.Errorf("upsert active session: ocserv_session_id must not be empty")
+	}
+	if rec.Username == "" {
+		return fmt.Errorf("upsert active session: username must not be empty")
+	}
+	if rec.Source == "" {
+		rec.Source = "ingested"
+	}
+	if rec.State == "" {
+		rec.State = "disconnected"
+	}
+
+	connectedAt := rec.ConnectedAt.UTC().Format(time.RFC3339)
+	disconnectedAt := rec.DisconnectedAt.UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO historical_sessions (
+			ocserv_session_id, username, connected_at, disconnected_at,
+			duration_seconds, bytes_in, bytes_out, source, state, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ocserv_session_id) WHERE ocserv_session_id != ''
+		DO UPDATE SET
+			disconnected_at = excluded.disconnected_at,
+			duration_seconds = excluded.duration_seconds,
+			bytes_in = excluded.bytes_in,
+			bytes_out = excluded.bytes_out,
+			state = excluded.state
+	`,
+		rec.OcservSessionID, rec.Username, connectedAt, disconnectedAt,
+		rec.DurationSeconds, rec.BytesIn, rec.BytesOut, rec.Source, rec.State, now,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert active session %s: %w", rec.OcservSessionID, err)
+	}
+	return nil
 }
 
 // UserSessionSummary aggregates historical session data for a single user.
@@ -168,7 +225,7 @@ func (s *Store) UserSessionSummaries(ctx context.Context, since time.Time) ([]Us
 func (s *Store) UserSessions(ctx context.Context, username string, since time.Time) ([]HistoricalSession, error) {
 	sinceStr := since.UTC().Format(time.RFC3339)
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source
+		`SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source, state
 		 FROM historical_sessions
 		 WHERE username = ? AND connected_at >= ?
 		 ORDER BY connected_at ASC`,
@@ -183,7 +240,7 @@ func (s *Store) UserSessions(ctx context.Context, username string, since time.Ti
 	for rows.Next() {
 		var session HistoricalSession
 		var connectedAt, disconnectedAt string
-		if err := rows.Scan(&session.ID, &session.Username, &connectedAt, &disconnectedAt, &session.DurationSeconds, &session.BytesIn, &session.BytesOut, &session.Source); err != nil {
+		if err := rows.Scan(&session.ID, &session.Username, &connectedAt, &disconnectedAt, &session.DurationSeconds, &session.BytesIn, &session.BytesOut, &session.Source, &session.State); err != nil {
 			return nil, fmt.Errorf("scan user session: %w", err)
 		}
 		parsedConnectedAt, err := parseTime(connectedAt)
@@ -202,6 +259,57 @@ func (s *Store) UserSessions(ctx context.Context, username string, since time.Ti
 		return nil, fmt.Errorf("iterate user sessions: %w", err)
 	}
 	return sessions, nil
+}
+
+// ListSessions returns historical sessions with connected_at >= since, newest
+// first. Returns the total matching count alongside the paged slice.
+func (s *Store) ListSessions(ctx context.Context, since time.Time, limit, offset int) ([]HistoricalSession, int64, error) {
+	sinceStr := since.UTC().Format(time.RFC3339)
+
+	var total int64
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM historical_sessions WHERE connected_at >= ?`, sinceStr,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count sessions: %w", err)
+	}
+
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source, state
+		 FROM historical_sessions
+		 WHERE connected_at >= ?
+		 ORDER BY connected_at DESC, id DESC
+		 LIMIT ? OFFSET ?`,
+		sinceStr, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query sessions: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := make([]HistoricalSession, 0)
+	for rows.Next() {
+		var session HistoricalSession
+		var connectedAt, disconnectedAt string
+		if err := rows.Scan(&session.ID, &session.Username, &connectedAt, &disconnectedAt,
+			&session.DurationSeconds, &session.BytesIn, &session.BytesOut, &session.Source, &session.State); err != nil {
+			return nil, 0, fmt.Errorf("scan session: %w", err)
+		}
+		parsedConnectedAt, err := parseTime(connectedAt)
+		if err != nil {
+			return nil, 0, fmt.Errorf("parse connected_at: %w", err)
+		}
+		parsedDisconnectedAt, err := parseTime(disconnectedAt)
+		if err != nil {
+			return nil, 0, fmt.Errorf("parse disconnected_at: %w", err)
+		}
+		session.ConnectedAt = parsedConnectedAt
+		session.DisconnectedAt = parsedDisconnectedAt
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate sessions: %w", err)
+	}
+	return sessions, total, nil
 }
 
 // StartHousekeeper starts a background goroutine that purges sessions older than
