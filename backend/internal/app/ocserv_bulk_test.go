@@ -14,7 +14,7 @@ import (
 
 func newBulkTestService(t *testing.T, passwd *users.FakePasswdManager) *OcservService {
 	t.Helper()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceActive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceActive)
 	// Replace the fake passwd manager with the one supplied by the test.
 	svc.users = passwd
 	return svc

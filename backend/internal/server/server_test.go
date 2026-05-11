@@ -691,6 +691,7 @@ func newTestOcservService(s *store.Store, recorder audit.SQLiteRecorder) *app.Oc
 func newTestOcservServiceWithFake(s *store.Store, recorder audit.SQLiteRecorder) (*app.OcservService, *sessions.FakeManager) {
 	runner := exec.NewFakeCommandRunner()
 	fakeSvc := service.NewFakeServiceManager(service.ServiceInactive)
+	fakePanelSvc := service.NewFakeServiceManager(service.ServiceActive)
 	checker := health.NewReadinessChecker(func() health.ReadinessConfig { return health.ReadinessConfig{} }, runner, fakeSvc)
 	validator := vpnconfig.NewConfigValidator("/nonexistent/ocserv.conf")
 	fakeManager := sessions.NewFakeManager()
@@ -699,6 +700,7 @@ func newTestOcservServiceWithFake(s *store.Store, recorder audit.SQLiteRecorder)
 		fakeManager,
 		users.NewFakePasswdManager(),
 		fakeSvc,
+		fakePanelSvc,
 		validator,
 		recorder,
 		rbac.NewDefaultAuthorizer(),

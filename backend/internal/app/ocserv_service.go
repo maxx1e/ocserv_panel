@@ -20,7 +20,8 @@ type OcservService struct {
 	readiness  *health.ReadinessChecker
 	sessions   sessions.Manager
 	users      users.PasswdManager
-	svc        service.ServiceManager
+	svc        service.ServiceManager // ocserv service
+	panelSvc   service.ServiceManager // panel service
 	validator  *config.ConfigValidator
 	recorder   audit.Recorder
 	authorizer rbac.Authorizer
@@ -32,6 +33,7 @@ func NewOcservService(
 	sessions sessions.Manager,
 	users users.PasswdManager,
 	svc service.ServiceManager,
+	panelSvc service.ServiceManager,
 	validator *config.ConfigValidator,
 	recorder audit.Recorder,
 	authorizer rbac.Authorizer,
@@ -44,6 +46,7 @@ func NewOcservService(
 		sessions:   sessions,
 		users:      users,
 		svc:        svc,
+		panelSvc:   panelSvc,
 		validator:  validator,
 		recorder:   recorder,
 		authorizer: authorizer,
@@ -123,7 +126,7 @@ func (s *OcservService) RestartPanelService(ctx context.Context, principal auth.
 		return err
 	}
 	actorID := principal.ID
-	if err := s.svc.Restart(ctx); err != nil {
+	if err := s.panelSvc.Restart(ctx); err != nil {
 		_ = s.record(ctx, &actorID, "settings.restart", "service", "", audit.OutcomeFailure, err.Error(), nil)
 		return fmt.Errorf("restart panel service: %w", err)
 	}

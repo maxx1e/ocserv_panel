@@ -22,6 +22,7 @@ func newTestOcservService(t *testing.T, svcStatus service.ServiceStatus) (
 	*sessions.FakeManager,
 	*users.FakePasswdManager,
 	*service.FakeServiceManager,
+	*service.FakeServiceManager,
 ) {
 	t.Helper()
 
@@ -35,17 +36,19 @@ func newTestOcservService(t *testing.T, svcStatus service.ServiceStatus) (
 
 	fakePasswd := users.NewFakePasswdManager()
 	validator := config.NewConfigValidator("/nonexistent/ocserv.conf")
+	fakePanelSvc := service.NewFakeServiceManager(service.ServiceActive)
 
 	svc := NewOcservService(
 		checker,
 		fakeManager,
 		fakePasswd,
 		fakeSvc,
+		fakePanelSvc,
 		validator,
 		audit.NoopRecorder{},
 		rbac.NewDefaultAuthorizer(),
 	)
-	return svc, fakeManager, fakePasswd, fakeSvc
+	return svc, fakeManager, fakePasswd, fakeSvc, fakePanelSvc
 }
 
 func ownerPrincipal() auth.Principal {
@@ -60,7 +63,7 @@ func viewerPrincipal() auth.Principal {
 
 func TestOcservServiceReadinessRequiresAuth(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceInactive)
 	_, err := svc.Readiness(context.Background(), auth.Principal{})
 	if !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("expected ErrUnauthenticated, got %v", err)
@@ -69,7 +72,7 @@ func TestOcservServiceReadinessRequiresAuth(t *testing.T) {
 
 func TestOcservServiceReadinessAllowedForViewer(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceInactive)
 	_, err := svc.Readiness(context.Background(), viewerPrincipal())
 	if err != nil {
 		t.Fatalf("expected viewer to read readiness, got %v", err)
@@ -80,7 +83,7 @@ func TestOcservServiceReadinessAllowedForViewer(t *testing.T) {
 
 func TestOcservServiceStartDeniedForViewer(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceInactive)
 	err := svc.StartService(context.Background(), viewerPrincipal())
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("expected ErrPermissionDenied for viewer, got %v", err)
@@ -89,7 +92,7 @@ func TestOcservServiceStartDeniedForViewer(t *testing.T) {
 
 func TestOcservServiceStartAllowedForOwner(t *testing.T) {
 	t.Parallel()
-	svc, _, _, fakeSvc := newTestOcservService(t, service.ServiceInactive)
+	svc, _, _, fakeSvc, _ := newTestOcservService(t, service.ServiceInactive)
 	if err := svc.StartService(context.Background(), ownerPrincipal()); err != nil {
 		t.Fatalf("expected owner to start service, got %v", err)
 	}
@@ -100,7 +103,7 @@ func TestOcservServiceStartAllowedForOwner(t *testing.T) {
 
 func TestOcservServiceStopAllowedForOwner(t *testing.T) {
 	t.Parallel()
-	svc, _, _, fakeSvc := newTestOcservService(t, service.ServiceActive)
+	svc, _, _, fakeSvc, _ := newTestOcservService(t, service.ServiceActive)
 	if err := svc.StopService(context.Background(), ownerPrincipal()); err != nil {
 		t.Fatalf("expected owner to stop service, got %v", err)
 	}
@@ -111,7 +114,7 @@ func TestOcservServiceStopAllowedForOwner(t *testing.T) {
 
 func TestOcservServiceRestartAllowedForOwner(t *testing.T) {
 	t.Parallel()
-	svc, _, _, fakeSvc := newTestOcservService(t, service.ServiceActive)
+	svc, _, _, fakeSvc, _ := newTestOcservService(t, service.ServiceActive)
 	if err := svc.RestartService(context.Background(), ownerPrincipal()); err != nil {
 		t.Fatalf("expected owner to restart service, got %v", err)
 	}
@@ -124,7 +127,7 @@ func TestOcservServiceRestartAllowedForOwner(t *testing.T) {
 
 func TestOcservServiceListSessionsDeniedForUnauthenticated(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceInactive)
 	_, err := svc.ListSessions(context.Background(), auth.Principal{})
 	if !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("expected ErrUnauthenticated, got %v", err)
@@ -133,7 +136,7 @@ func TestOcservServiceListSessionsDeniedForUnauthenticated(t *testing.T) {
 
 func TestOcservServiceListSessionsAllowedForViewer(t *testing.T) {
 	t.Parallel()
-	svc, fakeManager, _, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, fakeManager, _, _, _ := newTestOcservService(t, service.ServiceInactive)
 	fakeManager.Sessions = []sessions.Session{
 		{ID: "s1", Username: "alice"},
 	}
@@ -148,7 +151,7 @@ func TestOcservServiceListSessionsAllowedForViewer(t *testing.T) {
 
 func TestOcservServiceDisconnectDeniedForViewer(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceInactive)
 	err := svc.DisconnectSession(context.Background(), viewerPrincipal(), "s1")
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("expected ErrPermissionDenied for viewer, got %v", err)
@@ -157,7 +160,7 @@ func TestOcservServiceDisconnectDeniedForViewer(t *testing.T) {
 
 func TestOcservServiceDisconnectAllowedForOwner(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceActive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceActive)
 	if err := svc.DisconnectSession(context.Background(), ownerPrincipal(), "s1"); err != nil {
 		t.Fatalf("expected owner to disconnect session, got %v", err)
 	}
@@ -167,7 +170,7 @@ func TestOcservServiceDisconnectAllowedForOwner(t *testing.T) {
 
 func TestOcservServiceCreateUserDeniedForViewer(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceInactive)
 	err := svc.CreateOcservUser(context.Background(), viewerPrincipal(), "alice", "password", "")
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("expected ErrPermissionDenied for viewer, got %v", err)
@@ -176,7 +179,7 @@ func TestOcservServiceCreateUserDeniedForViewer(t *testing.T) {
 
 func TestOcservServiceCreateUserAllowedForOwner(t *testing.T) {
 	t.Parallel()
-	svc, _, fakePasswd, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, fakePasswd, _, _ := newTestOcservService(t, service.ServiceInactive)
 	if err := svc.CreateOcservUser(context.Background(), ownerPrincipal(), "alice", "password", ""); err != nil {
 		t.Fatalf("expected owner to create user, got %v", err)
 	}
@@ -188,7 +191,7 @@ func TestOcservServiceCreateUserAllowedForOwner(t *testing.T) {
 
 func TestOcservServiceDeleteUserAllowedForOwner(t *testing.T) {
 	t.Parallel()
-	svc, _, fakePasswd, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, fakePasswd, _, _ := newTestOcservService(t, service.ServiceInactive)
 	_ = fakePasswd.CreateUser(context.Background(), "alice", "password", "")
 
 	if err := svc.DeleteOcservUser(context.Background(), ownerPrincipal(), "alice"); err != nil {
@@ -202,7 +205,7 @@ func TestOcservServiceDeleteUserAllowedForOwner(t *testing.T) {
 
 func TestOcservServiceListUsersAllowedForViewer(t *testing.T) {
 	t.Parallel()
-	svc, _, fakePasswd, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, fakePasswd, _, _ := newTestOcservService(t, service.ServiceInactive)
 	_ = fakePasswd.CreateUser(context.Background(), "alice", "password", "")
 
 	users, err := svc.ListOcservUsers(context.Background(), viewerPrincipal())
@@ -241,12 +244,14 @@ func newTestOcservServiceWithRecorder(t *testing.T, svcStatus service.ServiceSta
 	fakePasswd := users.NewFakePasswdManager()
 	validator := config.NewConfigValidator("/nonexistent/ocserv.conf")
 	recorder := &capturingRecorder{}
+	fakePanelSvc := service.NewFakeServiceManager(service.ServiceActive)
 
 	svc := NewOcservService(
 		checker,
 		fakeManager,
 		fakePasswd,
 		fakeSvc,
+		fakePanelSvc,
 		validator,
 		recorder,
 		rbac.NewDefaultAuthorizer(),
@@ -356,7 +361,7 @@ func TestOcservServiceGetSessionDetailManagerError(t *testing.T) {
 
 func TestOcservServiceConfigIssuesAllowedForViewer(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceInactive)
 	// Config path is /nonexistent/ocserv.conf — should return 1 error issue.
 	issues, err := svc.ConfigIssues(context.Background(), viewerPrincipal())
 	if err != nil {
@@ -369,7 +374,7 @@ func TestOcservServiceConfigIssuesAllowedForViewer(t *testing.T) {
 
 func TestOcservServiceConfigIssuesDeniedForUnauthenticated(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceInactive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceInactive)
 	_, err := svc.ConfigIssues(context.Background(), auth.Principal{})
 	if !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("expected ErrUnauthenticated, got %v", err)
@@ -378,7 +383,7 @@ func TestOcservServiceConfigIssuesDeniedForUnauthenticated(t *testing.T) {
 
 func TestRestartPanelServiceDeniedForUnauthenticated(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceActive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceActive)
 	err := svc.RestartPanelService(context.Background(), auth.Principal{})
 	if !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("expected ErrUnauthenticated, got %v", err)
@@ -387,7 +392,7 @@ func TestRestartPanelServiceDeniedForUnauthenticated(t *testing.T) {
 
 func TestRestartPanelServiceDeniedForViewer(t *testing.T) {
 	t.Parallel()
-	svc, _, _, _ := newTestOcservService(t, service.ServiceActive)
+	svc, _, _, _, _ := newTestOcservService(t, service.ServiceActive)
 	err := svc.RestartPanelService(context.Background(), viewerPrincipal())
 	if !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("expected ErrPermissionDenied, got %v", err)
@@ -396,11 +401,11 @@ func TestRestartPanelServiceDeniedForViewer(t *testing.T) {
 
 func TestRestartPanelServiceAllowedForOwner(t *testing.T) {
 	t.Parallel()
-	svc, _, _, fakeSvc := newTestOcservService(t, service.ServiceActive)
+	svc, _, _, _, fakePanelSvc := newTestOcservService(t, service.ServiceActive)
 	if err := svc.RestartPanelService(context.Background(), ownerPrincipal()); err != nil {
 		t.Fatalf("expected owner to restart panel, got %v", err)
 	}
-	if fakeSvc.RestartCount() != 1 {
-		t.Fatalf("expected 1 restart call, got %d", fakeSvc.RestartCount())
+	if fakePanelSvc.RestartCount() != 1 {
+		t.Fatalf("expected 1 restart call on panel svc, got %d", fakePanelSvc.RestartCount())
 	}
 }

@@ -111,6 +111,7 @@ func main() {
 	// Build ocserv integration components from config.
 	runner := exec.NewOSCommandRunner()
 	svcManager := service.NewSystemdManager(cfg.Service.SystemdUnitName, runner)
+	panelSvcManager := service.NewSystemdManager(cfg.Installation.PanelSystemdUnit, runner)
 	readinessChecker := health.NewReadinessChecker(
 		func() health.ReadinessConfig {
 			liveCfg, err := config.Load(configPath)
@@ -133,7 +134,7 @@ func main() {
 	sessionManager := sessions.NewOcctlAdapter(cfg.Installation.OcctlBinPath, cfg.Installation.OcservSocketPath, runner)
 	passwdManager := users.NewOcpasswdAdapter(cfg.Installation.OcpasswdBinPath, cfg.Installation.OcpasswdFilePath, cfg.Installation.OcservConfigPath, runner)
 	configValidator := vpnconfig.NewConfigValidator(cfg.Installation.OcservConfigPath)
-	ocservService := app.NewOcservService(readinessChecker, sessionManager, passwdManager, svcManager, configValidator, recorder, rbac.NewDefaultAuthorizer())
+	ocservService := app.NewOcservService(readinessChecker, sessionManager, passwdManager, svcManager, panelSvcManager, configValidator, recorder, rbac.NewDefaultAuthorizer())
 
 	healthCfgFn := func() config.Config {
 		liveCfg, err := config.Load(configPath)
