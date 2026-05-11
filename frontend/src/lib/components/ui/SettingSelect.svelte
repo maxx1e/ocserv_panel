@@ -73,12 +73,13 @@
       onclick={cancel}
     >Cancel</button>
   {:else}
-    <span class="text-sm text-slate-600">{setting.value || '—'}</span>
-    <button
-      class="px-3 py-1.5 text-sm font-medium text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    <span
+      class="text-sm text-slate-600 cursor-pointer hover:text-slate-900 hover:underline"
       onclick={startEdit}
-      {disabled}
-    >Edit</button>
+      role="button"
+      tabindex="0"
+      onkeydown={(e) => e.key === 'Enter' && startEdit()}
+    >{setting.value || '—'}</span>
   {/if}
   {#if error}
     <span class="text-sm text-red-600 max-w-md break-words">{error}</span>
