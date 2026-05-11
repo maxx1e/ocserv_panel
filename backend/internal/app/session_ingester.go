@@ -150,6 +150,11 @@ func (si *SessionIngester) poll(ctx context.Context) {
 				durationSeconds = 0
 			}
 
+			state := conn.State
+			if state == "connected" {
+				state = "authenticated"
+			}
+
 			rec := store.ActiveSessionRecord{
 				OcservSessionID: sessionID,
 				Username:        username,
@@ -159,6 +164,7 @@ func (si *SessionIngester) poll(ctx context.Context) {
 				BytesIn:         conn.RxBytes,
 				BytesOut:        conn.TxBytes,
 				Source:          "ingested",
+				State:           state,
 			}
 
 			if err := si.store.UpsertActiveSession(ctx, rec); err != nil {
