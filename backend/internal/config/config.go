@@ -73,8 +73,8 @@ type DatabaseConfig struct {
 
 // MonitoringConfig holds monitoring endpoint settings.
 type MonitoringConfig struct {
-	HealthEndpoint           bool   `toml:"health_endpoint"`
-	MetricsEndpoint          bool   `toml:"metrics_endpoint"`
+	HealthEndpoint           string `toml:"health_endpoint"`
+	MetricsEndpoint          string `toml:"metrics_endpoint"`
 	DashboardRefreshInterval int    `toml:"dashboard_refresh_interval"`
 	LogFileReadEnabled       bool   `toml:"log_file_read_enabled"`
 	NetworkInterface         string `toml:"network_interface"`
@@ -140,8 +140,8 @@ func Defaults() Config {
 			ConnMaxLifetime: 300,
 		},
 		Monitoring: MonitoringConfig{
-			HealthEndpoint:           true,
-			MetricsEndpoint:          false,
+			HealthEndpoint:           "true",
+			MetricsEndpoint:          "false",
 			DashboardRefreshInterval: 15,
 			LogFileReadEnabled:       true,
 			NetworkInterface:         "",

@@ -143,17 +143,9 @@ func applySettingToConfig(cfg *config.Config, key, value string) error {
 
 	// Monitoring
 	case "monitoring.health_endpoint":
-		b, err := parseBool(value)
-		if err != nil {
-			return fmt.Errorf("%w: monitoring.health_endpoint must be true or false", ErrInvalidInput)
-		}
-		cfg.Monitoring.HealthEndpoint = b
+		cfg.Monitoring.HealthEndpoint = value
 	case "monitoring.metrics_endpoint":
-		b, err := parseBool(value)
-		if err != nil {
-			return fmt.Errorf("%w: monitoring.metrics_endpoint must be true or false", ErrInvalidInput)
-		}
-		cfg.Monitoring.MetricsEndpoint = b
+		cfg.Monitoring.MetricsEndpoint = value
 	case "monitoring.dashboard_refresh_interval":
 		n, err := strconv.Atoi(value)
 		if err != nil {
