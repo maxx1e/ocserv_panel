@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { Area, Axis, Chart, Highlight, LinearGradient, Svg } from 'layerchart';
+  import { Area, Axis, Bars, Chart, Highlight, LinearGradient, Svg } from 'layerchart';
+  // @ts-ignore -- d3-scale ships without bundled types; layerchart depends on it at runtime
+  import { scaleBand } from 'd3-scale';
   import { Container as ChartContainer, Tooltip as ChartTooltip } from '$lib/components/ui/chart/index';
   import {
     formatMetricValue,
@@ -20,9 +22,11 @@
     metric: string;
     /** Pixel height of the chart container. Defaults to 160. */
     height?: number;
+    /** Chart rendering style. 'line' renders an area chart, 'bar' renders vertical bars. Defaults to 'line'. */
+    chartType?: 'line' | 'bar';
   };
 
-  let { data, metric, height = 160 }: Props = $props();
+  let { data, metric, height = 160, chartType = 'line' }: Props = $props();
 
   const config = $derived(getChartConfig(metric));
   const classes = $derived(getChartClasses(metric));
@@ -32,6 +36,17 @@
   const chartConfig: ChartConfig = $derived({
     value: { label: metric, color: chartColor },
   });
+
+  /** For bar charts, use scaleBand on the x-axis so Bars renders vertical columns. */
+  const barXScale = $derived(chartType === 'bar' ? scaleBand() : undefined);
+
+  /** Bar fill uses the gradient-top RGBA color (30% opacity looks good for solid bars). */
+  const barFill = $derived(classes.gradientTop);
+
+  /** Extra props for the Chart component when rendering bars (xScale override). */
+  const chartScaleProps = $derived(
+    chartType === 'bar' ? { xScale: barXScale } : {}
+  );
 
   function tooltipFormatter(value: number): string {
     return formatMetricValue(metric, value);
@@ -44,6 +59,7 @@
       <Chart
         {data}
         x="timestamp"
+        {...chartScaleProps}
         y="value"
         yDomain={config.yDomain}
         yNice={config.yNice}
@@ -61,14 +77,18 @@
             format={(d: Date | number) => formatXAxisTime(d)}
             ticks={xTickCount}
           />
-          <LinearGradient
-            stops={[classes.gradientTop, classes.gradientBottom]}
-            vertical
-          >
-            {#snippet children({ gradient }: { gradient: string })}
-              <Area fill={gradient} line={{ class: classes.stroke }} />
-            {/snippet}
-          </LinearGradient>
+          {#if chartType === 'bar'}
+            <Bars fill={barFill} radius={2} strokeWidth={0} />
+          {:else}
+            <LinearGradient
+              stops={[classes.gradientTop, classes.gradientBottom]}
+              vertical
+            >
+              {#snippet children({ gradient }: { gradient: string })}
+                <Area fill={gradient} line={{ class: classes.stroke }} />
+              {/snippet}
+            </LinearGradient>
+          {/if}
           <Highlight points lines />
         </Svg>
         <ChartTooltip

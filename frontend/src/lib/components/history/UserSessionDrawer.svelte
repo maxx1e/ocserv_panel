@@ -127,11 +127,11 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <p class="text-xs text-slate-500 mb-1">Download (RX)</p>
-            <MetricChart data={rxData} metric="net_interface_rx_bytes" height={120} />
+            <MetricChart data={rxData} metric="net_interface_rx_bytes" height={120} chartType="bar" />
           </div>
           <div>
             <p class="text-xs text-slate-500 mb-1">Upload (TX)</p>
-            <MetricChart data={txData} metric="net_interface_tx_bytes" height={120} />
+            <MetricChart data={txData} metric="net_interface_tx_bytes" height={120} chartType="bar" />
           </div>
         </div>
       </div>
@@ -139,13 +139,13 @@
       <!-- Chart 2: Session duration -->
       <div>
         <h3 class="text-sm font-medium text-slate-700 mb-2">Session duration (minutes)</h3>
-        <MetricChart data={durationData} metric="active_sessions" height={120} />
+        <MetricChart data={durationData} metric="active_sessions" height={120} chartType="bar" />
       </div>
 
       <!-- Chart 3: Cumulative data -->
       <div>
         <h3 class="text-sm font-medium text-slate-700 mb-2">Cumulative data transferred</h3>
-        <MetricChart data={cumulativeData} metric="net_interface_rx_bytes" height={120} />
+        <MetricChart data={cumulativeData} metric="net_interface_rx_bytes" height={120} chartType="bar" />
       </div>
 
       <!-- Session list -->
