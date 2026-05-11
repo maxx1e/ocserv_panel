@@ -1466,9 +1466,9 @@ func BannedIPsJSON(data []byte) ([]BannedIP, error) {
 	}
 
 	type rawBan struct {
-		IP     string `json:"ip"`
-		Score  int    `json:"score"`
-		Reason string `json:"reason"`
+		IP     string `json:"IP"`
+		Score  int    `json:"Score"`
+		Reason string `json:"Reason"`
 	}
 
 	var raw []rawBan
@@ -1489,16 +1489,14 @@ func BannedIPsJSON(data []byte) ([]BannedIP, error) {
 
 // BanPointsJSON parses the JSON output of `occtl show ip ban points --output-type json`.
 // It returns an empty slice (never nil) when data is empty or represents an empty array.
-// Timestamps that fail to parse are left as zero time without returning an error.
 func BanPointsJSON(data []byte) ([]BanPointEntry, error) {
 	if len(data) == 0 {
 		return []BanPointEntry{}, nil
 	}
 
 	type rawBanPoint struct {
-		IP     string `json:"ip"`
-		Points int    `json:"points"`
-		Since  string `json:"since"`
+		IP    string `json:"IP"`
+		Score int    `json:"Score"`
 	}
 
 	var raw []rawBanPoint
@@ -1508,11 +1506,9 @@ func BanPointsJSON(data []byte) ([]BanPointEntry, error) {
 
 	entries := make([]BanPointEntry, 0, len(raw))
 	for _, r := range raw {
-		ts := Timestamp(r.Since)
 		entries = append(entries, BanPointEntry{
-			IP:     r.IP,
-			Points: r.Points,
-			Since:  ts,
+			IP:    r.IP,
+			Score: r.Score,
 		})
 	}
 	return entries, nil

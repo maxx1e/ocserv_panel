@@ -106,14 +106,14 @@ func TestEventsJSONMalformed(t *testing.T) {
 func TestBannedIPsJSONValid(t *testing.T) {
 	input := []byte(`[
 		{
-			"ip": "192.168.1.50",
-			"score": 80,
-			"reason": "too many authentication failures"
+			"IP": "192.168.1.50",
+			"Score": 80,
+			"Reason": "too many authentication failures"
 		},
 		{
-			"ip": "10.0.0.99",
-			"score": 100,
-			"reason": "brute force detected"
+			"IP": "10.0.0.99",
+			"Score": 100,
+			"Reason": "brute force detected"
 		}
 	]`)
 
@@ -188,14 +188,12 @@ func TestBannedIPsJSONMalformed(t *testing.T) {
 func TestBanPointsJSONValid(t *testing.T) {
 	input := []byte(`[
 		{
-			"ip": "10.0.0.1",
-			"points": 30,
-			"since": "2026-05-06T10:00:00Z"
+			"IP": "10.0.0.1",
+			"Score": 3
 		},
 		{
-			"ip": "172.16.0.5",
-			"points": 10,
-			"since": "2026-05-07T08:30:00Z"
+			"IP": "172.16.0.5",
+			"Score": 10
 		}
 	]`)
 
@@ -210,12 +208,14 @@ func TestBanPointsJSONValid(t *testing.T) {
 	if entries[0].IP != "10.0.0.1" {
 		t.Errorf("entries[0].IP = %q, want %q", entries[0].IP, "10.0.0.1")
 	}
-	if entries[0].Points != 30 {
-		t.Errorf("entries[0].Points = %d, want %d", entries[0].Points, 30)
+	if entries[0].Score != 3 {
+		t.Errorf("entries[0].Score = %d, want %d", entries[0].Score, 3)
 	}
-	expectedTime := time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC)
-	if !entries[0].Since.Equal(expectedTime) {
-		t.Errorf("entries[0].Since = %v, want %v", entries[0].Since, expectedTime)
+	if entries[1].IP != "172.16.0.5" {
+		t.Errorf("entries[1].IP = %q, want %q", entries[1].IP, "172.16.0.5")
+	}
+	if entries[1].Score != 10 {
+		t.Errorf("entries[1].Score = %d, want %d", entries[1].Score, 10)
 	}
 }
 

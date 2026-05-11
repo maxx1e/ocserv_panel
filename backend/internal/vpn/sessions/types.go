@@ -160,7 +160,6 @@ type BannedIP struct {
 
 // BanPointEntry represents ban point info from `occtl show ip ban points`.
 type BanPointEntry struct {
-	IP     string    `json:"ip"`
-	Points int       `json:"points"`
-	Since  time.Time `json:"since"`
+	IP    string `json:"ip"`
+	Score int    `json:"score"`
 }

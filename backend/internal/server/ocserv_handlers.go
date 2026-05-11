@@ -188,9 +188,8 @@ type bannedIPResponse struct {
 }
 
 type banPointEntryResponse struct {
-	IP     string `json:"ip"`
-	Points int    `json:"points"`
-	Since  string `json:"since,omitempty"`
+	IP    string `json:"ip"`
+	Score int    `json:"score"`
 }
 
 type disconnectSessionRequest struct {
@@ -1074,13 +1073,8 @@ func bannedIPToResponse(b sessions.BannedIP) bannedIPResponse {
 }
 
 func banPointEntryToResponse(p sessions.BanPointEntry) banPointEntryResponse {
-	since := ""
-	if !p.Since.IsZero() {
-		since = p.Since.UTC().Format(time.RFC3339)
-	}
 	return banPointEntryResponse{
-		IP:     p.IP,
-		Points: p.Points,
-		Since:  since,
+		IP:    p.IP,
+		Score: p.Score,
 	}
 }

@@ -855,7 +855,7 @@ func TestOcctlAdapterListBannedIPsSuccess(t *testing.T) {
 	runner := exec.NewFakeCommandRunner()
 	runner.Results["/usr/local/bin/occtl"] = exec.CommandResult{
 		ExitCode: 0,
-		Stdout:   `[{"ip":"10.0.0.5","score":50,"reason":"auth failures"}]`,
+		Stdout:   `[{"IP":"10.0.0.5","Score":50,"Reason":"auth failures"}]`,
 	}
 	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/occtl.socket", runner)
 
@@ -914,7 +914,7 @@ func TestOcctlAdapterListBanPointsSuccess(t *testing.T) {
 	runner := exec.NewFakeCommandRunner()
 	runner.Results["/usr/local/bin/occtl"] = exec.CommandResult{
 		ExitCode: 0,
-		Stdout:   `[{"ip":"10.0.0.5","points":30,"since":"2026-05-07T08:00:00Z"}]`,
+		Stdout:   `[{"IP":"10.0.0.5","Score":30}]`,
 	}
 	adapter := NewOcctlAdapter("/usr/local/bin/occtl", "/var/run/occtl.socket", runner)
 
@@ -928,11 +928,8 @@ func TestOcctlAdapterListBanPointsSuccess(t *testing.T) {
 	if points[0].IP != "10.0.0.5" {
 		t.Errorf("IP: got %q, want %q", points[0].IP, "10.0.0.5")
 	}
-	if points[0].Points != 30 {
-		t.Errorf("Points: got %d, want %d", points[0].Points, 30)
-	}
-	if points[0].Since.IsZero() {
-		t.Error("Since should not be zero")
+	if points[0].Score != 30 {
+		t.Errorf("Score: got %d, want %d", points[0].Score, 30)
 	}
 }
 

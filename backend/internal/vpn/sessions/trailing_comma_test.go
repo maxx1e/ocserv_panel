@@ -242,9 +242,9 @@ func TestBannedIPsJSONTrailingComma(t *testing.T) {
 	t.Parallel()
 	input := `[
   {
-    "ip": "10.0.0.1",
-    "score": 100,
-    "reason": "brute force",
+    "IP": "10.0.0.1",
+    "Score": 100,
+    "Reason": "brute force",
   }
 ]`
 	bans, err := sessions.BannedIPsJSON([]byte(input))
@@ -267,9 +267,8 @@ func TestBanPointsJSONTrailingComma(t *testing.T) {
 	t.Parallel()
 	input := `[
   {
-    "ip": "172.16.0.5",
-    "points": 42,
-    "since": "2026-05-09T10:00:00Z",
+    "IP": "172.16.0.5",
+    "Score": 42,
   }
 ]`
 	entries, err := sessions.BanPointsJSON([]byte(input))
@@ -282,7 +281,7 @@ func TestBanPointsJSONTrailingComma(t *testing.T) {
 	if entries[0].IP != "172.16.0.5" {
 		t.Errorf("IP: got %q want %q", entries[0].IP, "172.16.0.5")
 	}
-	if entries[0].Points != 42 {
-		t.Errorf("Points: got %d want %d", entries[0].Points, 42)
+	if entries[0].Score != 42 {
+		t.Errorf("Score: got %d want %d", entries[0].Score, 42)
 	}
 }
