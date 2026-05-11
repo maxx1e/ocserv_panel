@@ -3,9 +3,7 @@
   import MetricChart from '$lib/components/ui/MetricChart.svelte';
   import MultiLineChart from '$lib/components/ui/MultiLineChart.svelte';
   import type { LineData } from '$lib/components/ui/MultiLineChart.svelte';
-  import { ArrowDown, ArrowUp, Server, Users, BarChart2, List, Shield, Settings } from 'lucide-svelte';
-
-  import CardStats from '$lib/components/ui/CardStats.svelte';
+  import { Users, BarChart2, List, Shield, Settings } from 'lucide-svelte';
   import * as Card from '$lib/components/ui/card/index';
   import { mode } from 'mode-watcher';
   import CardTable from '$lib/components/ui/CardTable.svelte';
@@ -20,7 +18,6 @@
   import { paginate } from '$lib/utils/pagination';
 
   import {
-    getHistoryAnalytics,
     getHistoryUsers,
     getHistoryUserSessions,
     getMe,
@@ -37,7 +34,6 @@
     updateSetting,
     type HistoricalSession,
     type HistoricalSessionPage,
-    type HistoryAnalytics,
     type MonitoringOverview,
     type MonitoringSeries,
     type MonitoringWindow,
@@ -93,7 +89,6 @@
   let error = $state('');
   let setupRequired = $state(false);
   let principal = $state<Principal | null>(null);
-  let analytics = $state<HistoryAnalytics | null>(null);
 
   // --- Tab state ---
   let activeTab = $state<TabId>('monitoring');
@@ -166,8 +161,6 @@
 
   // --- Derived ---
   const isOwner = $derived(hasOwnerRole(principal));
-  const sampleWarning = $derived(sampleDataWarning(analytics));
-  const totals = $derived(calculateTotals(analytics?.summary));
   const purgeEnabled = $derived(isOwner && confirmation === 'PURGE' && !purgeSubmitting);
   const sortedUserSummaries = $derived((() => {
     const arr = [...userSummaries];
@@ -256,7 +249,6 @@
       if (setup.required) return;
 
       principal = principalFromAuth(await getMe());
-      analytics = await getHistoryAnalytics();
       void reloadMonitoring(monitoringWindow);
     } catch (caught) {
       error = caught instanceof Error ? caught.message : 'Unable to load historical analytics.';
@@ -489,26 +481,6 @@
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }
 
-  function sampleDataWarning(value: HistoryAnalytics | null): string {
-    const sampleData = value?.sampleData;
-    if (typeof sampleData === 'boolean') return sampleData ? 'Sample historical sessions are present.' : '';
-    if (sampleData?.enabled || sampleData?.present || Number(sampleData?.sessionCount ?? 0) > 0) {
-      return sampleData?.message ?? 'Sample historical sessions are present.';
-    }
-    return '';
-  }
-
-  function calculateTotals(summary: Record<string, unknown> | undefined) {
-    const sessionCount = numberFrom(summary?.sessionCount) ?? numberFrom(summary?.totalSessions) ?? 0;
-    const rxBytes = numberFrom(summary?.rxBytes) ?? numberFrom(summary?.bytesIn) ?? 0;
-    const txBytes = numberFrom(summary?.txBytes) ?? numberFrom(summary?.bytesOut) ?? 0;
-    return { sessionCount, rxBytes, txBytes, totalBytes: rxBytes + txBytes };
-  }
-
-  function numberFrom(value: unknown): number | null {
-    return typeof value === 'number' && Number.isFinite(value) ? value : null;
-  }
-
   function formatDuration(secs: number): string {
     if (secs === 0) return '—';
     const d = Math.floor(secs / 86400);
@@ -549,41 +521,10 @@
     {/if}
   </div>
 
-{:else if analytics}
+{:else}
   <div class="mb-6">
     <h1 class="text-xl font-bold text-slate-700">History</h1>
     <p class="text-sm text-slate-500 mt-1">Analytics are read from the local backend API and persisted SQLite history.</p>
-  </div>
-
-  {#if sampleWarning}
-    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
-      <strong class="text-amber-800 text-sm">Sample data warning:</strong>
-      <span class="text-amber-700 text-sm ml-1">{sampleWarning}</span>
-    </div>
-  {/if}
-
-  <!-- Summary stat cards -->
-  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-    <CardStats
-      title="Sessions"
-      value={String(totals.sessionCount)}
-      icon={Users}
-    />
-    <CardStats
-      title="Received"
-      value={formatBytes(totals.rxBytes)}
-      icon={ArrowDown}
-    />
-    <CardStats
-      title="Sent"
-      value={formatBytes(totals.txBytes)}
-      icon={ArrowUp}
-    />
-    <CardStats
-      title="Total traffic"
-      value={formatBytes(totals.totalBytes)}
-      icon={Server}
-    />
   </div>
 
   <!-- Tab bar -->
@@ -1159,8 +1100,4 @@
     />
   {/if}
 
-{:else}
-  <div class="bg-red-50 border border-red-200 rounded-lg p-6">
-    <p class="text-red-700 text-sm">{error || 'Historical analytics were not returned.'}</p>
-  </div>
 {/if}
