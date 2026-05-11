@@ -294,9 +294,15 @@
             title={section.title}
             label={section.label}
             description={section.description}
+            stub={section.id === 'backup' || section.id === 'notifications'}
           >
             {#each section.settings as setting (setting.key)}
-              <SettingField {setting} onUpdate={handleUpdate} {savingKey} {configHealthy} />
+              <SettingField
+                {setting}
+                onUpdate={handleUpdate}
+                {savingKey}
+                configHealthy={configHealthy && section.id !== 'backup' && section.id !== 'notifications'}
+              />
             {/each}
           </CardSettings>
         {/each}

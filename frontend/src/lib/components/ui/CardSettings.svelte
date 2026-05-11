@@ -4,10 +4,11 @@
     title: string;
     label?: string;
     description?: string;
+    stub?: boolean;
     children: import('svelte').Snippet;
   };
 
-  let { id, title, label, description, children }: Props = $props();
+  let { id, title, label, description, stub = false, children }: Props = $props();
 </script>
 
 <section id={id} class="bg-white rounded-lg shadow-sm p-6 scroll-mt-24">
@@ -17,6 +18,11 @@
     <p class="text-sm text-slate-500 mt-1">{description}</p>
   {/if}
   <div class="mt-4">
+    {#if stub}
+      <div class="mb-3 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+        This feature is not yet implemented. Settings are saved but have no effect.
+      </div>
+    {/if}
     {@render children()}
   </div>
 </section>
