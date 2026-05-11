@@ -24,6 +24,7 @@ import (
 	"ocserv_panel/backend/internal/logs"
 	"ocserv_panel/backend/internal/monitor"
 	
+	"ocserv_panel/backend/internal/vpn/bans"
 	"ocserv_panel/backend/internal/vpn/sessions"
 	"ocserv_panel/backend/internal/vpn/users"
 	"ocserv_panel/backend/internal/vpn/health"
@@ -226,6 +227,10 @@ func main() {
 	metricCatalog.SetState(monitor.MetricConcurrentSessions, monitor.StateCollecting, "")
 
 	go vpnWatcher.Run(ctx)
+
+	banWatcher := bans.NewBanWatcher(sessionManager, &banStoreAdapter{s: persistence})
+	go banWatcher.Run(ctx)
+
 	go collectorService.Run(ctx)
 
 	loginLimiter := auth.NewRateLimiter(5, time.Minute)
@@ -409,4 +414,30 @@ func pairsToMap(args []any) map[string]interface{} {
 		}
 	}
 	return m
+}
+
+// banStoreAdapter adapts *store.Store to bans.BanStore.
+// store.Store.OpenBanEvents returns []store.BanEvent; bans.BanStore needs []bans.OpenBan.
+type banStoreAdapter struct {
+	s *store.Store
+}
+
+func (a *banStoreAdapter) InsertBanEvent(ctx context.Context, ip string, score int, reason string, bannedAt time.Time) error {
+	return a.s.InsertBanEvent(ctx, ip, score, reason, bannedAt)
+}
+
+func (a *banStoreAdapter) CloseBanEvent(ctx context.Context, ip string, unbanAt time.Time) error {
+	return a.s.CloseBanEvent(ctx, ip, unbanAt)
+}
+
+func (a *banStoreAdapter) OpenBanEvents(ctx context.Context) ([]bans.OpenBan, error) {
+	events, err := a.s.OpenBanEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]bans.OpenBan, len(events))
+	for i, e := range events {
+		result[i] = bans.OpenBan{IP: e.IP}
+	}
+	return result, nil
 }
