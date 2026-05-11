@@ -1,15 +1,17 @@
 <script lang="ts">
-  import { User } from 'lucide-svelte';
+  import { User, Menu } from 'lucide-svelte';
   import ThemeToggle from './ThemeToggle.svelte';
 
   type Props = {
     title: string;
     username: string;
     onLogout: () => void;
+    onToggleSidebar?: () => void;
   };
 
-  let { title, username, onLogout }: Props = $props();
+  let { title, username, onLogout, onToggleSidebar }: Props = $props();
   let showDropdown = $state(false);
+  let dropdownRef: HTMLDivElement | undefined = $state(undefined);
 
   function toggleDropdown() {
     showDropdown = !showDropdown;
@@ -19,15 +21,35 @@
     showDropdown = false;
     onLogout();
   }
+
+  function handleWindowClick(event: MouseEvent) {
+    if (showDropdown && dropdownRef && !dropdownRef.contains(event.target as Node)) {
+      showDropdown = false;
+    }
+  }
 </script>
 
+<svelte:window onclick={handleWindowClick} />
+
 <header class="h-16 bg-card border-b border-border flex items-center justify-between px-6 sticky top-0 z-20">
-  <h2 class="text-lg font-semibold text-foreground">{title}</h2>
+  <div class="flex items-center gap-3">
+    {#if onToggleSidebar}
+      <button
+        type="button"
+        onclick={onToggleSidebar}
+        class="md:hidden p-2 -ml-2 text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="Toggle navigation menu"
+      >
+        <Menu class="w-5 h-5" />
+      </button>
+    {/if}
+    <h2 class="text-lg font-semibold text-foreground">{title}</h2>
+  </div>
 
   <div class="flex items-center gap-2">
     <ThemeToggle />
 
-    <div class="relative">
+    <div class="relative" bind:this={dropdownRef}>
       <button
         type="button"
         onclick={toggleDropdown}

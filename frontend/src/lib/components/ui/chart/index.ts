@@ -3,4 +3,4 @@ import Tooltip from "./chart-tooltip.svelte";
 import Style from "./chart-style.svelte";
 
 export { Container, Tooltip, Style };
-export { type ChartConfig, setChartContext, useChart } from "./chart-utils";
+export { type ChartConfig, setChartContext } from "./chart-utils";

@@ -1,5 +1,21 @@
 # AGENTS.md
 
+## Rules Files
+
+The `.claude/rules/` directory contains reference files that agents MUST read before working in each domain:
+
+- **`memory.md`** — Canonical index of all design specs and implementation plans in `docs/superpowers/`. Read this first before starting any feature work to find existing specs and plans that cover your area.
+- **`project-structure.md`** — Go backend package map, key types, design principles, RBAC guard patterns, audit conventions, and testing checklist. Read before touching any backend code.
+- **`svelteforge-admin-main.md`** — Frontend reference design (SvelteKit 5, Tailwind CSS v4, shadcn-svelte). Read before touching any frontend code.
+- **`occtl-excamples.md`** — Real occtl JSON output samples. Read before parsing or testing any occtl command output.
+- **`memory-tasks.md`** — Project progress snapshot (may be stale; verify against code).
+
+**Agent workflow:**
+1. Read `memory.md` to find specs/plans that cover your task.
+2. Read the relevant spec file from `docs/superpowers/specs/` before reading code.
+3. Read `project-structure.md` for backend work; `svelteforge-admin-main.md` for frontend work.
+4. Implement using the plan from `docs/superpowers/plans/` if one exists.
+
 ## Project Intent
 
 This repository implements a local Web UI admin panel for `ocserv`.
@@ -18,6 +34,7 @@ Build the system with:
 - HAProxy for TLS termination is optional deployment feature
 - HTTP is a default connection protocol
 - Select graph types based on whether the metric is time-based, distribution-based, or categorical.
+- use md files from rules for additional reference.
 
 
 Do not introduce external services unless explicitly requested.

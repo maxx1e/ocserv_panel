@@ -3,7 +3,6 @@
 
 /* Scan LayerChart's internal classes so Tailwind v4 includes them */
 @source "../node_modules/layerchart/**/*.svelte";
-@source "../node_modules/svelte-ux/**/*.svelte";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

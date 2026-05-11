@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { Search, Plus, Lock, Unlock, KeyRound, Trash2, ArrowUpDown } from 'lucide-svelte';
+  import { Search, Plus, Lock, Unlock, KeyRound, Trash2, ArrowUpDown, Pencil, Check, X, Loader2 } from 'lucide-svelte';
   import { paginate } from '$lib/utils/pagination';
   import {
     lockVpnUser,
     unlockVpnUser,
     resetVpnPassword,
     deleteVpnUser,
+    updateVpnUserGroup,
     bulkDeleteVpnUsers,
     bulkLockVpnUsers,
     bulkUnlockVpnUsers,
@@ -30,10 +31,17 @@
 
   let search = $state('');
   let statusFilter = $state<'all' | 'active' | 'locked'>('all');
+  let groupFilter = $state<string>('all');
   let sortColumn = $state<'username' | 'group' | 'status'>('username');
   let sortDirection = $state<'asc' | 'desc'>('asc');
   let page = $state(1);
   let pageSize = $state(10);
+
+  // ── inline group edit state ───────────────────────────────────────────────
+  let editingGroupUser = $state<string | null>(null);
+  let editingGroupValue = $state('');
+  let editingGroupSaving = $state(false);
+  let editingGroupSuccess = $state<string | null>(null);
 
   // ── dialog state ──────────────────────────────────────────────────────────
 
@@ -60,6 +68,18 @@
 
   // ── derived ───────────────────────────────────────────────────────────────
 
+  const uniqueGroups = $derived((() => {
+    const groups = new Set<string>();
+    for (const u of users) {
+      groups.add(u.group || '');
+    }
+    return [...groups].sort((a, b) => {
+      if (!a && b) return 1;
+      if (a && !b) return -1;
+      return a.localeCompare(b);
+    });
+  })());
+
   const filteredUsers = $derived((() => {
     let result = users;
 
@@ -72,6 +92,14 @@
       result = result.filter(u => u.active);
     } else if (statusFilter === 'locked') {
       result = result.filter(u => !u.active);
+    }
+
+    if (groupFilter !== 'all') {
+      if (groupFilter === '__none__') {
+        result = result.filter(u => !u.group);
+      } else {
+        result = result.filter(u => u.group === groupFilter);
+      }
     }
 
     return result;
@@ -211,6 +239,51 @@
     }
   }
 
+  // ── inline group edit helpers ──────────────────────────────────────────────
+
+  function startEditGroup(user: VpnUser) {
+    editingGroupUser = user.username;
+    editingGroupValue = user.group || '';
+    editingGroupSuccess = null;
+  }
+
+  function cancelEditGroup() {
+    editingGroupUser = null;
+    editingGroupValue = '';
+    editingGroupSaving = false;
+  }
+
+  async function saveEditGroup() {
+    if (editingGroupUser === null) return;
+    const trimmed = editingGroupValue.trim();
+    if (trimmed && !/^[a-zA-Z0-9_-]{2,64}$/.test(trimmed)) {
+      errorMsg = 'Group must be 2-64 characters (letters, digits, underscore, hyphen).';
+      return;
+    }
+    editingGroupSaving = true;
+    try {
+      await updateVpnUserGroup(editingGroupUser, trimmed);
+      editingGroupSuccess = editingGroupUser;
+      editingGroupUser = null;
+      editingGroupValue = '';
+      onRefresh();
+      setTimeout(() => { editingGroupSuccess = null; }, 1500);
+    } catch (caught) {
+      errorMsg = caught instanceof Error ? caught.message : 'Failed to update group.';
+    } finally {
+      editingGroupSaving = false;
+    }
+  }
+
+  function handleEditGroupKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveEditGroup();
+    } else if (e.key === 'Escape') {
+      cancelEditGroup();
+    }
+  }
+
   function handleCreateSuccess() {
     successMsg = 'VPN user created.';
     onRefresh();
@@ -276,6 +349,21 @@
       <option value="all">All Status</option>
       <option value="active">Active</option>
       <option value="locked">Locked</option>
+    </select>
+
+    <!-- Group filter -->
+    <select
+      bind:value={groupFilter}
+      class="px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500"
+    >
+      <option value="all">All Groups</option>
+      {#each uniqueGroups as g}
+        {#if g}
+          <option value={g}>{g}</option>
+        {:else}
+          <option value="__none__">(No group)</option>
+        {/if}
+      {/each}
     </select>
 
     <!-- Count badge -->
@@ -359,7 +447,45 @@
                 {user.username}
               </td>
               <td class="px-4 py-3 text-sm text-slate-700 dark:text-slate-300">
-                {user.group || '--'}
+                {#if editingGroupUser === user.username}
+                  <div class="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      bind:value={editingGroupValue}
+                      onkeydown={handleEditGroupKeydown}
+                      onblur={() => { if (!editingGroupSaving) cancelEditGroup(); }}
+                      disabled={editingGroupSaving}
+                      class="w-28 px-2 py-1 text-sm border border-blue-300 dark:border-blue-500 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Group name"
+                    />
+                    {#if editingGroupSaving}
+                      <Loader2 class="w-3.5 h-3.5 text-blue-500 animate-spin" />
+                    {:else}
+                      <button type="button" onclick={saveEditGroup} title="Save group" class="p-0.5 rounded text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20">
+                        <Check class="w-3.5 h-3.5" />
+                      </button>
+                      <button type="button" onclick={cancelEditGroup} title="Cancel" class="p-0.5 rounded text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
+                        <X class="w-3.5 h-3.5" />
+                      </button>
+                    {/if}
+                  </div>
+                {:else}
+                  <span class="inline-flex items-center gap-1.5 group/gcell">
+                    <span>{user.group || '--'}</span>
+                    {#if editingGroupSuccess === user.username}
+                      <Check class="w-3.5 h-3.5 text-green-500" />
+                    {:else if isOwner}
+                      <button
+                        type="button"
+                        onclick={() => startEditGroup(user)}
+                        title="Edit group"
+                        class="p-0.5 rounded text-slate-300 dark:text-slate-600 opacity-0 group-hover/gcell:opacity-100 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-opacity"
+                      >
+                        <Pencil class="w-3 h-3" />
+                      </button>
+                    {/if}
+                  </span>
+                {/if}
               </td>
               <td class="px-4 py-3 text-sm">
                 {#if user.active}

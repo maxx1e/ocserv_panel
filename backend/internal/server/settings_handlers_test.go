@@ -109,17 +109,6 @@ func TestSettingsUpdateRejectsUnknownKey(t *testing.T) {
 	assertJSONField(t, rec, "error", "invalid input")
 }
 
-func TestSettingsUpdateRejectsInvalidToggle(t *testing.T) {
-	h := newTestHarness(t)
-	h.createOwner(t, "testowner", "testpass123")
-	cookie := h.login(t, "testowner", "testpass123")
-
-	rec := serveAPI(t, h.router, http.MethodPut, "/api/settings/service.restart_on_failure", map[string]string{"value": "yes"}, cookie)
-
-	assertStatus(t, rec, http.StatusBadRequest)
-	assertJSONField(t, rec, "error", "invalid input: toggle must be true or false")
-}
-
 func TestRestartStatusRequiresAuth(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -184,7 +173,7 @@ func TestRestartRequiresOwner(t *testing.T) {
 	assertJSONField(t, rec, "error", "permission denied")
 }
 
-func TestRestartReturnsPlaceholder(t *testing.T) {
+func TestRestartOwnerSucceeds(t *testing.T) {
 	h := newTestHarness(t)
 	h.createOwner(t, "testowner", "testpass123")
 	cookie := h.login(t, "testowner", "testpass123")

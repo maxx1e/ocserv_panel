@@ -13,6 +13,95 @@ Expected components:
 
 The API is same-origin under `/api`. In production, HAProxy terminates TLS and forwards to the loopback backend. In local development, the SvelteKit/Vite dev server may proxy `/api` to `127.0.0.1:8080`; this does not require CORS.
 
+## Remote Access via SSH Port Forwarding
+
+When the panel is deployed on a remote server, you can access the Web UI securely over an SSH tunnel without exposing the port to the internet.
+
+### Production deployment (HTTPS on port 8443)
+
+The default systemd unit listens on `0.0.0.0:8443` with TLS enabled. Forward the remote port to your local machine:
+
+```sh
+ssh -L 8443:127.0.0.1:8443 user@your-server
+```
+
+Then open **https://localhost:8443** in your browser. Because the TLS certificate is issued for the server's domain (not `localhost`), your browser will show a certificate warning — this is safe to accept for local testing since the traffic never leaves the SSH tunnel.
+
+To avoid the certificate warning, add the server's domain to your local `/etc/hosts`:
+
+```sh
+# Add to /etc/hosts (replace with your actual domain)
+127.0.0.1  light-mirror.ru
+```
+
+Then open **https://light-mirror.ru:8443** — the certificate will match and the browser will not warn.
+
+### Development deployment (HTTP on port 8080)
+
+If running in HTTP mode (e.g., `OCSERV_PANEL_ADDR=127.0.0.1:8080` without TLS certs):
+
+```sh
+ssh -L 8080:127.0.0.1:8080 user@your-server
+```
+
+Then open **http://localhost:8080** in your browser.
+
+### Persistent tunnel (background mode)
+
+To keep the tunnel running in the background:
+
+```sh
+ssh -f -N -L 8443:127.0.0.1:8443 user@your-server
+```
+
+Flags:
+- `-f` — go to background after authentication
+- `-N` — do not execute a remote command (tunnel only)
+- `-L` — local port forwarding
+
+### Using an SSH config shortcut
+
+Add to `~/.ssh/config` for convenience:
+
+```
+Host ocserv-panel
+    HostName your-server-ip
+    User your-user
+    LocalForward 8443 127.0.0.1:8443
+```
+
+Then simply run:
+
+```sh
+ssh -N ocserv-panel
+```
+
+### Adding a tunnel from an existing SSH session
+
+If you are already connected to the server via SSH, open a **new local terminal** and run:
+
+```sh
+ssh -f -N -L 8443:127.0.0.1:8443 user@your-server
+```
+
+This creates a background tunnel alongside your existing session. Then open **https://localhost:8443** on your local machine.
+
+Alternatively, start a second SSH connection with the tunnel:
+
+```sh
+ssh -L 8443:127.0.0.1:8443 user@your-server
+```
+
+Multiple SSH sessions to the same host work simultaneously without conflict.
+
+### Notes
+
+- The SSH tunnel encrypts all traffic between your machine and the server, so even the HTTP mode is secure in transit.
+- Only one SSH session needs to be active for the tunnel to work; you can use it alongside a normal shell session.
+- If port 8443 is already in use locally, pick a different local port: `ssh -L 9443:127.0.0.1:8443 user@your-server` and open `https://localhost:9443`.
+
+---
+
 ## Local Development Without `ocserv`
 
 The authenticated dashboard slice can run without a live `ocserv` instance. It provides first-run owner setup, login/logout, authenticated dashboard summary/history APIs, and local sample analytics.

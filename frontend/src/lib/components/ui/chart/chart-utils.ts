@@ -1,4 +1,4 @@
-import { getContext, setContext } from 'svelte';
+import { setContext } from 'svelte';
 
 export type ChartConfig = Record<
   string,
@@ -17,8 +17,4 @@ type ChartContext = {
 
 export function setChartContext(ctx: ChartContext) {
   setContext(CHART_CONTEXT_KEY, ctx);
-}
-
-export function useChart(): ChartContext {
-  return getContext<ChartContext>(CHART_CONTEXT_KEY);
 }

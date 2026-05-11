@@ -62,13 +62,12 @@
   });
 
   function statusBadgeClass(session: OcservSession): string {
-    if (session.device) return 'bg-green-100 text-green-700';
+    if (session.state === 'connected') return 'bg-green-100 text-green-700';
     return 'bg-blue-100 text-blue-700';
   }
 
   function statusLabel(session: OcservSession): string {
-    if (session.device) return 'connected';
-    return 'authenticated';
+    return session.state || 'authenticated';
   }
 
   async function selectSession(session: OcservSession) {

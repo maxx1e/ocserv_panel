@@ -2,7 +2,9 @@
 
 **Date:** 2026-05-05
 **Route:** `/config`
-**Status:** Approved
+**Status:** SUPERSEDED — split into:
+- `2026-05-05-config-management-backend-design.md`
+- `2026-05-05-config-management-frontend-design.md`
 
 ---
 

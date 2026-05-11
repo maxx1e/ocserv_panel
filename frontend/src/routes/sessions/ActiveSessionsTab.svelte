@@ -275,7 +275,7 @@
     <!-- Detail drawer -->
     {#if selectedUser !== null}
       <SessionDetailDrawer
-        session={{ id: selectedUser.id, username: selectedUser.username, remoteAddress: selectedUser.remoteIp, vpnAddress: selectedUser.vpnIp, connectedAt: undefined, rxBytes: 0, txBytes: 0, userAgent: '', device: selectedUser.device, reconnectCount: 0 }}
+        session={{ id: selectedUser.id, username: selectedUser.username, remoteAddress: selectedUser.remoteIp, vpnAddress: selectedUser.vpnIp, connectedAt: undefined, rxBytes: 0, txBytes: 0, userAgent: '', device: selectedUser.device, reconnectCount: 0, state: selectedUser.status || 'connected', groupname: '', vhost: selectedUser.vhost || '' }}
         detail={null}
         userConnection={selectedConnections.length > 0 ? selectedConnections[0] : null}
         loading={detailLoading}

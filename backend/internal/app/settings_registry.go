@@ -73,9 +73,8 @@ func AllSettingDefs() []SettingDef {
 		{Key: "service.user", Label: "Run as User", Section: "service", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "ocserv-panel", SortOrder: 2},
 		{Key: "service.group", Label: "Run as Group", Section: "service", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "ocserv-panel", SortOrder: 3},
 		{Key: "service.start_on_boot", Label: "Start on Boot", Section: "service", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "true", SortOrder: 4},
-		{Key: "service.restart_on_failure", Label: "Restart on Failure", Section: "service", Type: SettingTypeToggle, Source: SettingSourceDatabase, RequiresRestart: false, Default: "true", SortOrder: 5},
-		{Key: "service.maintenance_mode", Label: "Maintenance Mode", Section: "service", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "false", SortOrder: 6},
-		{Key: "service.systemd_unit_name", Label: "Systemd Unit Name", Section: "service", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "ocserv", SortOrder: 7},
+		{Key: "service.maintenance_mode", Label: "Maintenance Mode", Section: "service", Type: SettingTypeToggle, Source: SettingSourceConfig, RequiresRestart: true, Default: "false", SortOrder: 5},
+		{Key: "service.systemd_unit_name", Label: "Systemd Unit Name", Section: "service", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "ocserv", SortOrder: 6},
 
 		// Web Access
 		{Key: "web.host", Label: "Listen Host", Section: "web", Type: SettingTypeText, Source: SettingSourceConfig, RequiresRestart: true, Default: "127.0.0.1", SortOrder: 1},

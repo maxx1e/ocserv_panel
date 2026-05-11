@@ -5,8 +5,14 @@
 #   sudo ./install.sh              # fresh install or upgrade
 #   sudo ./install.sh --status     # check current installation health
 #   sudo ./install.sh --fix        # check health and auto-fix common issues
+#   sudo ./install.sh --healthcheck # quick pass/fail endpoint check (for monitoring)
 #   sudo ./install.sh --uninstall  # remove installation
 #   sudo ./install.sh --help       # show usage
+#
+# Exit codes:
+#   0 — success / healthy
+#   1 — errors found / health check failed
+#   2 — warnings only (--status)
 #
 # Assumptions documented:
 #   Binary target   : /usr/local/bin/ocserv-panel
@@ -17,7 +23,7 @@
 #   Log dir         : /var/log/ocserv-panel/
 #   Metrics (tsdb)  : /var/lib/ocserv-panel/metrics/
 #   systemd unit    : /etc/systemd/system/ocserv-panel.service
-#   Health endpoint : https://127.0.0.1:${PANEL_PORT}/api/health
+#   Health endpoint : http(s)://127.0.0.1:${PANEL_PORT}/api/health
 
 # ─── Error handling ──────────────────────────────────────────────────────────
 # We do NOT use "set -e" because it causes silent exits on benign failures
@@ -67,6 +73,20 @@ PANEL_PORT="8443"
 FIX_MODE="false"
 FIXES_APPLIED=0
 FIXES_FAILED=0
+
+# ─── Port from config helper ─────────────────────────────────────────────────
+# Reads the configured port from config.toml (if present) to override the
+# default PANEL_PORT. Called before status/healthcheck so we hit the right port.
+
+read_port_from_config() {
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        local p
+        p="$(grep -E '^\s*port\s*=' "${CONFIG_FILE}" | head -1 | sed 's/.*=\s*//' | tr -d ' ')" || true
+        if [[ -n "${p}" && "${p}" =~ ^[0-9]+$ ]]; then
+            PANEL_PORT="${p}"
+        fi
+    fi
+}
 
 # ─── Detected values (populated by detect_ocserv) ────────────────────────────
 
@@ -126,8 +146,6 @@ run_step() {
     fi
 }
 
-# ─── Usage ────────────────────────────────────────────────────────────────────
-
 # ─── Fix helper ──────────────────────────────────────────────────────────────
 # Attempts a fix only when FIX_MODE is enabled. Returns 0 if fix was applied
 # successfully, 1 otherwise (including when FIX_MODE is off).
@@ -151,51 +169,6 @@ try_fix() {
     fi
 }
 
-# ─── Certificate group access helper ────────────────────────────────────────
-# Creates ssl-cert group if needed, adds the service user to it, sets group
-# ownership on the cert directory, and ensures parent directory traversal.
-# Usage: __fix_cert_group_access <user> <cert_dir>
-
-__fix_cert_group_access() {
-    local user="$1"
-    local dir="$2"
-
-    # Create ssl-cert group if it doesn't exist
-    if ! getent group ssl-cert >/dev/null 2>&1; then
-        if ! groupadd ssl-cert; then
-            return 1
-        fi
-    fi
-
-    # Add service user to ssl-cert group
-    if ! usermod -aG ssl-cert "${user}"; then
-        return 1
-    fi
-
-    # Set group ownership on cert directory and contents
-    if ! chgrp -R ssl-cert "${dir}"; then
-        return 1
-    fi
-    chmod -R g+rX "${dir}"
-
-    # Ensure parent directories allow group traversal (e.g. /etc/letsencrypt/live)
-    local parent="${dir}"
-    while [[ "${parent}" != "/" ]]; do
-        parent="$(dirname "${parent}")"
-        # Stop at /etc or / to avoid overly broad changes
-        if [[ "${parent}" == "/" || "${parent}" == "/etc" ]]; then
-            break
-        fi
-        # Only add g+x if the directory is not already group-traversable
-        if [[ ! -x "${parent}" ]] || ! stat -c '%A' "${parent}" 2>/dev/null | grep -q '...x'; then
-            chgrp ssl-cert "${parent}" 2>/dev/null || true
-            chmod g+x "${parent}" 2>/dev/null || true
-        fi
-    done
-
-    return 0
-}
-
 # ─── Usage ────────────────────────────────────────────────────────────────────
 
 usage() {
@@ -206,8 +179,14 @@ Usage:
   sudo $0              # fresh install or upgrade
   sudo $0 --status     # check current installation health
   sudo $0 --fix        # check health and auto-fix common issues
+  sudo $0 --healthcheck # quick pass/fail endpoint check (for monitoring)
   sudo $0 --uninstall  # remove installation
   sudo $0 --help       # show this help
+
+Exit codes:
+  0  success / healthy
+  1  errors found / health check failed / fixes failed
+  2  warnings only (--status)
 
 The installer:
   - Detects your ocserv configuration automatically
@@ -222,6 +201,7 @@ Re-running the installer on an existing installation performs an upgrade:
 Status check (--status):
   Inspects the current installation and reports any issues:
   binary, service, config, certificates, permissions, health, and ocserv integration.
+  Returns exit code 0 (clean), 1 (errors), or 2 (warnings only).
 
 Fix mode (--fix):
   Runs the same checks as --status, but automatically attempts to resolve
@@ -230,15 +210,19 @@ Fix mode (--fix):
   - SQLite database file permission/ownership problems
   - WAL/SHM journal file ownership mismatches
   - Config file permission modes
-  - Sudoers file permission modes
   - Service not enabled on boot
-  - Certificate read access for the service user
+  - Relative DSN path in config
+  Restarts the service after successful fixes.
+
+Healthcheck (--healthcheck):
+  Lightweight check for monitoring/cron. Hits the health endpoint and
+  exits 0 (OK) or 1 (FAIL). Reads port from installed config.
 
 Prerequisites:
   - Root access (sudo)
   - systemd
   - ocserv installed and configured
-  - TLS certificates (e.g. Let's Encrypt)
+  - TLS certificates (e.g. Let's Encrypt) — optional
 
 EOF
 }
@@ -924,6 +908,37 @@ EOF
     ok "Config generated: ${CONFIG_FILE}"
 }
 
+# ─── Check config keys on upgrade ────────────────────────────────────────────
+# Warns if the installed config is missing keys present in the template.
+# This helps administrators discover new config options after an upgrade.
+
+do_check_config_keys() {
+    # Only relevant when config was preserved (upgrade path)
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        return 0
+    fi
+    local template="${SCRIPT_DIR}/config.toml.example"
+    if [[ ! -f "${template}" ]]; then
+        return 0
+    fi
+
+    # Extract key names (lines matching: key = value) from both files
+    local missing=""
+    missing="$(comm -23 \
+        <(grep -E '^\s*[a-z_]+\s*=' "${template}" | sed 's/\s*=.*//' | sed 's/^\s*//' | sort -u) \
+        <(grep -E '^\s*[a-z_]+\s*=' "${CONFIG_FILE}" | sed 's/\s*=.*//' | sed 's/^\s*//' | sort -u))" || true
+
+    if [[ -n "${missing}" ]]; then
+        echo ""
+        warn "New config keys available in this version (not in your config):"
+        echo "${missing}" | while IFS= read -r key; do
+            printf "       • %s\n" "${key}"
+        done
+        info "Review ${template} and add any needed keys to ${CONFIG_FILE}"
+        echo ""
+    fi
+}
+
 # ─── Install systemd unit ─────────────────────────────────────────────────────
 
 do_install_systemd() {
@@ -1109,6 +1124,9 @@ success_banner() {
 # ─── Status check ────────────────────────────────────────────────────────────
 
 status_check() {
+    # Read actual port from config if available
+    read_port_from_config
+
     echo ""
     bold "╔══════════════════════════════════════════════════╗"
     bold "║  ocserv-panel Installation Status               ║"
@@ -1238,6 +1256,82 @@ status_check() {
             errors=$((errors + 1))
         fi
     done
+
+    # ── File ownership ──
+    # Service runs as root — all installation files must be owned by root:root
+    echo ""
+    bold "File ownership"
+    echo ""
+
+    local ownership_ok=true
+
+    # Helper: check ownership of a file or directory
+    __check_ownership() {
+        local path="$1"
+        local label="$2"
+        local expected_owner="root:root"
+
+        if [[ ! -e "${path}" ]]; then
+            return 0  # skip non-existent paths (caught by other checks)
+        fi
+
+        local actual_owner
+        actual_owner="$(stat -c '%U:%G' "${path}" 2>/dev/null)" || true
+        if [[ "${actual_owner}" == "${expected_owner}" ]]; then
+            return 0
+        fi
+
+        ownership_ok=false
+        warn "${label}: owned by ${actual_owner} (expected ${expected_owner})"
+        if try_fix "Set ownership of ${path} to root:root" chown root:root "${path}"; then
+            return 0
+        else
+            printf "       → Fix: ${BOLD}chown root:root %s${RESET}\n" "${path}"
+        fi
+        return 1
+    }
+
+    # Check binary
+    __check_ownership "${BINARY_DST}" "Binary" || warnings=$((warnings + 1))
+
+    # Check config file
+    __check_ownership "${CONFIG_FILE}" "Config" || warnings=$((warnings + 1))
+
+    # Check data directories
+    for dir_path in "${DATA_DIR}" "${LOG_DIR}" "${METRICS_DIR}"; do
+        __check_ownership "${dir_path}" "Directory ${dir_path}" || warnings=$((warnings + 1))
+    done
+
+    # Check static assets directory
+    __check_ownership "${STATIC_DST}" "Static assets" || warnings=$((warnings + 1))
+
+    # Check migrations directory
+    __check_ownership "${MIGRATIONS_DST}" "Migrations" || warnings=$((warnings + 1))
+
+    # Check database file and WAL/SHM journals
+    local db_check_file="${DATA_DIR}/ocserv_panel.db"
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        local dsn_val=""
+        dsn_val="$(grep -E '^\s*dsn\s*=' "${CONFIG_FILE}" \
+            | head -1 | sed 's/^[^=]*=\s*//' | tr -d '"' | tr -d "'")" || true
+        if [[ -n "${dsn_val}" ]]; then
+            local dsn_path=""
+            dsn_path="$(echo "${dsn_val}" | sed 's|^file:||' | sed 's|?.*||')" || true
+            if [[ -n "${dsn_path}" && "${dsn_path}" == /* ]]; then
+                db_check_file="${dsn_path}"
+            fi
+        fi
+    fi
+    __check_ownership "${db_check_file}" "Database" || warnings=$((warnings + 1))
+    __check_ownership "${db_check_file}-wal" "Database WAL" || warnings=$((warnings + 1))
+    __check_ownership "${db_check_file}-shm" "Database SHM" || warnings=$((warnings + 1))
+
+    # Check systemd unit file
+    __check_ownership "${SYSTEMD_UNIT}" "Systemd unit" || warnings=$((warnings + 1))
+
+    if [[ "${ownership_ok}" == "true" ]]; then
+        ok "All installation files owned by root:root"
+    fi
 
     # ── Database health ──
     echo ""
@@ -1544,6 +1638,14 @@ status_check() {
     fi
     printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     echo ""
+
+    # Return meaningful codes: errors → 1, warnings-only → 2, clean → 0
+    if [[ "${errors}" -gt 0 ]]; then
+        return 1
+    elif [[ "${warnings}" -gt 0 ]]; then
+        return 2
+    fi
+    return 0
 }
 
 # ─── Uninstall ────────────────────────────────────────────────────────────────
@@ -1635,15 +1737,46 @@ main() {
             if [[ "${EUID}" -ne 0 ]]; then
                 die "Must run as root (use sudo)"
             fi
-            status_check
-            exit 0
+            # status_check returns: 0=healthy, 1=errors, 2=warnings-only
+            local sc=0
+            status_check || sc=$?
+            exit "${sc}"
+            ;;
+        --healthcheck)
+            # Lightweight health endpoint check for monitoring/cron
+            read_port_from_config
+            if ! command -v curl &>/dev/null; then
+                echo "curl not available" >&2
+                exit 1
+            fi
+            local scheme="http"
+            if [[ -f "${CONFIG_FILE}" ]]; then
+                local tls_cert_val=""
+                tls_cert_val="$(grep -E '^\s*tls_cert_path\s*=' "${CONFIG_FILE}" \
+                    | head -1 | sed 's/.*=\s*//' | tr -d '"' | tr -d "'")" || true
+                if [[ -n "${tls_cert_val}" ]]; then
+                    scheme="https"
+                fi
+            fi
+            local health_url="${scheme}://127.0.0.1:${PANEL_PORT}/api/health"
+            local http_code
+            http_code="$(curl -sk -o /dev/null -w '%{http_code}' \
+                --connect-timeout 3 --max-time 5 "${health_url}" 2>/dev/null)" || http_code="000"
+            if [[ "${http_code}" == "200" ]]; then
+                echo "OK"
+                exit 0
+            else
+                echo "FAIL (HTTP ${http_code})"
+                exit 1
+            fi
             ;;
         --fix)
             if [[ "${EUID}" -ne 0 ]]; then
                 die "Must run as root (use sudo)"
             fi
             FIX_MODE="true"
-            status_check
+            # status_check returns non-zero on errors — we handle our own exit below
+            status_check || true  # ignore return; fix mode uses FIXES_* counters
             echo ""
             if [[ "${FIXES_APPLIED}" -gt 0 || "${FIXES_FAILED}" -gt 0 ]]; then
                 printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1659,9 +1792,23 @@ main() {
                     printf "  Run ${BOLD}--status${RESET} again to verify.\n"
                     echo ""
                 fi
+                # Restart service if fixes were applied and service is running
+                if [[ "${FIXES_APPLIED}" -gt 0 ]]; then
+                    if systemctl is-active --quiet ocserv-panel 2>/dev/null; then
+                        info "Restarting service to apply fixes..."
+                        if systemctl restart ocserv-panel; then
+                            ok "Service restarted successfully"
+                        else
+                            fail "Service restart failed after fixes"
+                        fi
+                    fi
+                fi
             else
                 ok "No fixes were needed — installation looks healthy."
                 echo ""
+            fi
+            if [[ "${FIXES_FAILED}" -gt 0 ]]; then
+                exit 1
             fi
             exit 0
             ;;
@@ -1719,6 +1866,7 @@ main() {
     run_step "Install static assets" do_install_static
     run_step "Install migrations" do_install_migrations
     run_step "Generate configuration" do_generate_config
+    do_check_config_keys
     run_step "Install systemd unit" do_install_systemd
     run_step "Start service" do_start_service
 

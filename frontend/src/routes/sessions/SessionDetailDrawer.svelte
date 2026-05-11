@@ -32,7 +32,7 @@
     onDisconnectUser
   }: Props = $props();
 
-  function formatDurationSecs(secs: number): string {
+  function formatDurationSecs(secs: number | undefined): string {
     if (!secs || secs < 0) return '—';
     const h = Math.floor(secs / 3600);
     const m = Math.floor((secs % 3600) / 60);
@@ -40,8 +40,19 @@
     return `${m}m`;
   }
 
+  function computeDurationSecs(connectedAt: string | undefined): number {
+    if (!connectedAt) return 0;
+    const ms = Date.now() - new Date(connectedAt).getTime();
+    return isNaN(ms) || ms < 0 ? 0 : Math.floor(ms / 1000);
+  }
+
   function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text);
+  }
+
+  function displayGroupname(g: string | undefined): string {
+    if (!g || g === '(none)') return '';
+    return g;
   }
 
   const username = $derived(session?.username ?? 'Session');
@@ -79,61 +90,97 @@
     {:else if error}
       <p class="text-sm text-red-600 py-4">{error}</p>
 
-    {:else if detail}
+    {:else if detail || userConnection}
       <!-- Connection Info -->
       <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4 mb-2">Connection</p>
       <div class="flex justify-between text-sm py-1 border-b border-slate-50">
         <span class="text-slate-500">VPN IPv4</span>
-        <span class="text-slate-700 font-medium font-mono text-xs">{detail.ipv4 || '—'}</span>
+        <span class="text-slate-700 font-medium font-mono text-xs">{detail?.ipv4 || userConnection?.ipv4 || session?.vpnAddress || '—'}</span>
       </div>
-      <div class="flex justify-between text-sm py-1 border-b border-slate-50">
-        <span class="text-slate-500">VPN IPv6</span>
-        <span class="text-slate-700 font-medium font-mono text-xs">{detail.ipv6 || '—'}</span>
-      </div>
+      {#if detail?.ipv6}
+        <div class="flex justify-between text-sm py-1 border-b border-slate-50">
+          <span class="text-slate-500">VPN IPv6</span>
+          <span class="text-slate-700 font-medium font-mono text-xs">{detail.ipv6}</span>
+        </div>
+      {/if}
       <div class="flex justify-between text-sm py-1 border-b border-slate-50">
         <span class="text-slate-500">Client IP</span>
-        <span class="text-slate-700 font-medium font-mono text-xs">{detail.remoteAddress || '—'}</span>
+        <span class="text-slate-700 font-medium font-mono text-xs">{detail?.remoteAddress || userConnection?.remoteIp || session?.remoteAddress || '—'}</span>
       </div>
       <div class="flex justify-between text-sm py-1 border-b border-slate-50">
         <span class="text-slate-500">Connected</span>
-        <span class="text-slate-700 font-medium text-right">{formatAbsoluteTime(detail.connectedAt)}</span>
+        <span class="text-slate-700 font-medium text-right">{formatAbsoluteTime(detail?.connectedAt || userConnection?.connectedAt)}</span>
       </div>
       <div class="flex justify-between text-sm py-1 border-b border-slate-50">
         <span class="text-slate-500">Duration</span>
-        <span class="text-slate-700 font-medium">{formatDurationSecs(detail.durationSeconds)}</span>
+        <span class="text-slate-700 font-medium">{formatDurationSecs(detail?.durationSeconds ?? computeDurationSecs(userConnection?.connectedAt))}</span>
       </div>
       <div class="flex justify-between text-sm py-1 border-b border-slate-50">
         <span class="text-slate-500">Device</span>
-        <span class="text-slate-700 font-medium">{detail.device || '—'}</span>
+        <span class="text-slate-700 font-medium">{detail?.device || userConnection?.device || session?.device || '—'}</span>
       </div>
+      <div class="flex justify-between text-sm py-1 border-b border-slate-50">
+        <span class="text-slate-500">State</span>
+        <span class="text-slate-700 font-medium">{detail?.state || userConnection?.state || session?.state || '—'}</span>
+      </div>
+      {#if displayGroupname(detail?.groupname || userConnection?.groupname || session?.groupname)}
+        <div class="flex justify-between text-sm py-1 border-b border-slate-50">
+          <span class="text-slate-500">Group</span>
+          <span class="text-slate-700 font-medium">{displayGroupname(detail?.groupname || userConnection?.groupname || session?.groupname)}</span>
+        </div>
+      {/if}
+      {#if detail?.vhost || userConnection?.vhost || session?.vhost}
+        <div class="flex justify-between text-sm py-1 border-b border-slate-50">
+          <span class="text-slate-500">Virtual Host</span>
+          <span class="text-slate-700 font-medium">{detail?.vhost || userConnection?.vhost || session?.vhost || '—'}</span>
+        </div>
+      {/if}
+      {#if userConnection?.hostname}
+        <div class="flex justify-between text-sm py-1 border-b border-slate-50">
+          <span class="text-slate-500">Hostname</span>
+          <span class="text-slate-700 font-medium">{userConnection.hostname}</span>
+        </div>
+      {/if}
 
       <!-- Traffic -->
       <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4 mb-2">Traffic</p>
       <div class="flex justify-between text-sm py-1 border-b border-slate-50">
         <span class="text-slate-500">Received</span>
-        <span class="text-slate-700 font-medium">{formatBytes(detail.rxBytes)}</span>
+        <span class="text-slate-700 font-medium">{formatBytes(detail?.rxBytes ?? userConnection?.rxBytes ?? 0)}</span>
       </div>
       <div class="flex justify-between text-sm py-1 border-b border-slate-50">
         <span class="text-slate-500">Transmitted</span>
-        <span class="text-slate-700 font-medium">{formatBytes(detail.txBytes)}</span>
+        <span class="text-slate-700 font-medium">{formatBytes(detail?.txBytes ?? userConnection?.txBytes ?? 0)}</span>
       </div>
+      {#if userConnection}
+        <div class="flex justify-between text-sm py-1 border-b border-slate-50">
+          <span class="text-slate-500">Avg Download</span>
+          <span class="text-slate-700 font-medium">{userConnection.avgRxBandwidth || '—'}</span>
+        </div>
+        <div class="flex justify-between text-sm py-1 border-b border-slate-50">
+          <span class="text-slate-500">Avg Upload</span>
+          <span class="text-slate-700 font-medium">{userConnection.avgTxBandwidth || '—'}</span>
+        </div>
+      {/if}
 
       <!-- Client -->
       <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4 mb-2">Client</p>
       <div class="flex justify-between text-sm py-1 border-b border-slate-50">
         <span class="text-slate-500">User Agent</span>
-        <span class="text-slate-700 font-medium text-right max-w-[60%] break-words">{detail.userAgent || '—'}</span>
+        <span class="text-slate-700 font-medium text-right max-w-[60%] break-words">{detail?.userAgent || userConnection?.userAgent || '—'}</span>
       </div>
-      <div class="flex justify-between text-sm py-1 border-b border-slate-50">
-        <span class="text-slate-500">Stability</span>
-        {#if detail.reconnectCount > 2}
-          <span class="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-700">
-            {detail.reconnectCount} reconnects
-          </span>
-        {:else}
-          <span class="text-slate-700 font-medium">Stable</span>
-        {/if}
-      </div>
+      {#if detail}
+        <div class="flex justify-between text-sm py-1 border-b border-slate-50">
+          <span class="text-slate-500">Stability</span>
+          {#if detail.reconnectCount > 2}
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-700">
+              {detail.reconnectCount} reconnects
+            </span>
+          {:else}
+            <span class="text-slate-700 font-medium">Stable</span>
+          {/if}
+        </div>
+      {/if}
 
       <!-- Security Section (new) -->
       {#if userConnection}
@@ -191,9 +238,9 @@
 
       <!-- Routes -->
       <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4 mb-2">Assigned Routes</p>
-      {#if detail.routes && detail.routes.length > 0}
+      {#if (detail?.routes && detail.routes.length > 0) || (userConnection?.routes && userConnection.routes.length > 0)}
         <ul class="space-y-0.5">
-          {#each detail.routes as route}
+          {#each (detail?.routes ?? userConnection?.routes ?? []) as route}
             <li class="text-xs font-mono text-slate-700 py-0.5">{route}</li>
           {/each}
         </ul>
@@ -203,9 +250,9 @@
 
       <!-- DNS -->
       <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4 mb-2">Assigned DNS</p>
-      {#if detail.dns && detail.dns.length > 0}
+      {#if (detail?.dns && detail.dns.length > 0) || (userConnection?.dns && userConnection.dns.length > 0)}
         <ul class="space-y-0.5">
-          {#each detail.dns as entry}
+          {#each (detail?.dns ?? userConnection?.dns ?? []) as entry}
             <li class="text-xs font-mono text-slate-700 py-0.5">{entry}</li>
           {/each}
         </ul>

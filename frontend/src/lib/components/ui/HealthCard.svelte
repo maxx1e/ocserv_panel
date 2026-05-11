@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatRelativeTime } from '$lib/utils/format';
+  import HealthTooltip from '$lib/components/ui/HealthTooltip.svelte';
 
   export type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 
@@ -7,6 +8,11 @@
     label: string;
     status: HealthStatus;
     detail?: string;
+    tooltip?: {
+      title?: string;
+      description: string;
+      action?: string;
+    } | null;
   };
 
   type Props = {
@@ -49,9 +55,9 @@
   );
 
   const CARD_BORDER: Record<HealthStatus, string> = {
-    healthy:  'border-emerald-200',
-    warning:  'border-amber-200',
-    critical: 'border-red-200',
+    healthy:  'border-slate-200',
+    warning:  'border-slate-200 border-l-4 border-l-amber-400',
+    critical: 'border-slate-200 border-l-4 border-l-red-400',
     unknown:  'border-slate-200',
   };
 </script>
@@ -77,7 +83,20 @@
         <div class="min-w-0 flex-1">
           <div class="flex items-baseline justify-between gap-2">
             <span class="text-sm text-slate-700">{item.label}</span>
-            <span class="text-xs font-medium {STATUS_TEXT[item.status]}">{STATUS_LABEL[item.status]}</span>
+            <span class="inline-flex items-center gap-1">
+              <span class="text-xs font-medium {STATUS_TEXT[item.status]}">{STATUS_LABEL[item.status]}</span>
+              {#if item.tooltip}
+                <HealthTooltip content={item.tooltip}>
+                  <button type="button" tabindex="0" aria-label="More information about {item.label}" class="inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded">
+                    <svg class="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 transition-colors cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 16v-4" />
+                      <path d="M12 8h.01" />
+                    </svg>
+                  </button>
+                </HealthTooltip>
+              {/if}
+            </span>
           </div>
           {#if item.detail}
             <p class="text-xs text-slate-500 mt-0.5 break-words">{item.detail}</p>

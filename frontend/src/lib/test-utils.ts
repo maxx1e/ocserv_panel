@@ -12,6 +12,9 @@ export function makeSession(overrides: Partial<OcservSession> = {}): OcservSessi
     userAgent: 'AnyConnect',
     device: 'Linux',
     reconnectCount: 0,
+    state: 'connected',
+    groupname: '(none)',
+    vhost: 'default',
     ...overrides
   };
 }
@@ -33,6 +36,9 @@ export function makeSessionDetail(overrides: Partial<OcservSessionDetail> = {}):
     routes: ['0.0.0.0/0'],
     dns: ['8.8.8.8'],
     reconnectCount: 0,
+    state: 'connected',
+    groupname: '(none)',
+    vhost: 'default',
     ...overrides
   };
 }
