@@ -22,8 +22,7 @@ export const settingDescriptions: Record<string, string> = {
   'service.user': 'System user under which the panel service runs.',
   'service.group': 'System group under which the panel service runs.',
   'service.start_on_boot': 'Automatically start the panel service when the system boots.',
-  'service.restart_on_failure': 'Automatically restart the service if it crashes.',
-  'service.maintenance_mode': 'Enable maintenance mode to block user access during upgrades.',
+'service.maintenance_mode': 'Enable maintenance mode to block user access during upgrades.',
   'service.systemd_unit_name': 'Name of the systemd unit controlling the ocserv process (used for start/stop/restart operations).',
 
   // Web Access
