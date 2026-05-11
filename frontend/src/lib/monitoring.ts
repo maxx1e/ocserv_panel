@@ -285,8 +285,9 @@ export function seriesStats(data: { value: number }[]): { min: number; max: numb
   return { min, max, avg: sum / data.length };
 }
 
-export function formatTooltipTime(d: Date, window: string): string {
-  if (window === '24h') {
+export function formatTooltipTime(d: Date, timeWindow: string): string {
+  if (timeWindow === '24h') {
+    // Use local time for display — callers store UTC but users see their timezone
     const hh = d.getHours().toString().padStart(2, '0');
     const mm = d.getMinutes().toString().padStart(2, '0');
     return `${hh}:${mm}`;

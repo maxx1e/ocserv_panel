@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { seriesStats, formatTooltipTime, formatMetricValue } from './monitoring';
+import { seriesStats, formatTooltipTime } from './monitoring';
 
 describe('seriesStats', () => {
   it('returns min, max, avg for a populated series', () => {
@@ -28,13 +28,14 @@ describe('formatTooltipTime', () => {
   it('returns date+time for 7d window', () => {
     const d = new Date('2026-05-11T14:30:00Z');
     const result = formatTooltipTime(d, '7d');
-    // Should contain a day number and time
-    expect(result.length).toBeGreaterThan(6);
+    expect(result).toMatch(/\d/);  // contains a digit (day or hour)
+    expect(result).toMatch(/:/);   // contains colon from time portion
   });
 
   it('returns date+time for 30d window', () => {
     const d = new Date('2026-05-11T14:30:00Z');
     const result = formatTooltipTime(d, '30d');
-    expect(result.length).toBeGreaterThan(6);
+    expect(result).toMatch(/\d/);
+    expect(result).toMatch(/:/);
   });
 });
