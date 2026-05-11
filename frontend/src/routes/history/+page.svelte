@@ -137,6 +137,7 @@
   let usersSortDir = $state<'asc' | 'desc'>('desc');
 
   // --- Bans tab state ---
+  let bansWindow = $state('all');
   let bansPage = $state(1);
   let bansData = $state<BanEventPage | null>(null);
   let bansLoading = $state(false);
@@ -348,12 +349,18 @@
     bansLoading = true;
     bansError = '';
     try {
-      bansData = await listHistoricalBans(bansPage);
+      bansData = await listHistoricalBans(bansPage, 25, bansWindow);
     } catch (e) {
       bansError = e instanceof Error ? e.message : 'Failed to load ban history';
     } finally {
       bansLoading = false;
     }
+  }
+
+  function handleBansWindowChange(nextWindow: string) {
+    bansWindow = nextWindow;
+    bansPage = 1;
+    void loadBans();
   }
 
   async function handleUnban() {
@@ -896,12 +903,19 @@
     <div class="space-y-4">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <h2 class="text-base font-semibold text-slate-800 dark:text-slate-200">IP Ban History</h2>
-        <input
-          type="search"
-          placeholder="Filter by IP..."
-          bind:value={bansSearch}
-          class="px-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200"
-        />
+        <div class="flex items-center gap-3">
+          <WindowSelector
+            value={bansWindow}
+            windows={['24h', '7d', '30d', 'all']}
+            onchange={handleBansWindowChange}
+          />
+          <input
+            type="search"
+            placeholder="Filter by IP..."
+            bind:value={bansSearch}
+            class="px-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200"
+          />
+        </div>
       </div>
 
       {#if bansLoading}

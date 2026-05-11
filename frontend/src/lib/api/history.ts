@@ -104,6 +104,6 @@ export function getUserTraffic(username: string, window: string): Promise<UserTr
   );
 }
 
-export function listHistoricalBans(page = 1, limit = 25): Promise<BanEventPage> {
-  return apiFetch<BanEventPage>(`/api/history/bans?page=${page}&limit=${limit}`);
+export function listHistoricalBans(page = 1, limit = 25, window = 'all'): Promise<BanEventPage> {
+  return apiFetch<BanEventPage>(`/api/history/bans?page=${page}&limit=${limit}&window=${encodeURIComponent(window)}`);
 }
