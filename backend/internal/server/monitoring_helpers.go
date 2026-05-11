@@ -43,9 +43,11 @@ func (a *App) buildSystemInfo(ctx context.Context) systemInfoResponse {
 		info.NetInterface = lbls["interface"]
 	}
 
-	if lbls, err := a.metricStore.QueryLatestLabels(ctx, monitor.MetricVPNInterfaceRXBytes); err == nil {
-		if iface := lbls["interface"]; iface != "" {
-			info.VPNInterfaces = []string{iface}
+	if labelSets, err := a.metricStore.QueryAllLabels(ctx, monitor.MetricVPNInterfaceRXBytes); err == nil {
+		for _, ls := range labelSets {
+			if iface := ls["interface"]; iface != "" {
+				info.VPNInterfaces = append(info.VPNInterfaces, iface)
+			}
 		}
 	}
 

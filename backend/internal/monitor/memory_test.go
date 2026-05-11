@@ -332,3 +332,79 @@ func TestMemoryStore_QueryLatestLabels_ClosedStore(t *testing.T) {
 		t.Fatalf("QueryLatestLabels error = %v, want %v", err, ErrStoreClosed)
 	}
 }
+
+func TestMemoryStore_QueryAllLabels(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+
+	err := store.Append(ctx, []Sample{
+		{
+			Name:      MetricVPNInterfaceRXBytes,
+			Labels:    map[string]string{"interface": "vpns0"},
+			Timestamp: now,
+			Value:     100,
+		},
+		{
+			Name:      MetricVPNInterfaceRXBytes,
+			Labels:    map[string]string{"interface": "vpns1"},
+			Timestamp: now.Add(time.Minute),
+			Value:     200,
+		},
+		{
+			Name:      MetricVPNInterfaceRXBytes,
+			Labels:    map[string]string{"interface": "vpns0"},
+			Timestamp: now.Add(2 * time.Minute),
+			Value:     300,
+		},
+		{
+			Name:      MetricVPNInterfaceTXBytes,
+			Labels:    map[string]string{"interface": "vpns2"},
+			Timestamp: now,
+			Value:     50,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	labelSets, err := store.QueryAllLabels(ctx, MetricVPNInterfaceRXBytes)
+	if err != nil {
+		t.Fatalf("QueryAllLabels: %v", err)
+	}
+	if len(labelSets) != 2 {
+		t.Fatalf("expected 2 distinct label sets, got %d: %v", len(labelSets), labelSets)
+	}
+
+	found := map[string]bool{}
+	for _, ls := range labelSets {
+		found[ls["interface"]] = true
+	}
+	if !found["vpns0"] || !found["vpns1"] {
+		t.Fatalf("expected vpns0 and vpns1 in results, got %v", found)
+	}
+}
+
+func TestMemoryStore_QueryAllLabels_NoData(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+
+	labelSets, err := store.QueryAllLabels(ctx, MetricVPNInterfaceRXBytes)
+	if err != nil {
+		t.Fatalf("QueryAllLabels on empty store: %v", err)
+	}
+	if len(labelSets) != 0 {
+		t.Fatalf("expected empty result, got %v", labelSets)
+	}
+}
+
+func TestMemoryStore_QueryAllLabels_ClosedStore(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	store.Close()
+
+	_, err := store.QueryAllLabels(ctx, MetricVPNInterfaceRXBytes)
+	if !errors.Is(err, ErrStoreClosed) {
+		t.Fatalf("QueryAllLabels error = %v, want %v", err, ErrStoreClosed)
+	}
+}

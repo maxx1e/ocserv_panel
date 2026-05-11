@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -155,6 +157,8 @@ type Store interface {
 	Append(ctx context.Context, samples []Sample) error
 	QueryRange(ctx context.Context, query Query) (Series, error)
 	QueryLatestLabels(ctx context.Context, metric MetricName) (map[string]string, error)
+	// QueryAllLabels returns all distinct label sets ever seen for the given metric.
+	QueryAllLabels(ctx context.Context, metric MetricName) ([]map[string]string, error)
 	Close() error
 }
 
@@ -217,4 +221,18 @@ func cloneLabels(labels map[string]string) map[string]string {
 	}
 
 	return cloned
+}
+
+// labelsKey returns a stable string key for a label set, used for deduplication.
+func labelsKey(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(labels))
+	for _, k := range keys {
+		parts = append(parts, k+"="+labels[k])
+	}
+	return strings.Join(parts, ",")
 }

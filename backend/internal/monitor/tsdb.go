@@ -207,6 +207,53 @@ func (s *TSDBStore) QueryLatestLabels(ctx context.Context, metric MetricName) (m
 	return map[string]string{}, nil
 }
 
+func (s *TSDBStore) QueryAllLabels(ctx context.Context, metric MetricName) ([]map[string]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	now := time.Now().UTC()
+	querier, err := s.db.Querier(now.Add(-30*24*time.Hour).UnixMilli(), now.UnixMilli())
+	if err != nil {
+		return nil, fmt.Errorf("monitor.TSDBStore.QueryAllLabels: %w", err)
+	}
+	defer querier.Close()
+
+	matchers := []*labels.Matcher{
+		labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, string(metric)),
+	}
+	sets := querier.Select(ctx, false, nil, matchers...)
+
+	seen := map[string]bool{}
+	var result []map[string]string
+	for sets.Next() {
+		series := sets.At()
+		lbls := series.Labels()
+		labelMap := make(map[string]string, lbls.Len())
+		lbls.Range(func(l labels.Label) {
+			if l.Name != labels.MetricName {
+				labelMap[l.Name] = l.Value
+			}
+		})
+		key := labelsKey(labelMap)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, labelMap)
+	}
+	if err := sets.Err(); err != nil {
+		return nil, fmt.Errorf("monitor.TSDBStore.QueryAllLabels: %w", err)
+	}
+	return result, nil
+}
+
 func labelsForSample(sample Sample) labels.Labels {
 	labelMap := cloneLabels(sample.Labels)
 	labelMap[labels.MetricName] = string(sample.Name)

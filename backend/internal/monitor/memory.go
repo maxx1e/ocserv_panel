@@ -145,6 +145,34 @@ func (s *MemoryStore) QueryLatestLabels(ctx context.Context, metric MetricName) 
 	return cloneLabels(latest.Labels), nil
 }
 
+func (s *MemoryStore) QueryAllLabels(ctx context.Context, metric MetricName) ([]map[string]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+
+	seen := map[string]bool{}
+	var result []map[string]string
+	for i := range s.samples {
+		sample := &s.samples[i]
+		if sample.Name != metric {
+			continue
+		}
+		key := labelsKey(sample.Labels)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, cloneLabels(sample.Labels))
+	}
+	return result, nil
+}
+
 func (s *MemoryStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

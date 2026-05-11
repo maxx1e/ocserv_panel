@@ -474,6 +474,10 @@ func (s *failingStore) QueryLatestLabels(_ context.Context, _ MetricName) (map[s
 	return map[string]string{}, nil
 }
 
+func (s *failingStore) QueryAllLabels(_ context.Context, _ MetricName) ([]map[string]string, error) {
+	return nil, nil
+}
+
 func (s *failingStore) Close() error {
 	return nil
 }

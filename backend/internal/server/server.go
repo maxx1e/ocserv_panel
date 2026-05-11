@@ -809,20 +809,61 @@ func (a *App) handleMonitoringOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := a.now().UTC()
+	vpnMetrics := map[monitor.MetricName]bool{
+		monitor.MetricVPNInterfaceRXBytes: true,
+		monitor.MetricVPNInterfaceTXBytes: true,
+	}
+
 	series := make([]monitor.Series, 0, len(monitoringOverviewMetrics))
 	for _, name := range monitoringOverviewMetrics {
-		item, err := a.metricStore.QueryRange(r.Context(), monitor.Query{
-			Metric: name,
-			Labels: map[string]string{},
-			Start:  now.Add(-windowDuration),
-			End:    now,
-			Step:   stepDuration,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
+		if vpnMetrics[name] {
+			labelSets, qErr := a.metricStore.QueryAllLabels(r.Context(), name)
+			if qErr != nil {
+				labelSets = nil
+			}
+			if len(labelSets) == 0 {
+				// No interfaces registered yet — emit a single empty series.
+				item, rangeErr := a.metricStore.QueryRange(r.Context(), monitor.Query{
+					Metric: name,
+					Labels: map[string]string{},
+					Start:  now.Add(-windowDuration),
+					End:    now,
+					Step:   stepDuration,
+				})
+				if rangeErr != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				series = append(series, item)
+				continue
+			}
+			for _, labels := range labelSets {
+				item, rangeErr := a.metricStore.QueryRange(r.Context(), monitor.Query{
+					Metric: name,
+					Labels: labels,
+					Start:  now.Add(-windowDuration),
+					End:    now,
+					Step:   stepDuration,
+				})
+				if rangeErr != nil {
+					continue
+				}
+				series = append(series, item)
+			}
+		} else {
+			item, rangeErr := a.metricStore.QueryRange(r.Context(), monitor.Query{
+				Metric: name,
+				Labels: map[string]string{},
+				Start:  now.Add(-windowDuration),
+				End:    now,
+				Step:   stepDuration,
+			})
+			if rangeErr != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			series = append(series, item)
 		}
-		series = append(series, item)
 	}
 
 	writeJSON(w, http.StatusOK, monitoringOverviewResponse{

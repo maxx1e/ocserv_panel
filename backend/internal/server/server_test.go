@@ -409,6 +409,76 @@ func TestMonitoringEndpointsDenyUsersWithoutDashboardRead(t *testing.T) {
 	assertJSONField(t, rec, "error", "permission denied")
 }
 
+func TestMonitoringOverviewMultipleVPNInterfaces(t *testing.T) {
+	h := newTestHarness(t)
+	h.createOwner(t, "owner", "owner-password")
+	cookie := h.login(t, "owner", "owner-password")
+
+	now := time.Now().UTC()
+	err := h.metricStore.Append(context.Background(), []monitor.Sample{
+		{
+			Name:      monitor.MetricVPNInterfaceRXBytes,
+			Labels:    map[string]string{"interface": "vpns0"},
+			Timestamp: now.Add(-5 * time.Minute),
+			Value:     1000,
+		},
+		{
+			Name:      monitor.MetricVPNInterfaceRXBytes,
+			Labels:    map[string]string{"interface": "vpns1"},
+			Timestamp: now.Add(-5 * time.Minute),
+			Value:     2000,
+		},
+		{
+			Name:      monitor.MetricVPNInterfaceTXBytes,
+			Labels:    map[string]string{"interface": "vpns0"},
+			Timestamp: now.Add(-5 * time.Minute),
+			Value:     500,
+		},
+		{
+			Name:      monitor.MetricVPNInterfaceTXBytes,
+			Labels:    map[string]string{"interface": "vpns1"},
+			Timestamp: now.Add(-5 * time.Minute),
+			Value:     600,
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed VPN samples: %v", err)
+	}
+
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/monitoring/overview?window=1h", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body monitoringOverviewResponse
+	decodeJSON(t, rec, &body)
+
+	// Count VPN RX and TX series
+	var vpnRXSeries, vpnTXSeries []monitor.Series
+	for _, s := range body.Series {
+		if s.Metric == monitor.MetricVPNInterfaceRXBytes {
+			vpnRXSeries = append(vpnRXSeries, s)
+		}
+		if s.Metric == monitor.MetricVPNInterfaceTXBytes {
+			vpnTXSeries = append(vpnTXSeries, s)
+		}
+	}
+
+	if len(vpnRXSeries) != 2 {
+		t.Fatalf("expected 2 VPN RX series, got %d", len(vpnRXSeries))
+	}
+	if len(vpnTXSeries) != 2 {
+		t.Fatalf("expected 2 VPN TX series, got %d", len(vpnTXSeries))
+	}
+
+	// Verify distinct interface labels
+	rxInterfaces := map[string]bool{}
+	for _, s := range vpnRXSeries {
+		rxInterfaces[s.Labels["interface"]] = true
+	}
+	if !rxInterfaces["vpns0"] || !rxInterfaces["vpns1"] {
+		t.Fatalf("expected vpns0 and vpns1 in RX series labels, got %v", rxInterfaces)
+	}
+}
+
 func TestDashboardSummaryIncludesRequiredStatusAndLocalData(t *testing.T) {
 	h := newTestHarness(t)
 	h.createOwner(t, "owner", "owner-password")
@@ -594,10 +664,11 @@ func TestRepresentativeWrongMethodsReturn405(t *testing.T) {
 }
 
 type testHarness struct {
-	database   *sql.DB
-	store      *store.Store
-	router     http.Handler
-	ocservFake *sessions.FakeManager
+	database    *sql.DB
+	store       *store.Store
+	router      http.Handler
+	ocservFake  *sessions.FakeManager
+	metricStore *monitor.MemoryStore
 }
 
 func newTestHarness(t *testing.T) *testHarness {
@@ -657,9 +728,10 @@ func newTestHarnessWithCookieSecure(t *testing.T, cookieSecure bool) *testHarnes
 	)
 
 	return &testHarness{
-		database:   database,
-		store:      s,
-		ocservFake: fakeManager,
+		database:    database,
+		store:       s,
+		ocservFake:  fakeManager,
+		metricStore: memStore,
 		router: NewAppRouter(
 			authService,
 			dashboardService,
