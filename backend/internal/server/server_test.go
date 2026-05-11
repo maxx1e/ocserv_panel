@@ -1064,7 +1064,7 @@ func TestHandleRestartStatusAfterConfigUpdate(t *testing.T) {
 		h.router,
 		http.MethodPut,
 		"/api/settings/installation.ocserv_bin_path",
-		map[string]string{"value": "/usr/sbin/ocserv"},
+		map[string]string{"value": "/usr/local/sbin/ocserv"},
 		token,
 	)
 	assertStatus(t, updateRec, http.StatusOK)
@@ -1332,13 +1332,19 @@ func TestHistoryUserSessionsReturnsSessionsForUser(t *testing.T) {
 	}
 }
 
-func TestHistoryUserSessionsUnknownUserReturns404(t *testing.T) {
+func TestHistoryUserSessionsReturnsEmptyArrayWhenNoSessions(t *testing.T) {
 	h := newTestHarness(t)
 	h.createOwner(t, "owner", "owner-password")
 
 	cookie := h.login(t, "owner", "owner-password")
-	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users/nobody?window=24h", nil, cookie)
-	assertStatus(t, rec, http.StatusNotFound)
+	rec := serveAPI(t, h.router, http.MethodGet, "/api/history/users/nobody?window=7d", nil, cookie)
+	assertStatus(t, rec, http.StatusOK)
+
+	var body []map[string]any
+	decodeJSON(t, rec, &body)
+	if len(body) != 0 {
+		t.Fatalf("expected empty array, got %d items", len(body))
+	}
 }
 
 func TestHistoryUsersViewerCanRead(t *testing.T) {

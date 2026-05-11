@@ -597,10 +597,6 @@ func (a *App) handleHistoryUserSessions(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	if len(sessions) == 0 {
-		writeError(w, http.StatusNotFound, "no sessions found for user in this window")
-		return
-	}
 	resp := make([]historicalSessionResponse, 0, len(sessions))
 	for _, s := range sessions {
 		resp = append(resp, historicalSessionResponse{
