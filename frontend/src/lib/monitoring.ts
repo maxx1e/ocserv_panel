@@ -271,3 +271,30 @@ export function getChartColorVar(metric: string): string {
   };
   return map[metric] ?? 'var(--chart-1)';
 }
+
+export function seriesStats(data: { value: number }[]): { min: number; max: number; avg: number } {
+  if (data.length === 0) return { min: 0, max: 0, avg: 0 };
+  let min = data[0].value;
+  let max = data[0].value;
+  let sum = 0;
+  for (const d of data) {
+    if (d.value < min) min = d.value;
+    if (d.value > max) max = d.value;
+    sum += d.value;
+  }
+  return { min, max, avg: sum / data.length };
+}
+
+export function formatTooltipTime(d: Date, window: string): string {
+  if (window === '24h') {
+    const hh = d.getHours().toString().padStart(2, '0');
+    const mm = d.getMinutes().toString().padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+  return d.toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
