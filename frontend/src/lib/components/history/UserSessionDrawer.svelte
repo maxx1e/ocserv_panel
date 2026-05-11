@@ -169,7 +169,11 @@
                     {formatRelativeTime(session.connectedAt ?? session.startedAt)}
                   </td>
                   <td class="px-4 py-2 text-slate-700" title={session.disconnectedAt ?? session.endedAt ?? ''}>
-                    {formatRelativeTime(session.disconnectedAt ?? session.endedAt)}
+                    {#if session.state === 'authenticated' || session.state === 'connected'}
+                      <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">Active</span>
+                    {:else}
+                      {formatRelativeTime(session.disconnectedAt ?? session.endedAt)}
+                    {/if}
                   </td>
                   <td class="px-4 py-2 text-slate-700">{sessionDuration(session)}</td>
                   <td class="px-4 py-2 text-slate-700">{formatBytes(session.bytesIn ?? session.rxBytes ?? 0)}</td>

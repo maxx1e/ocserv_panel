@@ -698,7 +698,13 @@
                 >
                   <td class="px-4 py-2 font-mono text-xs text-slate-800 dark:text-slate-200">{session.username ?? '—'}</td>
                   <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">{formatAbsoluteTime(session.connectedAt ?? session.startedAt)}</td>
-                  <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">{formatAbsoluteTime(session.disconnectedAt ?? session.endedAt)}</td>
+                  <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">
+                    {#if session.state === 'authenticated' || session.state === 'connected'}
+                      <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">Active</span>
+                    {:else}
+                      {formatAbsoluteTime(session.disconnectedAt ?? session.endedAt)}
+                    {/if}
+                  </td>
                   <td class="px-4 py-2 text-slate-600 text-xs dark:text-slate-400">{formatDuration(session.durationSeconds ?? 0)}</td>
                   <td class="px-4 py-2 text-right text-xs">{formatBytes(session.bytesIn ?? session.rxBytes ?? 0)}</td>
                   <td class="px-4 py-2 text-right text-xs">{formatBytes(session.bytesOut ?? session.txBytes ?? 0)}</td>
