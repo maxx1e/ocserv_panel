@@ -78,14 +78,13 @@ func (a *App) handleRestart(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.authorizer.Allowed(principalRoles(principal), rbac.PermissionSettingsRestart) {
-		writeError(w, http.StatusForbidden, "permission denied")
+	if err := a.ocservService.RestartPanelService(r.Context(), principal); err != nil {
+		a.writeAppError(w, err)
 		return
 	}
-	// Placeholder: actual restart will be wired in a later task.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
-		"message": "restart not yet implemented",
+		"message": "restart initiated",
 	})
 }
 
