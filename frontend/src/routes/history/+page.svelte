@@ -245,7 +245,7 @@
   const filteredBanRows = $derived(
     mergedBanRows.filter(r => {
       if (bansStatusFilter !== 'all' && r.status !== bansStatusFilter) return false;
-      if (bansSearch && !r.ip.includes(bansSearch)) return false;
+      if (bansSearch && !r.ip.toLowerCase().includes(bansSearch.toLowerCase())) return false;
       return true;
     })
   );
