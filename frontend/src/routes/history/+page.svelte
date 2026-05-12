@@ -22,6 +22,7 @@
     listHistoricalBans,
     getUserTraffic,
     getConnectedUsers,
+    getBanPoints,
     unbanIP,
     principalFromAuth,
     purgeHistory,
@@ -37,7 +38,8 @@
     type UserSessionSummary,
     type UserTrafficResponse,
     type BanEvent,
-    type BanEventPage
+    type BanEventPage,
+    type BanPointEntry
   } from '$lib/api';
   import { formatBytes, metricByName, seriesByMetric, allSeriesForMetric } from '$lib/monitoring';
 
@@ -129,12 +131,26 @@
   let usersSortDir = $state<'asc' | 'desc'>('desc');
 
   // --- Bans tab state ---
+  type BanStatus = 'banned' | 'watching' | 'known' | 'unbanned';
+  type MergedBanRow = {
+    ip: string;
+    score: number;
+    reason: string;
+    bannedAt: string | null;
+    unbannedAt: string | null;
+    status: BanStatus;
+  };
+
+  const BAN_WATCHING_THRESHOLD = 50;
+
   let bansWindow = $state('all');
   let bansPage = $state(1);
   let bansData = $state<BanEventPage | null>(null);
   let bansLoading = $state(false);
   let bansError = $state('');
   let bansSearch = $state('');
+  let banPoints = $state<BanPointEntry[]>([]);
+  let bansStatusFilter = $state<'all' | BanStatus>('all');
   let unbanTarget = $state<string | null>(null);
   let unbanSubmitting = $state(false);
   let unbanError = $state('');
@@ -185,6 +201,61 @@
       .filter(chart => !shouldShowChart(chart.metric))
       .map(chart => ({ name: chart.title, reason: unavailableReason(chart.metric) }))
   );
+
+  // --- Bans derived ---
+  const mergedBanRows = $derived<MergedBanRow[]>((() => {
+    const rows: MergedBanRow[] = banPoints.map(bp => {
+      const hist = bansData?.events.find(e => e.ip === bp.ip);
+      let status: BanStatus;
+      if (hist && !hist.unbannedAt) {
+        status = 'banned';
+      } else if (hist && hist.unbannedAt) {
+        status = 'unbanned';
+      } else {
+        status = bp.score >= BAN_WATCHING_THRESHOLD ? 'watching' : 'known';
+      }
+      return {
+        ip: bp.ip,
+        score: bp.score,
+        reason: hist?.reason ?? '',
+        bannedAt: hist?.bannedAt ?? null,
+        unbannedAt: hist?.unbannedAt ?? null,
+        status,
+      };
+    });
+
+    if (bansData) {
+      for (const evt of bansData.events) {
+        if (!rows.find(r => r.ip === evt.ip)) {
+          rows.push({
+            ip: evt.ip,
+            score: evt.score,
+            reason: evt.reason,
+            bannedAt: evt.bannedAt,
+            unbannedAt: evt.unbannedAt ?? null,
+            status: evt.unbannedAt ? 'unbanned' : 'banned',
+          });
+        }
+      }
+    }
+
+    return rows.sort((a, b) => b.score - a.score);
+  })());
+
+  const filteredBanRows = $derived(
+    mergedBanRows.filter(r => {
+      if (bansStatusFilter !== 'all' && r.status !== bansStatusFilter) return false;
+      if (bansSearch && !r.ip.includes(bansSearch)) return false;
+      return true;
+    })
+  );
+
+  const banCounts = $derived({
+    all: mergedBanRows.length,
+    banned: mergedBanRows.filter(r => r.status === 'banned').length,
+    watching: mergedBanRows.filter(r => r.status === 'watching').length,
+    known: mergedBanRows.filter(r => r.status === 'known' || r.status === 'unbanned').length,
+  });
 
   // VPN per-interface multi-line chart data
   const vpnRXLines = $derived<LineData[]>(
@@ -376,7 +447,12 @@
     bansLoading = true;
     bansError = '';
     try {
-      bansData = await listHistoricalBans(bansPage, 25, bansWindow);
+      const [page, points] = await Promise.all([
+        listHistoricalBans(bansPage, 25, bansWindow),
+        getBanPoints(),
+      ]);
+      bansData = page;
+      banPoints = points;
     } catch (e) {
       bansError = e instanceof Error ? e.message : 'Failed to load ban history';
     } finally {
@@ -911,62 +987,96 @@
   {:else if activeTab === 'bans'}
     <!-- Bans tab -->
     <div class="space-y-4">
-      <div class="flex items-center justify-between flex-wrap gap-3">
-        <h2 class="text-base font-semibold text-slate-800 dark:text-slate-200">IP Ban History</h2>
-        <div class="flex items-center gap-3">
+      <!-- Toolbar -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- Filter chips -->
+        <div class="flex gap-1.5">
+          {#each (['all', 'banned', 'watching', 'known'] as const) as val}
+            {@const label = val === 'all' ? 'All' : val === 'banned' ? 'Banned' : val === 'watching' ? 'Watching' : 'Known'}
+            {@const count = val === 'all' ? banCounts.all : val === 'banned' ? banCounts.banned : val === 'watching' ? banCounts.watching : banCounts.known}
+            <button
+              type="button"
+              onclick={() => bansStatusFilter = val}
+              class="px-3 py-1 text-xs font-medium rounded-full border transition-colors {bansStatusFilter === val
+                ? val === 'banned' ? 'bg-red-100 text-red-700 border-red-200'
+                : val === 'watching' ? 'bg-amber-100 text-amber-700 border-amber-200'
+                : 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}"
+            >
+              {label} ({count})
+            </button>
+          {/each}
+        </div>
+        <!-- Search -->
+        <input
+          type="search"
+          placeholder="Filter by IP..."
+          bind:value={bansSearch}
+          class="px-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 w-36"
+        />
+        <!-- Window selector (right-aligned) -->
+        <div class="ml-auto">
           <WindowSelector
             value={bansWindow}
             windows={['24h', '7d', '30d', 'all']}
             onchange={handleBansWindowChange}
           />
-          <input
-            type="search"
-            placeholder="Filter by IP..."
-            bind:value={bansSearch}
-            class="px-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200"
-          />
         </div>
       </div>
+
+      <p class="text-xs text-slate-400">
+        Showing ban history for last {bansWindow === 'all' ? 'all time' : bansWindow} · Live scores always current
+      </p>
 
       {#if bansLoading}
         <div class="py-8 text-center text-sm text-slate-500">Loading...</div>
       {:else if bansError}
         <div class="py-4 text-sm text-red-600">{bansError}</div>
-      {:else if bansData}
-        {@const filteredBans = bansData.events.filter(e => !bansSearch || e.ip.includes(bansSearch))}
+      {:else}
         <div class="rounded-lg border border-slate-200 overflow-hidden dark:border-slate-700">
           <table class="w-full text-sm">
             <thead class="bg-slate-50 border-b border-slate-200 dark:bg-slate-800 dark:border-slate-700">
               <tr>
-                <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">IP</th>
-                <th class="px-4 py-2 text-right font-medium text-slate-600 dark:text-slate-400">Score</th>
+                <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">IP Address</th>
+                <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400 w-32">Score</th>
                 <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Reason</th>
                 <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Banned At</th>
-                <th class="px-4 py-2 text-left font-medium text-slate-600 dark:text-slate-400">Unbanned At</th>
                 <th class="px-4 py-2 text-center font-medium text-slate-600 dark:text-slate-400">Status</th>
                 {#if isOwner}<th class="px-4 py-2"></th>{/if}
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
-              {#each filteredBans as event}
+              {#each filteredBanRows as row}
+                {@const barColor =
+                  row.status === 'banned' ? 'bg-red-500' :
+                  row.status === 'watching' ? 'bg-amber-400' : 'bg-slate-300'}
+                {@const barWidth = Math.min(100, Math.max(2, row.score))}
+                {@const badgeClass =
+                  row.status === 'banned' ? 'bg-red-100 text-red-700' :
+                  row.status === 'watching' ? 'bg-amber-100 text-amber-700' :
+                  'bg-slate-100 text-slate-600'}
                 <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                  <td class="px-4 py-2 font-mono text-xs text-slate-800 dark:text-slate-200">{event.ip}</td>
-                  <td class="px-4 py-2 text-right text-xs text-slate-600 dark:text-slate-400">{event.score}</td>
-                  <td class="px-4 py-2 text-xs text-slate-600 dark:text-slate-400">{event.reason || '—'}</td>
-                  <td class="px-4 py-2 text-xs text-slate-600 dark:text-slate-400">{formatAbsoluteTime(event.bannedAt)}</td>
-                  <td class="px-4 py-2 text-xs text-slate-600 dark:text-slate-400">{event.unbannedAt ? formatAbsoluteTime(event.unbannedAt) : '—'}</td>
+                  <td class="px-4 py-2 font-mono text-xs text-slate-800 dark:text-slate-200">{row.ip}</td>
+                  <td class="px-4 py-2">
+                    <div class="flex items-center gap-2">
+                      <div class="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div class="{barColor} h-full rounded-full" style="width: {barWidth}%"></div>
+                      </div>
+                      <span class="text-xs font-semibold text-slate-700 dark:text-slate-300 tabular-nums w-8 text-right">{row.score}</span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-2 text-xs text-slate-600 dark:text-slate-400">{row.reason || '—'}</td>
+                  <td class="px-4 py-2 text-xs text-slate-600 dark:text-slate-400">{row.bannedAt ? formatAbsoluteTime(row.bannedAt) : '—'}</td>
                   <td class="px-4 py-2 text-center">
-                    {#if event.unbannedAt}
-                      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">Unbanned</span>
-                    {:else}
-                      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Active</span>
-                    {/if}
+                    <span class="px-2 py-0.5 rounded-full text-xs font-medium capitalize {badgeClass}">
+                      {row.status}
+                    </span>
                   </td>
                   {#if isOwner}
                     <td class="px-4 py-2">
-                      {#if !event.unbannedAt}
+                      {#if row.status === 'banned'}
                         <button
-                          onclick={() => unbanTarget = event.ip}
+                          onclick={() => unbanTarget = row.ip}
                           class="text-xs text-blue-600 hover:underline"
                         >Unban</button>
                       {/if}
@@ -974,25 +1084,31 @@
                   {/if}
                 </tr>
               {/each}
+              {#if filteredBanRows.length === 0}
+                <tr>
+                  <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-400">No entries match the current filter.</td>
+                </tr>
+              {/if}
             </tbody>
           </table>
         </div>
-        <!-- Pagination -->
         <div class="flex items-center justify-between text-sm text-slate-500">
-          <span>{bansData.total} total ban events</span>
-          <div class="flex gap-2">
-            <button
-              disabled={bansPage <= 1}
-              onclick={() => { bansPage--; void loadBans(); }}
-              class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-            >Previous</button>
-            <span class="px-3 py-1">Page {bansPage}</span>
-            <button
-              disabled={bansPage * bansData.limit >= bansData.total}
-              onclick={() => { bansPage++; void loadBans(); }}
-              class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-            >Next</button>
-          </div>
+          <span>{filteredBanRows.length} of {mergedBanRows.length} entries</span>
+          {#if bansData}
+            <div class="flex gap-2">
+              <button
+                disabled={bansPage <= 1}
+                onclick={() => { bansPage--; void loadBans(); }}
+                class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              >Previous</button>
+              <span class="px-3 py-1">Page {bansPage}</span>
+              <button
+                disabled={bansPage * bansData.limit >= bansData.total}
+                onclick={() => { bansPage++; void loadBans(); }}
+                class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              >Next</button>
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
