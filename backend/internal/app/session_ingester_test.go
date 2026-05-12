@@ -260,3 +260,54 @@ func TestSessionIngester_RunStopsOnContextCancel(t *testing.T) {
 		t.Fatal("Run did not exit after context cancellation")
 	}
 }
+
+func TestSessionIngester_PollMarksDisconnectedSessions(t *testing.T) {
+	fixedNow := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	connectedAt := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+
+	// First poll: alice and bob are connected.
+	mgr := &fakeIngesterManager{
+		connectedUsers: []sessions.ConnectedUser{
+			{ID: "1", Username: "alice"},
+			{ID: "2", Username: "bob"},
+		},
+		userDetails: map[string][]sessions.UserConnection{
+			"alice": {{ID: "1", Username: "alice", SessionID: "AliceSess", ConnectedAt: connectedAt, RxBytes: 100, TxBytes: 200}},
+			"bob":   {{ID: "2", Username: "bob", SessionID: "BobSess", ConnectedAt: connectedAt, RxBytes: 300, TxBytes: 400}},
+		},
+	}
+	st := &fakeIngesterStore{}
+	ingester := NewSessionIngester(st, mgr,
+		IngesterWithNow(func() time.Time { return fixedNow }),
+		IngesterWithLogger(zerolog.Nop()),
+	)
+	ctx := context.Background()
+	ingester.poll(ctx)
+
+	// Second poll: only bob is still connected; alice has disconnected.
+	disconnectNow := fixedNow.Add(5 * time.Minute)
+	ingester.now = func() time.Time { return disconnectNow }
+	mgr.connectedUsers = []sessions.ConnectedUser{
+		{ID: "2", Username: "bob"},
+	}
+	ingester.poll(ctx)
+
+	records := st.getRecords()
+	// Find the upsert for alice's session after disconnect (state = "disconnected").
+	var disconnectRec *store.ActiveSessionRecord
+	for i, r := range records {
+		if r.OcservSessionID == "AliceSess" && r.State == "disconnected" {
+			disconnectRec = &records[i]
+			break
+		}
+	}
+	if disconnectRec == nil {
+		t.Fatal("expected a disconnected upsert for AliceSess, got none")
+	}
+	if !disconnectRec.DisconnectedAt.Equal(disconnectNow) {
+		t.Errorf("disconnected_at = %v, want %v", disconnectRec.DisconnectedAt, disconnectNow)
+	}
+	if disconnectRec.Username != "alice" {
+		t.Errorf("username = %q, want %q", disconnectRec.Username, "alice")
+	}
+}

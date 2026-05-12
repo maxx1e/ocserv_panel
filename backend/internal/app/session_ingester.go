@@ -22,15 +22,23 @@ type sessionIngesterManager interface {
 	GetUserDetails(ctx context.Context, username string) ([]sessions.UserConnection, error)
 }
 
+// sessionSnapshot holds just enough state about a previously-seen session to
+// emit a disconnected upsert when the session disappears from the active list.
+type sessionSnapshot struct {
+	username    string
+	connectedAt time.Time
+}
+
 // SessionIngester polls ocserv for connected users and upserts their session
 // data into the historical_sessions table. This bridges the gap between
 // live ocserv state and persisted session history.
 type SessionIngester struct {
-	manager  sessionIngesterManager
-	store    sessionIngesterStore
-	interval time.Duration
-	logger   zerolog.Logger
-	now      func() time.Time
+	manager      sessionIngesterManager
+	store        sessionIngesterStore
+	interval     time.Duration
+	logger       zerolog.Logger
+	now          func() time.Time
+	prevSessions map[string]sessionSnapshot // keyed by ocserv session ID
 }
 
 // SessionIngesterOption configures a SessionIngester.
@@ -91,8 +99,8 @@ func (si *SessionIngester) Run(ctx context.Context) {
 	}
 }
 
-// poll performs a single ingestion cycle: fetch connected users and upsert their
-// session data into the historical sessions table.
+// poll performs a single ingestion cycle: fetch connected users, upsert their
+// session data, and mark disappeared sessions as disconnected.
 func (si *SessionIngester) poll(ctx context.Context) {
 	if err := ctx.Err(); err != nil {
 		return
@@ -104,14 +112,7 @@ func (si *SessionIngester) poll(ctx context.Context) {
 		return
 	}
 
-	if len(users) == 0 {
-		si.logger.Debug().Msg("session ingester: no connected users")
-		return
-	}
-
-	// Deduplicate usernames (a user may have multiple connections shown as
-	// separate ConnectedUser rows, but GetUserDetails returns all connections
-	// for a given username in one call).
+	// Deduplicate usernames.
 	seen := make(map[string]bool, len(users))
 	var uniqueUsernames []string
 	for _, u := range users {
@@ -122,6 +123,7 @@ func (si *SessionIngester) poll(ctx context.Context) {
 	}
 
 	now := si.now()
+	currentSessions := make(map[string]sessionSnapshot)
 	var upserted int
 
 	for _, username := range uniqueUsernames {
@@ -134,14 +136,12 @@ func (si *SessionIngester) poll(ctx context.Context) {
 		for _, conn := range conns {
 			sessionID := conn.SessionID
 			if sessionID == "" {
-				// Without a session ID we cannot reliably upsert; skip.
 				si.logger.Debug().Str("username", username).Str("device", conn.Device).Msg("session ingester: skipping connection without session ID")
 				continue
 			}
 
 			connectedAt := conn.ConnectedAt
 			if connectedAt.IsZero() {
-				// Approximate from now (should not happen with proper parsing).
 				connectedAt = now
 			}
 
@@ -175,8 +175,46 @@ func (si *SessionIngester) poll(ctx context.Context) {
 				continue
 			}
 			upserted++
+			currentSessions[sessionID] = sessionSnapshot{
+				username:    username,
+				connectedAt: connectedAt,
+			}
 		}
 	}
+
+	// Detect disconnects: sessions present in prevSessions but absent from this poll.
+	for sessionID, snap := range si.prevSessions {
+		if _, stillActive := currentSessions[sessionID]; !stillActive {
+			durationSeconds := int64(now.Sub(snap.connectedAt).Seconds())
+			if durationSeconds < 0 {
+				durationSeconds = 0
+			}
+			rec := store.ActiveSessionRecord{
+				OcservSessionID: sessionID,
+				Username:        snap.username,
+				ConnectedAt:     snap.connectedAt,
+				DisconnectedAt:  now,
+				DurationSeconds: durationSeconds,
+				BytesIn:         0,
+				BytesOut:        0,
+				Source:          "ingested",
+				State:           "disconnected",
+			}
+			if err := si.store.UpsertActiveSession(ctx, rec); err != nil {
+				si.logger.Warn().Err(err).
+					Str("username", snap.username).
+					Str("session_id", sessionID).
+					Msg("session ingester: disconnect upsert failed")
+			} else {
+				si.logger.Debug().
+					Str("username", snap.username).
+					Str("session_id", sessionID).
+					Msg("session ingester: marked session disconnected")
+			}
+		}
+	}
+
+	si.prevSessions = currentSessions
 
 	si.logger.Debug().
 		Int("users", len(uniqueUsernames)).
