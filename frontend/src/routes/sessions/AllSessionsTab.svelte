@@ -156,9 +156,17 @@
                       {statusLabel(session)}
                     </span>
                   </td>
-                  <td class="px-4 py-3 font-mono text-xs text-slate-700">{session.vpnAddress || '—'}</td>
+                  <td class="px-4 py-3 font-mono text-xs text-slate-700">
+                    {session.enriched && session.vpnAddress ? session.vpnAddress : '—'}
+                  </td>
                   <td class="px-4 py-3 font-mono text-xs text-slate-700">{session.remoteAddress || '—'}</td>
-                  <td class="px-4 py-3 font-mono text-xs text-slate-700">{formatBytes(session.rxBytes)} / {formatBytes(session.txBytes)}</td>
+                  <td class="px-4 py-3 font-mono text-xs text-slate-700">
+                    {#if session.enriched && (session.rxBytes > 0 || session.txBytes > 0)}
+                      {formatBytes(session.rxBytes)} / {formatBytes(session.txBytes)}
+                    {:else}
+                      —
+                    {/if}
+                  </td>
                   <td class="px-4 py-3 text-sm text-slate-700">{formatRelativeTime(session.connectedAt)}</td>
                   <td class="px-4 py-3 text-sm text-slate-700">{session.userAgent || '—'}</td>
                 </tr>
