@@ -26,14 +26,22 @@
     chartType?: 'line' | 'bar';
     /** Optional custom formatter for X-axis labels on bar charts. Defaults to HH:MM. */
     xLabelFormat?: (d: string) => string;
+    /** When true, renders the Y-axis grid lines as dashed strokes. Defaults to false. */
+    gridDashed?: boolean;
   };
 
-  let { data, metric, height = 160, chartType = 'line', xLabelFormat }: Props = $props();
+  let { data, metric, height = 160, chartType = 'line', xLabelFormat, gridDashed = false }: Props = $props();
 
   const config = $derived(getChartConfig(metric));
   const classes = $derived(getChartClasses(metric));
   const xTickCount = $derived(getXTickCount(data.length));
   const chartColor = $derived(getChartColorVar(metric));
+
+  const gridProp = $derived(
+    gridDashed
+      ? { class: 'stroke-slate-200 [stroke-dasharray:4_4]' }
+      : true
+  );
 
   const chartConfig: ChartConfig = $derived({
     value: { label: metric, color: chartColor },
@@ -82,7 +90,7 @@
           <Svg>
             <Axis
               placement="left"
-              grid
+              grid={gridProp}
               format={config.yAxisFormat}
             />
             <Axis
@@ -111,7 +119,7 @@
           <Svg>
             <Axis
               placement="left"
-              grid
+              grid={gridProp}
               format={config.yAxisFormat}
             />
             <Axis
