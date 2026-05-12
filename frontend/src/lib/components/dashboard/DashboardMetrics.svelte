@@ -1,7 +1,6 @@
 <script lang="ts">
   import MetricChart from '$lib/components/ui/MetricChart.svelte';
-  import MultiLineChart from '$lib/components/ui/MultiLineChart.svelte';
-  import type { LineData } from '$lib/components/ui/MultiLineChart.svelte';
+  import SankeyChartCard from '$lib/components/ui/SankeyChartCard.svelte';
   import { ArrowDown, ArrowUp, Cpu, MemoryStick } from 'lucide-svelte';
   import CardStats from '$lib/components/ui/CardStats.svelte';
   import * as Card from '$lib/components/ui/card/index';
@@ -96,16 +95,6 @@
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }
 
-  function chartDataForMetricAndInterface(metric: string, iface: string): { timestamp: Date; value: number }[] {
-    const series = monitoring?.series?.find(
-      s => s.metric === metric && s.labels['interface'] === iface
-    );
-    if (!series) return [];
-    return series.points
-      .filter(p => Number.isFinite(Date.parse(p.timestamp)) && Number.isFinite(p.value))
-      .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
-      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }
 
   const vpnInterfaceNames = $derived(
     [...new Set(
@@ -116,18 +105,20 @@
     )]
   );
 
-  const vpnRXLines = $derived<LineData[]>(
-    vpnInterfaceNames.map(iface => ({
-      name: iface,
-      data: chartDataForMetricAndInterface(VPN_RX, iface),
-    }))
-  );
-
-  const vpnTXLines = $derived<LineData[]>(
-    vpnInterfaceNames.map(iface => ({
-      name: iface,
-      data: chartDataForMetricAndInterface(VPN_TX, iface),
-    }))
+  const vpnSankeyInterfaces = $derived(
+    vpnInterfaceNames
+      .map(iface => {
+        const rxSeries = monitoring?.series?.find(
+          s => s.metric === VPN_RX && s.labels['interface'] === iface
+        );
+        const txSeries = monitoring?.series?.find(
+          s => s.metric === VPN_TX && s.labels['interface'] === iface
+        );
+        const rx = rxSeries?.points.at(-1)?.value ?? 0;
+        const tx = txSeries?.points.at(-1)?.value ?? 0;
+        return { name: iface, bytes: rx + tx };
+      })
+      .filter(i => i.bytes > 0)
   );
 
   const unavailableChips = $derived<Chip[]>(
@@ -248,28 +239,13 @@
             </Card.Root>
           {/if}
         {/each}
-        <Card.Root>
-          <Card.Header>
-            <div>
-              <Card.Title>VPN inbound</Card.Title>
-              <Card.Description>Last {monitoringWindow}</Card.Description>
-            </div>
-          </Card.Header>
-          <Card.Content>
-            <MultiLineChart lines={vpnRXLines} metric={VPN_RX} height={160} />
-          </Card.Content>
-        </Card.Root>
-        <Card.Root>
-          <Card.Header>
-            <div>
-              <Card.Title>VPN outbound</Card.Title>
-              <Card.Description>Last {monitoringWindow}</Card.Description>
-            </div>
-          </Card.Header>
-          <Card.Content>
-            <MultiLineChart lines={vpnTXLines} metric={VPN_TX} height={160} />
-          </Card.Content>
-        </Card.Root>
+        <div class="lg:col-span-2">
+          <SankeyChartCard
+            interfaces={vpnSankeyInterfaces}
+            mode="rate"
+            window={monitoringWindow}
+          />
+        </div>
       </div>
     {/key}
     <UnavailableChips chips={unavailableChips} />
