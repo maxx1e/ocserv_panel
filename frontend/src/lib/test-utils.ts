@@ -15,6 +15,7 @@ export function makeSession(overrides: Partial<OcservSession> = {}): OcservSessi
     state: 'connected',
     groupname: '(none)',
     vhost: 'default',
+    enriched: false,
     ...overrides
   };
 }

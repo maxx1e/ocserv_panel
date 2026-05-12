@@ -92,10 +92,14 @@ export type BanEventPage = {
   limit: number;
 };
 
-export function listSessions(window: string, page = 1, limit = 25): Promise<HistoricalSessionPage> {
-  return apiFetch<HistoricalSessionPage>(
-    `/api/history/sessions?window=${encodeURIComponent(window)}&page=${page}&limit=${limit}`
-  );
+export function listSessions(window: string, page = 1, limit = 25, username = ''): Promise<HistoricalSessionPage> {
+  const params = new URLSearchParams({
+    window,
+    page: String(page),
+    limit: String(limit),
+  });
+  if (username) params.set('username', username);
+  return apiFetch<HistoricalSessionPage>(`/api/history/sessions?${params.toString()}`);
 }
 
 export function getUserTraffic(username: string, window: string): Promise<UserTrafficResponse> {

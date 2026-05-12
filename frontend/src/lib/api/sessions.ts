@@ -14,6 +14,7 @@ export type OcservSession = {
   state: string;
   groupname: string;
   vhost: string;
+  enriched: boolean;
 };
 
 export type OcservSessionDetail = {
