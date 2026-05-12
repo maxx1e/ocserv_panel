@@ -123,7 +123,7 @@
 
     {#if selectedRoute !== null}
       <SessionDetailDrawer
-        session={{ id: selectedRoute.id, username: selectedRoute.username, remoteAddress: '', vpnAddress: selectedRoute.vpnIp, connectedAt: undefined, rxBytes: 0, txBytes: 0, userAgent: '', device: selectedRoute.device, reconnectCount: 0, state: '', groupname: '', vhost: selectedRoute.vhost || '' }}
+        session={{ id: selectedRoute.id, username: selectedRoute.username, remoteAddress: '', vpnAddress: selectedRoute.vpnIp, connectedAt: undefined, rxBytes: 0, txBytes: 0, userAgent: '', device: selectedRoute.device, reconnectCount: 0, state: '', groupname: '', vhost: selectedRoute.vhost || '', enriched: true }}
         detail={null}
         userConnection={connectionDetail}
         loading={detailLoading}

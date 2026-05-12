@@ -3,7 +3,8 @@
   import ChartCard from '$lib/components/ui/ChartCard.svelte';
   import type { LineData } from '$lib/components/ui/MultiLineChart.svelte';
   import { BarChart2, List, Shield, Settings } from 'lucide-svelte';
-  import CardSettings from '$lib/components/ui/CardSettings.svelte';  import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
+  import CardSettings from '$lib/components/ui/CardSettings.svelte';
+  import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
   import UnavailableChips from '$lib/components/ui/UnavailableChips.svelte';
   import UserSessionDrawer from '$lib/components/history/UserSessionDrawer.svelte';
   import UnbanConfirmDialog from '../sessions/UnbanConfirmDialog.svelte';
@@ -110,6 +111,7 @@
   let sessionsLoading = $state(false);
   let sessionsError = $state('');
   let sessionsSearch = $state('');
+  let sessionsRequestId = 0;
   let activeSessions = $state<ConnectedUser[]>([]);
   let activeSessionsLoading = $state(false);
 
@@ -369,14 +371,18 @@
 
   // --- Sessions tab ---
   async function loadSessions() {
+    const id = ++sessionsRequestId;
     sessionsLoading = true;
     sessionsError = '';
     try {
-      sessionsData = await listSessions(sessionsWindow, sessionsPage, 25, sessionsSearch);
+      const data = await listSessions(sessionsWindow, sessionsPage, 25, sessionsSearch);
+      if (id !== sessionsRequestId) return;
+      sessionsData = data;
     } catch (e) {
+      if (id !== sessionsRequestId) return;
       sessionsError = e instanceof Error ? e.message : 'Failed to load sessions';
     } finally {
-      sessionsLoading = false;
+      if (id === sessionsRequestId) sessionsLoading = false;
     }
   }
 
