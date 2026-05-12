@@ -144,7 +144,6 @@
   const BAN_WATCHING_THRESHOLD = 50;
 
   let bansWindow = $state('all');
-  let bansPage = $state(1);
   let bansData = $state<BanEventPage | null>(null);
   let bansLoading = $state(false);
   let bansError = $state('');
@@ -175,7 +174,7 @@
   // --- Derived ---
   const isOwner = $derived(hasOwnerRole(principal));
   const purgeEnabled = $derived(isOwner && confirmation === 'PURGE' && !purgeSubmitting);
-  const sortedUserSummaries = $derived((() => {
+  const sortedUserSummaries = $derived.by(() => {
     const arr = [...userSummaries];
     arr.sort((a, b) => {
       let av = 0, bv = 0;
@@ -187,7 +186,7 @@
       return usersSortDir === 'asc' ? av - bv : bv - av;
     });
     return arr;
-  })());
+  });
   const activeUsernames = $derived(new Set(activeSessions.map(s => s.username)));
   const filteredUserSummaries = $derived(
     usersSearch
@@ -203,7 +202,7 @@
   );
 
   // --- Bans derived ---
-  const mergedBanRows = $derived<MergedBanRow[]>((() => {
+  const mergedBanRows = $derived.by<MergedBanRow[]>(() => {
     const rows: MergedBanRow[] = banPoints.map(bp => {
       const hist = bansData?.events.find(e => e.ip === bp.ip);
       let status: BanStatus;
@@ -240,11 +239,15 @@
     }
 
     return rows.sort((a, b) => b.score - a.score);
-  })());
+  });
 
   const filteredBanRows = $derived(
     mergedBanRows.filter(r => {
-      if (bansStatusFilter !== 'all' && r.status !== bansStatusFilter) return false;
+      if (bansStatusFilter !== 'all') {
+        // 'known' chip shows both known and unbanned
+        if (bansStatusFilter === 'known' && r.status !== 'known' && r.status !== 'unbanned') return false;
+        if (bansStatusFilter !== 'known' && r.status !== bansStatusFilter) return false;
+      }
       if (bansSearch && !r.ip.toLowerCase().includes(bansSearch.toLowerCase())) return false;
       return true;
     })
@@ -448,7 +451,7 @@
     bansError = '';
     try {
       const [page, points] = await Promise.all([
-        listHistoricalBans(bansPage, 25, bansWindow),
+        listHistoricalBans(1, 1000, bansWindow),  // fetch up to 1000 events for merge
         getBanPoints(),
       ]);
       bansData = page;
@@ -462,7 +465,6 @@
 
   function handleBansWindowChange(nextWindow: string) {
     bansWindow = nextWindow;
-    bansPage = 1;
     void loadBans();
   }
 
@@ -1086,7 +1088,7 @@
               {/each}
               {#if filteredBanRows.length === 0}
                 <tr>
-                  <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-400">No entries match the current filter.</td>
+                  <td colspan={isOwner ? 6 : 5} class="px-4 py-8 text-center text-sm text-slate-400">No entries match the current filter.</td>
                 </tr>
               {/if}
             </tbody>
@@ -1094,21 +1096,6 @@
         </div>
         <div class="flex items-center justify-between text-sm text-slate-500">
           <span>{filteredBanRows.length} of {mergedBanRows.length} entries</span>
-          {#if bansData}
-            <div class="flex gap-2">
-              <button
-                disabled={bansPage <= 1}
-                onclick={() => { bansPage--; void loadBans(); }}
-                class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-              >Previous</button>
-              <span class="px-3 py-1">Page {bansPage}</span>
-              <button
-                disabled={bansPage * bansData.limit >= bansData.total}
-                onclick={() => { bansPage++; void loadBans(); }}
-                class="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-              >Next</button>
-            </div>
-          {/if}
         </div>
       {/if}
     </div>
