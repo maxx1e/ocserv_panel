@@ -46,6 +46,7 @@ type ocservSessionResponse struct {
 	Vhost         string `json:"vhost"`
 	SessionIsOpen bool   `json:"sessionIsOpen"`
 	InUse         bool   `json:"inUse"`
+	Enriched      bool   `json:"enriched"`
 }
 
 type ocservSessionDetailResponse struct {
@@ -299,7 +300,7 @@ func (a *App) handleOcservServiceRestart(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleOcservSessions lists active ocserv sessions.
+// handleOcservSessions lists active ocserv sessions, enriched with connected user data.
 func (a *App) handleOcservSessions(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodGet) {
 		return
@@ -308,14 +309,20 @@ func (a *App) handleOcservSessions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	sessions, err := a.ocservService.ListSessions(r.Context(), principal)
+	sess, err := a.ocservService.ListSessions(r.Context(), principal)
 	if err != nil {
 		a.writeAppError(w, err)
 		return
 	}
-	resp := make([]ocservSessionResponse, 0, len(sessions))
-	for _, s := range sessions {
-		resp = append(resp, ocservSessionToResponse(s))
+	users, err := a.ocservService.ListConnectedUsers(r.Context(), principal)
+	if err != nil {
+		// Enrichment failure is non-fatal: serve un-enriched sessions.
+		users = nil
+	}
+	userLookup := buildUserLookup(users)
+	resp := make([]ocservSessionResponse, 0, len(sess))
+	for _, s := range sess {
+		resp = append(resp, ocservEnrichedSessionToResponse(s, userLookup))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -822,6 +829,32 @@ func ocservReadinessToResponse(r *health.OcservReadiness) ocservReadinessRespons
 		OcctlPresent:    r.OcctlPresent,
 		OcpasswdPresent: r.OcpasswdPresent,
 	}
+}
+
+// buildUserLookup builds a map from FullSession to ConnectedUser for O(1) join.
+func buildUserLookup(users []sessions.ConnectedUser) map[string]sessions.ConnectedUser {
+	m := make(map[string]sessions.ConnectedUser, len(users))
+	for _, u := range users {
+		if u.FullSession != "" {
+			m[u.FullSession] = u
+		}
+	}
+	return m
+}
+
+// ocservEnrichedSessionToResponse maps a Session to a response, enriching with
+// ConnectedUser data when available (matched by FullSession).
+func ocservEnrichedSessionToResponse(s sessions.Session, userLookup map[string]sessions.ConnectedUser) ocservSessionResponse {
+	resp := ocservSessionToResponse(s)
+	user, ok := userLookup[s.FullSession]
+	if ok {
+		resp.VPNAddress = user.VpnIP
+		resp.RxBytes = user.RxBytes
+		resp.TxBytes = user.TxBytes
+		resp.Device = user.Device
+		resp.Enriched = true
+	}
+	return resp
 }
 
 func ocservSessionToResponse(s sessions.Session) ocservSessionResponse {
