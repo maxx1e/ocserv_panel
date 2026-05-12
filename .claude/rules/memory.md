@@ -31,6 +31,8 @@
 | 2026-05-10 | `2026-05-10-settings-page-improvements-design.md` | Settings page improvements | Approved |
 | 2026-05-10 | `2026-05-10-vpn-interface-watcher-design.md` | VPNWatcher replacing timer-based re-discovery | Approved |
 | 2026-05-11 | `2026-05-11-history-page-tabs-design.md` | History page full tab overhaul (Monitoring/Sessions/Users/Bans/Settings) | Approved |
+| 2026-05-11 | `2026-05-11-history-page-visual-improvements-design.md` | History page visual polish: ChartCard, rich tooltips, Sessions two-section, Bans score table, Users inline chart | Approved |
+| 2026-05-12 | `2026-05-12-sessions-history-data-accuracy-design.md` | Sessions All Sessions tab data fix (merge show users), History page Users+Sessions → single Sessions tab | Approved |
 
 ---
 
@@ -58,6 +60,7 @@
 | 2026-05-10 | `2026-05-10-sessions-status-cards.md` | Sessions status cards from `/api/ocserv/server/status` |
 | 2026-05-10 | `2026-05-10-vpn-interface-watcher.md` | VPNWatcher: session-triggered interface add/remove |
 | 2026-05-11 | `2026-05-11-history-page-tabs.md` | History page tab overhaul with persistent ban/session history |
+| 2026-05-11 | `2026-05-11-history-page-visual-improvements.md` | History page visual polish: ChartCard, rich tooltips, Sessions two-section, Bans score table, Users inline chart | **COMPLETED** |
 
 ---
 
