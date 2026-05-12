@@ -65,6 +65,7 @@
 | 2026-05-11 | `2026-05-11-history-page-visual-improvements.md` | History page visual polish: ChartCard, rich tooltips, Sessions two-section, Bans score table, Users inline chart | **COMPLETED** |
 | 2026-05-12 | `2026-05-12-sessions-history-data-accuracy.md` | Sessions All Sessions enrichment fix (show users join); History Users+Sessions tab merge | **COMPLETED** |
 | 2026-05-12 | `2026-05-12-history-session-log-fixes.md` | History Session Log: ingester disconnect detection, filter active sessions, drawer chart fix | |
+| 2026-05-12 | `2026-05-12-chart-improvements.md` | Chart improvements: elevated ChartCard, dashed grid, trend badges, Sankey VPN traffic chart | |
 
 ---
 
