@@ -631,8 +631,9 @@ func (a *App) handleHistorySessions(w http.ResponseWriter, r *http.Request) {
 		limit = l
 	}
 	offset := (page - 1) * limit
+	username := r.URL.Query().Get("username")
 
-	sessions, total, err := a.store.ListSessions(r.Context(), since, limit, offset)
+	sessions, total, err := a.store.ListSessions(r.Context(), since, limit, offset, username)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return

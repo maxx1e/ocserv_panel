@@ -691,7 +691,7 @@ func TestListSessions_ReturnsPagedResults(t *testing.T) {
 		}
 	}
 
-	sessions, total, err := s.ListSessions(ctx, base.Add(-time.Hour), 3, 0)
+	sessions, total, err := s.ListSessions(ctx, base.Add(-time.Hour), 3, 0, "")
 	if err != nil {
 		t.Fatalf("list sessions: %v", err)
 	}
@@ -702,7 +702,7 @@ func TestListSessions_ReturnsPagedResults(t *testing.T) {
 		t.Errorf("got %d sessions, want 3", len(sessions))
 	}
 
-	sessions2, total2, err := s.ListSessions(ctx, base.Add(-time.Hour), 3, 3)
+	sessions2, total2, err := s.ListSessions(ctx, base.Add(-time.Hour), 3, 3, "")
 	if err != nil {
 		t.Fatalf("list sessions page 2: %v", err)
 	}
@@ -898,7 +898,7 @@ func TestListSessions_FiltersBySince(t *testing.T) {
 	}
 
 	since := time.Now().UTC().Add(-25 * time.Hour)
-	sessions, total, err := s.ListSessions(ctx, since, 10, 0)
+	sessions, total, err := s.ListSessions(ctx, since, 10, 0, "")
 	if err != nil {
 		t.Fatalf("list sessions: %v", err)
 	}
@@ -907,5 +907,63 @@ func TestListSessions_FiltersBySince(t *testing.T) {
 	}
 	if len(sessions) != 2 {
 		t.Errorf("len = %d, want 2", len(sessions))
+	}
+}
+
+func TestListSessionsUsernameFilter(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	for _, row := range []struct {
+		username string
+		at       time.Time
+	}{
+		{"alice", now.Add(-1 * time.Hour)},
+		{"alice", now.Add(-2 * time.Hour)},
+		{"bob", now.Add(-1 * time.Hour)},
+	} {
+		_, err := s.DB.ExecContext(ctx,
+			`INSERT INTO historical_sessions (username, connected_at, disconnected_at, bytes_in, bytes_out, duration_seconds, source, created_at)
+			 VALUES (?, ?, ?, 100, 200, 60, 'ingested', ?)`,
+			row.username,
+			row.at.Format(time.RFC3339),
+			row.at.Add(time.Hour).Format(time.RFC3339),
+			now.Format(time.RFC3339),
+		)
+		if err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	since := now.Add(-24 * time.Hour)
+
+	// No filter returns all 3.
+	all, total, err := s.ListSessions(ctx, since, 10, 0, "")
+	if err != nil {
+		t.Fatalf("ListSessions no filter: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("total no filter: got %d, want 3", total)
+	}
+	if len(all) != 3 {
+		t.Errorf("rows no filter: got %d, want 3", len(all))
+	}
+
+	// Filter by alice returns 2.
+	aliceSessions, aliceTotal, err := s.ListSessions(ctx, since, 10, 0, "alice")
+	if err != nil {
+		t.Fatalf("ListSessions alice: %v", err)
+	}
+	if aliceTotal != 2 {
+		t.Errorf("total alice: got %d, want 2", aliceTotal)
+	}
+	if len(aliceSessions) != 2 {
+		t.Errorf("rows alice: got %d, want 2", len(aliceSessions))
+	}
+	for _, sess := range aliceSessions {
+		if sess.Username != "alice" {
+			t.Errorf("expected alice, got %q", sess.Username)
+		}
 	}
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -262,27 +263,54 @@ func (s *Store) UserSessions(ctx context.Context, username string, since time.Ti
 }
 
 // ListSessions returns historical sessions with connected_at >= since, newest
-// first. Returns the total matching count alongside the paged slice.
-func (s *Store) ListSessions(ctx context.Context, since time.Time, limit, offset int) ([]HistoricalSession, int64, error) {
+// first. If username is non-empty, only sessions for that user are returned.
+// Returns the total matching count alongside the paged slice.
+func (s *Store) ListSessions(ctx context.Context, since time.Time, limit, offset int, username string) ([]HistoricalSession, int64, error) {
 	sinceStr := since.UTC().Format(time.RFC3339)
 
-	var total int64
-	if err := s.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM historical_sessions WHERE connected_at >= ?`, sinceStr,
-	).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count sessions: %w", err)
+	var (
+		total    int64
+		countErr error
+		rows     *sql.Rows
+		queryErr error
+	)
+
+	if username != "" {
+		countErr = s.DB.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM historical_sessions WHERE connected_at >= ? AND username = ?`,
+			sinceStr, username,
+		).Scan(&total)
+	} else {
+		countErr = s.DB.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM historical_sessions WHERE connected_at >= ?`,
+			sinceStr,
+		).Scan(&total)
+	}
+	if countErr != nil {
+		return nil, 0, fmt.Errorf("count sessions: %w", countErr)
 	}
 
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source, state
-		 FROM historical_sessions
-		 WHERE connected_at >= ?
-		 ORDER BY connected_at DESC, id DESC
-		 LIMIT ? OFFSET ?`,
-		sinceStr, limit, offset,
-	)
-	if err != nil {
-		return nil, 0, fmt.Errorf("query sessions: %w", err)
+	if username != "" {
+		rows, queryErr = s.DB.QueryContext(ctx,
+			`SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source, state
+			 FROM historical_sessions
+			 WHERE connected_at >= ? AND username = ?
+			 ORDER BY connected_at DESC, id DESC
+			 LIMIT ? OFFSET ?`,
+			sinceStr, username, limit, offset,
+		)
+	} else {
+		rows, queryErr = s.DB.QueryContext(ctx,
+			`SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source, state
+			 FROM historical_sessions
+			 WHERE connected_at >= ?
+			 ORDER BY connected_at DESC, id DESC
+			 LIMIT ? OFFSET ?`,
+			sinceStr, limit, offset,
+		)
+	}
+	if queryErr != nil {
+		return nil, 0, fmt.Errorf("query sessions: %w", queryErr)
 	}
 	defer rows.Close()
 
