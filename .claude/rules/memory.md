@@ -61,6 +61,7 @@
 | 2026-05-10 | `2026-05-10-vpn-interface-watcher.md` | VPNWatcher: session-triggered interface add/remove |
 | 2026-05-11 | `2026-05-11-history-page-tabs.md` | History page tab overhaul with persistent ban/session history |
 | 2026-05-11 | `2026-05-11-history-page-visual-improvements.md` | History page visual polish: ChartCard, rich tooltips, Sessions two-section, Bans score table, Users inline chart | **COMPLETED** |
+| 2026-05-12 | `2026-05-12-sessions-history-data-accuracy.md` | Sessions All Sessions enrichment fix (show users join); History Users+Sessions tab merge |
 
 ---
 
