@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import ChartCard from '$lib/components/ui/ChartCard.svelte';
   import type { LineData } from '$lib/components/ui/MultiLineChart.svelte';
-  import { Users, BarChart2, List, Shield, Settings } from 'lucide-svelte';
+  import { BarChart2, List, Shield, Settings } from 'lucide-svelte';
   import CardSettings from '$lib/components/ui/CardSettings.svelte';  import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
   import UnavailableChips from '$lib/components/ui/UnavailableChips.svelte';
   import UserSessionDrawer from '$lib/components/history/UserSessionDrawer.svelte';
@@ -71,12 +71,11 @@
   ];
 
   // --- Tab definitions ---
-  type TabId = 'monitoring' | 'sessions' | 'users' | 'bans' | 'settings';
+  type TabId = 'monitoring' | 'sessions' | 'bans' | 'settings';
 
   const tabs: { id: TabId; label: string; icon: typeof BarChart2 }[] = [
     { id: 'monitoring', label: 'Monitoring', icon: BarChart2 },
     { id: 'sessions', label: 'Sessions', icon: List },
-    { id: 'users', label: 'Users', icon: Users },
     { id: 'bans', label: 'Bans', icon: Shield },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
@@ -92,7 +91,6 @@
   let activated = $state<Record<TabId, boolean>>({
     monitoring: true,
     sessions: false,
-    users: false,
     bans: false,
     settings: false
   });
@@ -115,17 +113,15 @@
   let activeSessions = $state<ConnectedUser[]>([]);
   let activeSessionsLoading = $state(false);
 
-  // --- Users tab state ---
-  let usersWindow = $state<MonitoringWindow>('24h');
+  // --- User summaries (Section A of sessions tab) ---
   let userSummaries = $state<UserSessionSummary[]>([]);
   let userSummariesLoading = $state(false);
   let userSummariesError = $state('');
   let expandedUser = $state<string | null>(null);
-  let usersSearch = $state('');
   let userTraffic = $state<UserTrafficResponse | null>(null);
   let userTrafficLoading = $state(false);
 
-  // --- Users tab sorting ---
+  // --- User summaries sorting ---
   type SortField = 'totalBytesIn' | 'totalBytesOut' | 'totalTraffic' | 'avgBytesIn' | 'avgBytesOut';
   let usersSortField = $state<SortField>('totalTraffic');
   let usersSortDir = $state<'asc' | 'desc'>('desc');
@@ -189,9 +185,9 @@
   });
   const activeUsernames = $derived(new Set(activeSessions.map(s => s.username)));
   const filteredUserSummaries = $derived(
-    usersSearch
+    sessionsSearch
       ? sortedUserSummaries.filter(u =>
-          u.username.toLowerCase().includes(usersSearch.toLowerCase())
+          u.username.toLowerCase().includes(sessionsSearch.toLowerCase())
         )
       : sortedUserSummaries
   );
@@ -290,8 +286,10 @@
     refreshInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         if (activeTab === 'monitoring') void reloadMonitoring();
-        if (activeTab === 'users') void reloadUserSummaries();
-        if (activeTab === 'sessions') void loadActiveSessions();
+        if (activeTab === 'sessions') {
+          void loadActiveSessions();
+          void reloadUserSummaries(sessionsWindow);
+        }
       }
     }, 15_000);
   });
@@ -312,9 +310,11 @@
   }
 
   function loadTabData(tab: TabId) {
-    if (tab === 'sessions') { void loadSessions(); void loadActiveSessions(); }
-    else if (tab === 'users') void reloadUserSummaries(usersWindow);
-    else if (tab === 'bans') void loadBans();
+    if (tab === 'sessions') {
+      void loadSessions();
+      void loadActiveSessions();
+      void reloadUserSummaries(sessionsWindow);
+    } else if (tab === 'bans') void loadBans();
     else if (tab === 'settings') void loadSettings();
   }
 
@@ -372,7 +372,7 @@
     sessionsLoading = true;
     sessionsError = '';
     try {
-      sessionsData = await listSessions(sessionsWindow, sessionsPage);
+      sessionsData = await listSessions(sessionsWindow, sessionsPage, 25, sessionsSearch);
     } catch (e) {
       sessionsError = e instanceof Error ? e.message : 'Failed to load sessions';
     } finally {
@@ -396,11 +396,14 @@
     if (!HISTORY_WINDOWS.includes(window) || window === sessionsWindow) return;
     sessionsWindow = window;
     sessionsPage = 1;
+    expandedUser = null;
+    userTraffic = null;
     void loadSessions();
+    void reloadUserSummaries(window);
   }
 
-  // --- Users tab ---
-  async function reloadUserSummaries(window: MonitoringWindow = usersWindow) {
+  // --- User summaries (sessions tab Section A) ---
+  async function reloadUserSummaries(window: MonitoringWindow = sessionsWindow) {
     userSummariesLoading = true;
     userSummariesError = '';
     try {
@@ -413,15 +416,6 @@
     }
   }
 
-  function handleUsersWindowChange(nextWindow: string) {
-    const window = nextWindow as MonitoringWindow;
-    if (!HISTORY_WINDOWS.includes(window) || window === usersWindow) return;
-    usersWindow = window;
-    expandedUser = null;
-    userTraffic = null;
-    void reloadUserSummaries(window);
-  }
-
   async function loadUserTraffic(username: string) {
     if (expandedUser === username) {
       expandedUser = null;
@@ -432,7 +426,7 @@
     userTrafficLoading = true;
     userTraffic = null;
     try {
-      userTraffic = await getUserTraffic(username, usersWindow);
+      userTraffic = await getUserTraffic(username, sessionsWindow);
     } catch {
       userTraffic = null;
     } finally {
@@ -612,8 +606,8 @@
 
 {:else}
   <div class="mb-6">
-    <h1 class="text-xl font-bold text-slate-700">History</h1>
-    <p class="text-sm text-slate-500 mt-1">Analytics are read from the local backend API and persisted SQLite history.</p>
+    <h1 class="text-2xl font-bold text-slate-800 dark:text-slate-100">History</h1>
+    <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Analytics are read from the local backend API and persisted SQLite history.</p>
   </div>
 
   <!-- Tab bar -->
@@ -655,7 +649,7 @@
             type="button"
             disabled={monitoringLoading}
             onclick={() => reloadMonitoring()}
-            class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {monitoringLoading ? 'Refreshing...' : 'Refresh'}
           </button>
@@ -721,41 +715,59 @@
   {:else if activeTab === 'sessions'}
     <!-- Sessions tab -->
     <div class="space-y-6">
-      <!-- Toolbar -->
+      <!-- Shared toolbar -->
       <div class="flex items-center justify-between flex-wrap gap-3">
         <WindowSelector
           value={sessionsWindow}
           windows={HISTORY_WINDOWS}
           onchange={handleSessionsWindowChange}
         />
-        <input
-          type="search"
-          placeholder="Filter by username..."
-          bind:value={sessionsSearch}
-          class="px-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200"
-        />
+        <div class="flex items-center gap-3">
+          <input
+            type="search"
+            placeholder="Filter by username..."
+            bind:value={sessionsSearch}
+            oninput={() => { sessionsPage = 1; void loadSessions(); }}
+            class="px-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200"
+          />
+          <div class="flex items-center gap-2 text-sm text-slate-500">
+            <label for="users-sort-combined" class="text-xs font-medium">Sort:</label>
+            <select
+              id="users-sort-combined"
+              bind:value={usersSortField}
+              onchange={() => { usersSortDir = 'desc'; }}
+              class="text-xs border border-slate-200 rounded-md px-2 py-1.5 bg-white text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200"
+            >
+              <option value="totalTraffic">Total traffic</option>
+              <option value="totalBytesIn">Total received</option>
+              <option value="totalBytesOut">Total sent</option>
+              <option value="avgBytesIn">Avg download</option>
+              <option value="avgBytesOut">Avg upload</option>
+            </select>
+          </div>
+        </div>
       </div>
 
-      <!-- Section A: Currently Active -->
-      <div class="bg-green-50 border border-green-200 rounded-xl p-4">
+      <!-- Currently Active -->
+      <div class="bg-green-50 border border-green-200 rounded-xl p-4 dark:bg-green-950/30 dark:border-green-800">
         <div class="flex items-center gap-2 mb-3">
           <span class="relative flex h-2.5 w-2.5">
             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
             <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
           </span>
-          <span class="text-sm font-semibold text-green-800">
+          <span class="text-sm font-semibold text-green-800 dark:text-green-200">
             Currently active ({activeSessions.length})
           </span>
         </div>
         {#if activeSessionsLoading && activeSessions.length === 0}
-          <p class="text-xs text-green-700">Loading...</p>
+          <p class="text-xs text-green-700 dark:text-green-300">Loading...</p>
         {:else if activeSessions.length === 0}
-          <p class="text-xs text-green-700">No active sessions right now</p>
+          <p class="text-xs text-green-700 dark:text-green-300">No active sessions right now</p>
         {:else}
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>
-                <tr class="text-left text-xs text-green-700 font-semibold">
+                <tr class="text-left text-xs text-green-700 dark:text-green-300 font-semibold">
                   <th class="pb-1 pr-4">Username</th>
                   <th class="pb-1 pr-4">Device</th>
                   <th class="pb-1 pr-4">Connected since</th>
@@ -763,14 +775,14 @@
                   <th class="pb-1 pr-4">VPN IP</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-green-100">
+              <tbody class="divide-y divide-green-100 dark:divide-green-800">
                 {#each activeSessions as s (s.id)}
                   <tr>
-                    <td class="py-1.5 pr-4 font-mono text-xs text-green-900 font-semibold">{s.username}</td>
-                    <td class="py-1.5 pr-4 text-xs text-green-800">{s.device}</td>
-                    <td class="py-1.5 pr-4 text-xs text-green-800">{formatDuration(Math.floor((Date.now() - new Date(s.since).getTime()) / 1000))}</td>
-                    <td class="py-1.5 pr-4 text-xs text-green-800">{s.remoteIp}</td>
-                    <td class="py-1.5 text-xs text-green-800">{s.vpnIp}</td>
+                    <td class="py-1.5 pr-4 font-mono text-xs text-green-900 dark:text-green-100 font-semibold">{s.username}</td>
+                    <td class="py-1.5 pr-4 text-xs text-green-800 dark:text-green-200">{s.device}</td>
+                    <td class="py-1.5 pr-4 text-xs text-green-800 dark:text-green-200">{formatDuration(Math.floor((Date.now() - new Date(s.since).getTime()) / 1000))}</td>
+                    <td class="py-1.5 pr-4 text-xs text-green-800 dark:text-green-200">{s.remoteIp}</td>
+                    <td class="py-1.5 text-xs text-green-800 dark:text-green-200">{s.vpnIp}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -779,19 +791,96 @@
         {/if}
       </div>
 
-      <!-- Section B: History -->
-      {#if sessionsLoading && !sessionsData}
-        <div class="text-sm text-slate-500 py-8 text-center">Loading sessions...</div>
-      {:else if sessionsError}
-        <div class="text-sm text-red-600 py-4">{sessionsError}</div>
-      {:else if sessionsData}
-        {@const filteredSessions = sessionsData.sessions.filter(s =>
-          !sessionsSearch || (s.username ?? '').toLowerCase().includes(sessionsSearch.toLowerCase())
-        )}
-        <div>
-          <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-            History — last {sessionsWindow} ({sessionsData.total} sessions)
-          </p>
+      <!-- Section A: Per-User Summary -->
+      <div>
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+          Users — last {sessionsWindow}
+        </p>
+        {#if userSummariesError}
+          <div class="flex items-center gap-3 py-4">
+            <p class="text-red-600 text-sm">{userSummariesError}</p>
+            <button class="text-sm text-blue-600 hover:underline" onclick={() => reloadUserSummaries(sessionsWindow)}>Retry</button>
+          </div>
+        {/if}
+        {#if userSummariesLoading && userSummaries.length === 0}
+          <div class="space-y-2">
+            {#each Array(3) as _}
+              <div class="h-10 bg-slate-100 rounded animate-pulse"></div>
+            {/each}
+          </div>
+        {:else if filteredUserSummaries.length === 0 && !userSummariesLoading}
+          <p class="text-sm text-slate-500">No user sessions in this period.</p>
+        {:else}
+          <div class="rounded-lg border border-slate-200 overflow-hidden dark:border-slate-700">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 dark:bg-slate-800">
+                <tr class="text-left text-xs text-slate-500 font-medium">
+                  <th class="px-4 py-3">User</th>
+                  <th class="px-4 py-3">Sessions</th>
+                  <th class="px-4 py-3">Total time</th>
+                  <th class="px-4 py-3">Total received</th>
+                  <th class="px-4 py-3">Total sent</th>
+                  <th class="px-4 py-3 text-blue-600 font-semibold">Total traffic</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                {#each filteredUserSummaries as row (row.username)}
+                  {@const initials = row.username.slice(0, 1).toUpperCase()}
+                  {@const isActive = activeUsernames.has(row.username)}
+                  <tr
+                    class="hover:bg-slate-50 cursor-pointer dark:hover:bg-slate-800/50"
+                    role="button"
+                    tabindex="0"
+                    onclick={() => {
+                      sessionsSearch = row.username;
+                      sessionsPage = 1;
+                      void loadSessions();
+                      openSessionDrawer(row.username, sessionsWindow);
+                    }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        sessionsSearch = row.username;
+                        sessionsPage = 1;
+                        void loadSessions();
+                        openSessionDrawer(row.username, sessionsWindow);
+                      }
+                    }}
+                  >
+                    <td class="px-4 py-3">
+                      <div class="flex items-center gap-2">
+                        <div class="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold flex-shrink-0">{initials}</div>
+                        <span class="text-slate-700 font-medium dark:text-slate-200">{row.username}</span>
+                        {#if isActive}
+                          <span class="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="Currently active"></span>
+                        {/if}
+                      </div>
+                    </td>
+                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{row.sessionCount}</td>
+                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatDuration(row.totalDurationSeconds)}</td>
+                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatBytes(row.totalBytesIn)}</td>
+                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatBytes(row.totalBytesOut)}</td>
+                    <td class="px-4 py-3 font-semibold text-slate-800 dark:text-slate-100">{formatBytes(row.totalBytesIn + row.totalBytesOut)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          <div class="flex items-center justify-between text-sm text-slate-500 mt-1">
+            <span>{filteredUserSummaries.length} users</span>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Section B: Session Log -->
+      <div>
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+          Session log — last {sessionsWindow}{sessionsSearch ? ` · ${sessionsSearch}` : ''} ({sessionsData?.total ?? '...'} sessions)
+        </p>
+        {#if sessionsLoading && !sessionsData}
+          <div class="text-sm text-slate-500 py-8 text-center">Loading sessions...</div>
+        {:else if sessionsError}
+          <div class="text-sm text-red-600 py-4">{sessionsError}</div>
+        {:else if sessionsData}
           <div class="rounded-lg border border-slate-200 overflow-hidden dark:border-slate-700">
             <table class="w-full text-sm">
               <thead class="bg-slate-50 border-b border-slate-200 dark:bg-slate-800 dark:border-slate-700">
@@ -806,7 +895,7 @@
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
-                {#each filteredSessions as session}
+                {#each sessionsData.sessions as session}
                   {@const stateColors: Record<string, string> = {
                     authenticated: 'bg-green-100 text-green-700',
                     connected: 'bg-green-100 text-green-700',
@@ -840,7 +929,6 @@
               </tbody>
             </table>
           </div>
-          <!-- Pagination -->
           <div class="flex items-center justify-between text-sm text-slate-500 mt-3">
             <span>{sessionsData.total} total sessions</span>
             <div class="flex gap-2">
@@ -857,134 +945,9 @@
               >Next</button>
             </div>
           </div>
-        </div>
-      {/if}
-    </div>
-
-  {:else if activeTab === 'users'}
-    <!-- Users tab -->
-    <section aria-labelledby="users-heading" class="space-y-4">
-      <!-- Compact toolbar -->
-      <div class="flex items-center gap-3 flex-wrap">
-        <WindowSelector
-          value={usersWindow}
-          windows={HISTORY_WINDOWS}
-          onchange={handleUsersWindowChange}
-        />
-        <input
-          type="search"
-          placeholder="Filter user..."
-          bind:value={usersSearch}
-          class="px-3 py-1.5 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 w-40"
-        />
-        <div class="flex items-center gap-2 ml-auto text-sm text-slate-500">
-          <label for="users-sort" class="text-xs font-medium">Sort:</label>
-          <select
-            id="users-sort"
-            bind:value={usersSortField}
-            onchange={() => { usersSortDir = 'desc'; }}
-            class="text-xs border border-slate-200 rounded-md px-2 py-1.5 bg-white text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200"
-          >
-            <option value="totalTraffic">Total traffic ↓</option>
-            <option value="totalBytesIn">Total received ↓</option>
-            <option value="totalBytesOut">Total sent ↓</option>
-            <option value="avgBytesIn">Avg download ↓</option>
-            <option value="avgBytesOut">Avg upload ↓</option>
-          </select>
-        </div>
+        {/if}
       </div>
-
-      {#if userSummariesError}
-        <div class="flex items-center gap-3 py-4">
-          <p class="text-red-600 text-sm">{userSummariesError}</p>
-          <button class="text-sm text-blue-600 hover:underline" onclick={() => reloadUserSummaries(usersWindow)}>Retry</button>
-        </div>
-      {/if}
-
-      {#if userSummariesLoading && userSummaries.length === 0}
-        <div class="space-y-2">
-          {#each Array(5) as _}
-            <div class="h-10 bg-slate-100 rounded animate-pulse"></div>
-          {/each}
-        </div>
-      {:else if filteredUserSummaries.length === 0}
-        <p class="text-sm text-slate-500">No sessions in this period.</p>
-      {:else}
-        <div class="rounded-lg border border-slate-200 overflow-hidden dark:border-slate-700">
-          <table class="w-full text-sm">
-            <thead class="bg-slate-50 dark:bg-slate-800">
-              <tr class="text-left text-xs text-slate-500 font-medium">
-                <th class="px-4 py-3">User</th>
-                <th class="px-4 py-3">Sessions</th>
-                <th class="px-4 py-3">Total time</th>
-                <th class="px-4 py-3">↓ Total</th>
-                <th class="px-4 py-3">↑ Total</th>
-                <th class="px-4 py-3 text-blue-600 font-semibold">Total ↕</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
-              {#each filteredUserSummaries as row (row.username)}
-                {@const initials = row.username.slice(0, 1).toUpperCase()}
-                {@const isActive = activeUsernames.has(row.username)}
-                {@const isExpanded = expandedUser === row.username}
-                <tr
-                  class="hover:bg-slate-50 cursor-pointer dark:hover:bg-slate-800/50 {isExpanded ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
-                  role="button"
-                  tabindex="0"
-                  onclick={() => loadUserTraffic(row.username)}
-                  onkeydown={(e) => { if (e.key === 'Enter') loadUserTraffic(row.username); }}
-                >
-                  <td class="px-4 py-3">
-                    <div class="flex items-center gap-2">
-                      <div class="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold flex-shrink-0">{initials}</div>
-                      <span class="text-slate-700 font-medium dark:text-slate-200">{row.username}</span>
-                      {#if isActive}
-                        <span class="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="Currently active"></span>
-                      {/if}
-                    </div>
-                  </td>
-                  <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{row.sessionCount}</td>
-                  <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatDuration(row.totalDurationSeconds)}</td>
-                  <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatBytes(row.totalBytesIn)}</td>
-                  <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatBytes(row.totalBytesOut)}</td>
-                  <td class="px-4 py-3 font-semibold text-slate-800 dark:text-slate-100">{formatBytes(row.totalBytesIn + row.totalBytesOut)}</td>
-                </tr>
-                {#if isExpanded}
-                  <tr>
-                    <td colspan="6" class="px-4 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-700">
-                      <div class="flex items-center justify-between mb-3">
-                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">Traffic — {row.username}</span>
-                        <button
-                          type="button"
-                          onclick={(e) => { e.stopPropagation(); expandedUser = null; userTraffic = null; }}
-                          class="text-slate-400 hover:text-slate-600 text-lg leading-none"
-                          aria-label="Close"
-                        >×</button>
-                      </div>
-                      {#if userTrafficLoading}
-                        <div class="py-6 text-center text-sm text-slate-500">Loading...</div>
-                      {:else if userTraffic && userTraffic.buckets.length > 0}
-                        {@const rxData = userTraffic.buckets.map(b => ({ timestamp: new Date(b.timestamp), value: b.bytesIn }))}
-                        {@const txData = userTraffic.buckets.map(b => ({ timestamp: new Date(b.timestamp), value: b.bytesOut }))}
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <ChartCard title="Download (RX)" metric="user_rx_bytes" data={rxData} window={usersWindow} height={140} />
-                          <ChartCard title="Upload (TX)" metric="user_tx_bytes" data={txData} window={usersWindow} height={140} />
-                        </div>
-                      {:else}
-                        <div class="py-6 text-center text-sm text-slate-400">No traffic data for this window</div>
-                      {/if}
-                    </td>
-                  </tr>
-                {/if}
-              {/each}
-            </tbody>
-          </table>
-        </div>
-        <div class="flex items-center justify-between text-sm text-slate-500">
-          <span>{filteredUserSummaries.length} users</span>
-        </div>
-      {/if}
-    </section>
+    </div>
 
   {:else if activeTab === 'bans'}
     <!-- Bans tab -->
@@ -1003,7 +966,7 @@
                 ? val === 'banned' ? 'bg-red-100 text-red-700 border-red-200'
                 : val === 'watching' ? 'bg-amber-100 text-amber-700 border-amber-200'
                 : 'bg-slate-800 text-white border-slate-800'
-                : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}"
+                : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 dark:hover:bg-slate-700'}"
             >
               {label} ({count})
             </button>
@@ -1112,7 +1075,7 @@
           <form onsubmit={handleSaveRetention} class="space-y-4">
             <label class="block">
               <span class="text-sm font-medium text-slate-700">Auto-delete records older than</span>
-              <select bind:value={retentionSetting} class="mt-1 block w-full max-w-xs rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400">
+              <select bind:value={retentionSetting} class="mt-1 block w-full max-w-xs rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
                 <option value="30">30 days</option>
                 <option value="90">90 days</option>
                 <option value="180">180 days</option>
@@ -1147,7 +1110,7 @@
           <form onsubmit={handlePurge} class="mt-4 space-y-4">
             <label class="block">
               <span class="text-sm font-medium text-red-700">Keep sessions newer than</span>
-              <select bind:value={retentionDays} class="mt-1 block w-full max-w-xs rounded-md border border-red-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400">
+              <select bind:value={retentionDays} class="mt-1 block w-full max-w-xs rounded-md border border-red-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
                 <option value={30}>30 days</option>
                 <option value={90}>90 days</option>
                 <option value={180}>180 days</option>
@@ -1159,7 +1122,7 @@
               <input
                 bind:value={confirmation}
                 autocomplete="off"
-                class="mt-1 block w-full max-w-xs rounded-md border border-red-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm placeholder:text-slate-400 focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400"
+                class="mt-1 block w-full max-w-xs rounded-md border border-red-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm placeholder:text-slate-400 focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 dark:placeholder:text-slate-500"
                 placeholder="PURGE"
               />
             </label>
@@ -1188,9 +1151,9 @@
   {#if drawerUsername !== null}
     {#if drawerLoading}
       <div class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center">
-        <div class="bg-white rounded-lg p-8 flex flex-col items-center gap-3">
+        <div class="bg-white dark:bg-slate-800 rounded-lg p-8 flex flex-col items-center gap-3">
           <div class="w-6 h-6 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin"></div>
-          <p class="text-sm text-slate-500">Loading sessions...</p>
+          <p class="text-sm text-slate-500 dark:text-slate-400">Loading sessions...</p>
         </div>
       </div>
     {:else}
