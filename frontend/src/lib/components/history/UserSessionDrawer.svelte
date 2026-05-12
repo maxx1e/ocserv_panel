@@ -201,11 +201,11 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <p class="text-xs text-slate-500 mb-1">Download (RX)</p>
-            <MetricChart data={rxData} metric="session_bytes" height={120} chartType="bar" xLabelFormat={formatShortDate} />
+            <MetricChart data={rxData} metric="session_bytes" height={120} chartType="bar" xLabelFormat={formatShortDate} gridDashed={true} />
           </div>
           <div>
             <p class="text-xs text-slate-500 mb-1">Upload (TX)</p>
-            <MetricChart data={txData} metric="session_bytes" height={120} chartType="bar" xLabelFormat={formatShortDate} />
+            <MetricChart data={txData} metric="session_bytes" height={120} chartType="bar" xLabelFormat={formatShortDate} gridDashed={true} />
           </div>
         </div>
       </div>
@@ -213,13 +213,13 @@
       <!-- Chart 2: Session duration -->
       <div>
         <h3 class="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Session duration (minutes)</h3>
-        <MetricChart data={durationData} metric="session_duration_minutes" height={120} chartType="bar" xLabelFormat={formatShortDate} />
+        <MetricChart data={durationData} metric="session_duration_minutes" height={120} chartType="bar" xLabelFormat={formatShortDate} gridDashed={true} />
       </div>
 
       <!-- Chart 3: Cumulative data -->
       <div>
         <h3 class="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Cumulative data transferred</h3>
-        <MetricChart data={cumulativeData} metric="session_bytes" height={120} chartType="bar" xLabelFormat={formatShortDate} />
+        <MetricChart data={cumulativeData} metric="session_bytes" height={120} chartType="bar" xLabelFormat={formatShortDate} gridDashed={true} />
       </div>
 
       <!-- Session list -->
