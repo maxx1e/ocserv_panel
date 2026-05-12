@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import ChartCard from '$lib/components/ui/ChartCard.svelte';
-  import type { LineData } from '$lib/components/ui/MultiLineChart.svelte';
+  import SankeyChartCard from '$lib/components/ui/SankeyChartCard.svelte';
   import { BarChart2, List, Shield, Settings } from 'lucide-svelte';
   import CardSettings from '$lib/components/ui/CardSettings.svelte';
   import WindowSelector from '$lib/components/ui/WindowSelector.svelte';
@@ -124,7 +124,7 @@
   let userTrafficLoading = $state(false);
 
   // --- User summaries sorting ---
-  type SortField = 'totalBytesIn' | 'totalBytesOut' | 'totalTraffic' | 'avgBytesIn' | 'avgBytesOut';
+  type SortField = 'totalBytesIn' | 'totalBytesOut' | 'totalTraffic' | 'avgThroughputBps' | 'sessionCount';
   let usersSortField = $state<SortField>('totalTraffic');
   let usersSortDir = $state<'asc' | 'desc'>('desc');
 
@@ -168,6 +168,7 @@
   let drawerSessions = $state<HistoricalSession[]>([]);
   let drawerLoading = $state(false);
   let drawerWindow = $state<MonitoringWindow>('24h');
+  let drawerSummary = $state<UserSessionSummary | null>(null);
 
   // --- Derived ---
   const isOwner = $derived(hasOwnerRole(principal));
@@ -179,8 +180,8 @@
       if (usersSortField === 'totalBytesIn') { av = a.totalBytesIn; bv = b.totalBytesIn; }
       else if (usersSortField === 'totalBytesOut') { av = a.totalBytesOut; bv = b.totalBytesOut; }
       else if (usersSortField === 'totalTraffic') { av = a.totalBytesIn + a.totalBytesOut; bv = b.totalBytesIn + b.totalBytesOut; }
-      else if (usersSortField === 'avgBytesIn') { av = a.avgBytesIn; bv = b.avgBytesIn; }
-      else if (usersSortField === 'avgBytesOut') { av = a.avgBytesOut; bv = b.avgBytesOut; }
+      else if (usersSortField === 'avgThroughputBps') { av = a.avgThroughputBps; bv = b.avgThroughputBps; }
+      else if (usersSortField === 'sessionCount') { av = a.sessionCount; bv = b.sessionCount; }
       return usersSortDir === 'asc' ? av - bv : bv - av;
     });
     return arr;
@@ -258,29 +259,25 @@
     known: mergedBanRows.filter(r => r.status === 'known' || r.status === 'unbanned').length,
   });
 
-  // VPN per-interface multi-line chart data
-  const vpnRXLines = $derived<LineData[]>(
-    allSeriesForMetric(monitoring, VPN_RX).map(s => ({
-      name: s.labels?.['interface'] ?? s.metric,
-      data: (s.points ?? [])
-        .filter(p => Number.isFinite(Date.parse(p.timestamp)) && Number.isFinite(p.value))
-        .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
-        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
-    }))
+  // VPN per-interface Sankey data (cumulative bytes across window)
+  const vpnSankeyInterfaces = $derived(
+    (() => {
+      const rxSeries = allSeriesForMetric(monitoring, VPN_RX);
+      const txSeries = allSeriesForMetric(monitoring, VPN_TX);
+      const ifaceNames = new Set<string>();
+      for (const s of rxSeries) ifaceNames.add(s.labels?.['interface'] ?? s.metric);
+      for (const s of txSeries) ifaceNames.add(s.labels?.['interface'] ?? s.metric);
+      return [...ifaceNames]
+        .map(iface => {
+          const rx = rxSeries.find(s => (s.labels?.['interface'] ?? s.metric) === iface);
+          const tx = txSeries.find(s => (s.labels?.['interface'] ?? s.metric) === iface);
+          const rxTotal = (rx?.points ?? []).reduce((sum, p) => sum + (p.value ?? 0), 0);
+          const txTotal = (tx?.points ?? []).reduce((sum, p) => sum + (p.value ?? 0), 0);
+          return { name: iface, bytes: rxTotal + txTotal };
+        })
+        .filter(i => i.bytes > 0);
+    })()
   );
-
-  const vpnTXLines = $derived<LineData[]>(
-    allSeriesForMetric(monitoring, VPN_TX).map(s => ({
-      name: s.labels?.['interface'] ?? s.metric,
-      data: (s.points ?? [])
-        .filter(p => Number.isFinite(Date.parse(p.timestamp)) && Number.isFinite(p.value))
-        .map(p => ({ timestamp: new Date(p.timestamp), value: p.value }))
-        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
-    }))
-  );
-
-  const hasVpnRXData = $derived(vpnRXLines.some(l => l.data.length > 0));
-  const hasVpnTXData = $derived(vpnTXLines.some(l => l.data.length > 0));
 
   // --- Lifecycle ---
   onMount(() => {
@@ -443,6 +440,7 @@
   function closeDrawer() {
     drawerUsername = null;
     drawerSessions = [];
+    drawerSummary = null;
   }
 
   // --- Bans tab ---
@@ -530,10 +528,11 @@
   }
 
   // --- Sessions tab drawer (from row click) ---
-  async function openSessionDrawer(username: string, window: MonitoringWindow) {
+  async function openSessionDrawer(username: string, window: MonitoringWindow, summary?: UserSessionSummary) {
     drawerUsername = username;
     drawerWindow = window;
     drawerSessions = [];
+    drawerSummary = summary ?? null;
     drawerLoading = true;
     try {
       drawerSessions = await getHistoryUserSessions(username, window);
@@ -695,23 +694,14 @@
               />
             {/if}
           {/each}
-          {#if hasVpnRXData}
-            <ChartCard
-              title="VPN inbound"
-              metric={VPN_RX}
-              lines={vpnRXLines}
-              window={monitoringWindow}
-              height={160}
-            />
-          {/if}
-          {#if hasVpnTXData}
-            <ChartCard
-              title="VPN outbound"
-              metric={VPN_TX}
-              lines={vpnTXLines}
-              window={monitoringWindow}
-              height={160}
-            />
+          {#if vpnSankeyInterfaces.length > 0}
+            <div class="lg:col-span-2">
+              <SankeyChartCard
+                interfaces={vpnSankeyInterfaces}
+                mode="cumulative"
+                window={monitoringWindow}
+              />
+            </div>
           {/if}
         </div>
         <UnavailableChips chips={unavailableChips} />
@@ -747,8 +737,8 @@
               <option value="totalTraffic">Total traffic</option>
               <option value="totalBytesIn">Total received</option>
               <option value="totalBytesOut">Total sent</option>
-              <option value="avgBytesIn">Avg download</option>
-              <option value="avgBytesOut">Avg upload</option>
+              <option value="avgThroughputBps">Avg throughput</option>
+              <option value="sessionCount">Session count</option>
             </select>
           </div>
         </div>
@@ -822,17 +812,23 @@
               <thead class="bg-slate-50 dark:bg-slate-800">
                 <tr class="text-left text-xs text-slate-500 font-medium">
                   <th class="px-4 py-3">User</th>
+                  <th class="px-4 py-3">Status</th>
                   <th class="px-4 py-3">Sessions</th>
+                  <th class="px-4 py-3">Total traffic</th>
+                  <th class="px-4 py-3">Avg throughput</th>
                   <th class="px-4 py-3">Total time</th>
-                  <th class="px-4 py-3">Total received</th>
-                  <th class="px-4 py-3">Total sent</th>
-                  <th class="px-4 py-3 text-blue-600 font-semibold">Total traffic</th>
+                  <th class="px-4 py-3">First seen</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
                 {#each filteredUserSummaries as row (row.username)}
                   {@const initials = row.username.slice(0, 1).toUpperCase()}
                   {@const isActive = activeUsernames.has(row.username)}
+                  {@const statusColors: Record<string, string> = {
+                    active: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+                    blocked: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
+                    deleted: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400',
+                  }}
                   <tr
                     class="hover:bg-slate-50 cursor-pointer dark:hover:bg-slate-800/50"
                     role="button"
@@ -841,14 +837,14 @@
                       sessionsSearch = row.username;
                       sessionsPage = 1;
                       void loadSessions();
-                      openSessionDrawer(row.username, sessionsWindow);
+                      openSessionDrawer(row.username, sessionsWindow, row);
                     }}
                     onkeydown={(e) => {
                       if (e.key === 'Enter') {
                         sessionsSearch = row.username;
                         sessionsPage = 1;
                         void loadSessions();
-                        openSessionDrawer(row.username, sessionsWindow);
+                        openSessionDrawer(row.username, sessionsWindow, row);
                       }
                     }}
                   >
@@ -861,11 +857,18 @@
                         {/if}
                       </div>
                     </td>
+                    <td class="px-4 py-3">
+                      <span class="px-2 py-0.5 rounded-full text-xs font-medium {statusColors[row.status] ?? statusColors.deleted}">
+                        {row.status}
+                      </span>
+                    </td>
                     <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{row.sessionCount}</td>
-                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatDuration(row.totalDurationSeconds)}</td>
-                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatBytes(row.totalBytesIn)}</td>
-                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatBytes(row.totalBytesOut)}</td>
                     <td class="px-4 py-3 font-semibold text-slate-800 dark:text-slate-100">{formatBytes(row.totalBytesIn + row.totalBytesOut)}</td>
+                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
+                      {row.avgThroughputBps > 0 ? `${formatBytes(row.avgThroughputBps)}/s` : '—'}
+                    </td>
+                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{formatDuration(row.totalDurationSeconds)}</td>
+                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400 text-xs">{formatAbsoluteTime(row.firstSeenAt)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -1167,6 +1170,7 @@
         username={drawerUsername}
         window={drawerWindow}
         sessions={drawerSessions}
+        summary={drawerSummary}
         onclose={closeDrawer}
       />
     {/if}
