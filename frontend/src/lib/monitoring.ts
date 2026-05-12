@@ -262,6 +262,15 @@ export function formatXAxisTime(d: Date | number): string {
 }
 
 /**
+ * Formats a Date as a short date label ("May 9") for bar charts where data
+ * points are spaced hours or days apart rather than minutes.
+ */
+export function formatShortDate(d: Date | string): string {
+  const date = typeof d === 'string' ? new Date(d) : d;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+/**
  * Returns the number of ticks for the X (time) axis.
  * Capped at 4-5 to prevent overlap in compact 160px-height charts.
  */

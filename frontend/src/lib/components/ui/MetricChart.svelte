@@ -24,9 +24,11 @@
     height?: number;
     /** Chart rendering style. 'line' renders an area chart, 'bar' renders vertical bars. Defaults to 'line'. */
     chartType?: 'line' | 'bar';
+    /** Optional custom formatter for X-axis labels on bar charts. Defaults to HH:MM. */
+    xLabelFormat?: (d: string) => string;
   };
 
-  let { data, metric, height = 160, chartType = 'line' }: Props = $props();
+  let { data, metric, height = 160, chartType = 'line', xLabelFormat }: Props = $props();
 
   const config = $derived(getChartConfig(metric));
   const classes = $derived(getChartClasses(metric));
@@ -85,7 +87,7 @@
             />
             <Axis
               placement="bottom"
-              format={(d: string) => formatXAxisTime(new Date(d))}
+              format={(d: string) => xLabelFormat ? xLabelFormat(d) : formatXAxisTime(new Date(d))}
               ticks={xTickCount}
             />
             <Bars fill={barFill} radius={2} strokeWidth={0} />
