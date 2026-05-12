@@ -400,6 +400,10 @@ func TestUserSessionSummaries(t *testing.T) {
 	if alice.AvgBytesOut != 300 {
 		t.Fatalf("alice.AvgBytesOut = %d, want 300", alice.AvgBytesOut)
 	}
+	// FirstSeenAt should be alice's earliest session within window (now-2h)
+	if alice.FirstSeenAt.IsZero() {
+		t.Fatal("alice.FirstSeenAt is zero")
+	}
 
 	bob := summaries[1]
 	if bob.Username != "bob" {
@@ -965,5 +969,56 @@ func TestListSessionsUsernameFilter(t *testing.T) {
 		if sess.Username != "alice" {
 			t.Errorf("expected alice, got %q", sess.Username)
 		}
+	}
+}
+
+func TestListSessions_ExcludesAuthenticatedSessions(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	base := time.Now().UTC().Add(-2 * time.Hour)
+
+	// One completed session.
+	if err := s.UpsertActiveSession(ctx, ActiveSessionRecord{
+		OcservSessionID: "done-sess",
+		Username:        "alice",
+		ConnectedAt:     base,
+		DisconnectedAt:  base.Add(30 * time.Minute),
+		DurationSeconds: 1800,
+		BytesIn:         1000,
+		BytesOut:        2000,
+		Source:          "ingested",
+		State:           "disconnected",
+	}); err != nil {
+		t.Fatalf("upsert disconnected: %v", err)
+	}
+
+	// One currently active session (state = "authenticated").
+	if err := s.UpsertActiveSession(ctx, ActiveSessionRecord{
+		OcservSessionID: "live-sess",
+		Username:        "bob",
+		ConnectedAt:     base.Add(time.Hour),
+		DisconnectedAt:  base.Add(time.Hour),
+		DurationSeconds: 0,
+		BytesIn:         500,
+		BytesOut:        500,
+		Source:          "ingested",
+		State:           "authenticated",
+	}); err != nil {
+		t.Fatalf("upsert authenticated: %v", err)
+	}
+
+	sessions, total, err := s.ListSessions(ctx, base.Add(-time.Hour), 10, 0, "")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("total = %d, want 1 (authenticated session must be excluded)", total)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	if sessions[0].State != "disconnected" {
+		t.Errorf("state = %q, want %q", sessions[0].State, "disconnected")
 	}
 }

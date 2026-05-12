@@ -174,6 +174,7 @@ type UserSessionSummary struct {
 	TotalBytesOut        int64
 	AvgBytesIn           int64
 	AvgBytesOut          int64
+	FirstSeenAt          time.Time
 }
 
 // UserSessionSummaries returns per-user aggregated session stats for sessions
@@ -187,8 +188,9 @@ func (s *Store) UserSessionSummaries(ctx context.Context, since time.Time) ([]Us
 			COALESCE(SUM(duration_seconds), 0) AS total_duration_seconds,
 			COALESCE(SUM(bytes_in), 0) AS total_bytes_in,
 			COALESCE(SUM(bytes_out), 0) AS total_bytes_out,
-			COALESCE(AVG(bytes_in), 0) AS avg_bytes_in,
-			COALESCE(AVG(bytes_out), 0) AS avg_bytes_out
+			CAST(COALESCE(AVG(bytes_in), 0) AS INTEGER) AS avg_bytes_in,
+			CAST(COALESCE(AVG(bytes_out), 0) AS INTEGER) AS avg_bytes_out,
+			MIN(connected_at) AS first_seen_at
 		FROM historical_sessions
 		WHERE connected_at >= ?
 		GROUP BY username
@@ -202,6 +204,7 @@ func (s *Store) UserSessionSummaries(ctx context.Context, since time.Time) ([]Us
 	summaries := make([]UserSessionSummary, 0)
 	for rows.Next() {
 		var sum UserSessionSummary
+		var firstSeenStr string
 		if err := rows.Scan(
 			&sum.Username,
 			&sum.SessionCount,
@@ -210,8 +213,12 @@ func (s *Store) UserSessionSummaries(ctx context.Context, since time.Time) ([]Us
 			&sum.TotalBytesOut,
 			&sum.AvgBytesIn,
 			&sum.AvgBytesOut,
+			&firstSeenStr,
 		); err != nil {
 			return nil, fmt.Errorf("scan user session summary: %w", err)
+		}
+		if t, err := parseTime(firstSeenStr); err == nil {
+			sum.FirstSeenAt = t
 		}
 		summaries = append(summaries, sum)
 	}
@@ -277,12 +284,12 @@ func (s *Store) ListSessions(ctx context.Context, since time.Time, limit, offset
 
 	if username != "" {
 		countErr = s.DB.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM historical_sessions WHERE connected_at >= ? AND username = ?`,
+			`SELECT COUNT(*) FROM historical_sessions WHERE connected_at >= ? AND username = ? AND state != 'authenticated'`,
 			sinceStr, username,
 		).Scan(&total)
 	} else {
 		countErr = s.DB.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM historical_sessions WHERE connected_at >= ?`,
+			`SELECT COUNT(*) FROM historical_sessions WHERE connected_at >= ? AND state != 'authenticated'`,
 			sinceStr,
 		).Scan(&total)
 	}
@@ -294,7 +301,7 @@ func (s *Store) ListSessions(ctx context.Context, since time.Time, limit, offset
 		rows, queryErr = s.DB.QueryContext(ctx,
 			`SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source, state
 			 FROM historical_sessions
-			 WHERE connected_at >= ? AND username = ?
+			 WHERE connected_at >= ? AND username = ? AND state != 'authenticated'
 			 ORDER BY connected_at DESC, id DESC
 			 LIMIT ? OFFSET ?`,
 			sinceStr, username, limit, offset,
@@ -303,7 +310,7 @@ func (s *Store) ListSessions(ctx context.Context, since time.Time, limit, offset
 		rows, queryErr = s.DB.QueryContext(ctx,
 			`SELECT id, username, connected_at, disconnected_at, duration_seconds, bytes_in, bytes_out, source, state
 			 FROM historical_sessions
-			 WHERE connected_at >= ?
+			 WHERE connected_at >= ? AND state != 'authenticated'
 			 ORDER BY connected_at DESC, id DESC
 			 LIMIT ? OFFSET ?`,
 			sinceStr, limit, offset,
