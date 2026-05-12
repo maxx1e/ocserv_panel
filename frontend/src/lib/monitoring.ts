@@ -76,6 +76,16 @@ const CHART_COLORS: Record<string, ChartClassSet> = {
     stroke: 'stroke-amber-500 stroke-2',
     gradientTop: 'rgba(245, 158, 11, 0.30)',    // amber-500 / 30 %
     gradientBottom: 'rgba(245, 158, 11, 0.05)'
+  },
+  session_bytes: {
+    stroke: 'stroke-indigo-500 stroke-2',
+    gradientTop: 'rgba(99, 102, 241, 0.30)',
+    gradientBottom: 'rgba(99, 102, 241, 0.05)'
+  },
+  session_duration_minutes: {
+    stroke: 'stroke-slate-500 stroke-2',
+    gradientTop: 'rgba(100, 116, 139, 0.30)',
+    gradientBottom: 'rgba(100, 116, 139, 0.05)'
   }
 };
 
@@ -121,8 +131,16 @@ export function formatMetricValue(metric: string, value: number | undefined | nu
     return `${value.toFixed(1)}%`;
   }
 
+  if (metric === 'session_bytes') {
+    return formatBytes(value, 'iec');
+  }
+
   if (isByteMetric(metric)) {
     return `${formatBytes(value, 'iec')}/s`;
+  }
+
+  if (metric === 'session_duration_minutes') {
+    return `${Math.round(value)} min`;
   }
 
   return formatNumber(value);
@@ -173,8 +191,14 @@ export function formatAxisValue(metric: string, value: number): string {
   if (isUtilizationMetric(metric)) {
     return `${Math.round(value)}%`;
   }
+  if (metric === 'session_bytes') {
+    return formatBytesCompact(value);
+  }
   if (isByteMetric(metric)) {
     return `${formatBytesCompact(value)}/s`;
+  }
+  if (metric === 'session_duration_minutes') {
+    return `${Math.round(value)} min`;
   }
   // count / session metrics
   if (Math.abs(value) >= 10000) {
@@ -268,6 +292,8 @@ export function getChartColorVar(metric: string): string {
     active_sessions: 'var(--chart-4)',
     concurrent_sessions: 'var(--chart-4)',
     connection_rate: 'var(--chart-5)',
+    session_bytes: 'var(--chart-1)',
+    session_duration_minutes: 'var(--chart-1)',
   };
   return map[metric] ?? 'var(--chart-1)';
 }
