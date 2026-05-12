@@ -25,11 +25,8 @@
 
   const classes = $derived(getChartClasses(metric));
 
-  // For single-series: derive stats from data. For multi-line: flatten all points.
   const allPoints = $derived<TimeData[]>(
-    data
-      ? data
-      : (lines ?? []).flatMap(l => l.data)
+    data ? data : (lines ?? []).flatMap(l => l.data)
   );
 
   const stats = $derived(seriesStats(allPoints));
@@ -39,7 +36,6 @@
       : null
   );
 
-  // Trend: difference between latest value and the window average, formatted
   const trendValue = $derived(latest !== null ? latest - stats.avg : null);
   const trendFormatted = $derived(
     trendValue !== null
@@ -47,56 +43,61 @@
       : null
   );
 
-  // Color dot uses gradientTop at higher opacity
-  const dotColor = $derived(classes.gradientTop.replace(/[\d.]+\)$/, '0.8)'));
+  // Derive solid accent color from gradientTop rgba string
+  // e.g. "rgba(99,102,241,0.30)" -> "rgba(99,102,241,0.85)" for border/pill
+  const accentColor = $derived(classes.gradientTop.replace(/[\d.]+\)$/, '0.85)'));
+  // Pill background: very faint version of accent
+  const pillBg = $derived(classes.gradientTop.replace(/[\d.]+\)$/, '0.12)'));
+  // Trend badge colors
+  const trendPositive = $derived((trendValue ?? 0) >= 0);
 
   const hasData = $derived(allPoints.length > 0);
 </script>
 
 <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
   <!-- Header -->
-  <div class="px-4 pt-4 pb-2">
-    <div class="flex items-center gap-2 mb-1">
-      <span
-        class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
-        style="background: {dotColor}"
-      ></span>
-      <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{title}</span>
-    </div>
+  <div
+    class="bg-slate-50 px-4 py-2.5 flex items-center justify-between"
+    style="border-left: 4px solid {accentColor}"
+  >
+    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">{title}</span>
     {#if latest !== null}
-      <div class="text-xl font-bold text-slate-800 leading-tight">
+      <span
+        class="text-[11px] font-bold px-2.5 py-0.5 rounded-full"
+        style="color: {accentColor}; background: {pillBg}"
+      >
         {formatMetricValue(metric, latest)}
-      </div>
-      {#if trendFormatted}
-        {#if (trendValue ?? 0) > 0}
-          <div class="text-[10px] mt-0.5" style="color: {dotColor}">
-            {trendFormatted}
-          </div>
-        {:else}
-          <div class="text-[10px] mt-0.5 text-slate-500">
-            {trendFormatted}
-          </div>
-        {/if}
-      {/if}
+      </span>
     {:else}
-      <div class="text-xl font-bold text-slate-300">—</div>
+      <span class="text-[11px] text-slate-300">&mdash;</span>
     {/if}
   </div>
 
   <!-- Chart -->
-  <div class="px-2 pb-1">
+  <div class="px-2 pb-1 pt-1">
     {#if data !== undefined}
-      <MetricChart {data} {metric} {height} {chartType} />
+      <MetricChart {data} {metric} {height} {chartType} gridDashed={true} />
     {:else if lines !== undefined}
       <MultiLineChart {lines} {metric} {height} />
     {/if}
   </div>
 
-  <!-- Footer: min / max / window -->
-  <div class="px-4 pb-3">
+  <!-- Footer -->
+  <div class="px-4 pb-3 flex items-center gap-2 flex-wrap">
+    {#if hasData && trendFormatted !== null}
+      {#if trendPositive}
+        <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+          {trendFormatted}
+        </span>
+      {:else}
+        <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+          {trendFormatted}
+        </span>
+      {/if}
+    {/if}
     {#if hasData}
       <p class="text-[10px] text-slate-400">
-        min {formatMetricValue(metric, stats.min)} · max {formatMetricValue(metric, stats.max)} · {w}
+        min {formatMetricValue(metric, stats.min)} &middot; max {formatMetricValue(metric, stats.max)} &middot; {w}
       </p>
     {:else}
       <p class="text-[10px] text-slate-400">No data</p>
